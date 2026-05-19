@@ -187,7 +187,7 @@ def main():
     logger.info(f"\n{'='*50}")
     logger.info(f"Summary: {len(graded)}/{len(results)} graded, {medals} medals")
     for r in results:
-        gr = r.get("grade_report", {})
+        gr = r.get("grade_report") or {}
         score = gr.get("score", "N/A")
         medal = "🥇" if gr.get("gold_medal") else "🥈" if gr.get("silver_medal") else \
                 "🥉" if gr.get("bronze_medal") else "✓" if gr.get("above_median") else "✗"
