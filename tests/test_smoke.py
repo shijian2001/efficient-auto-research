@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import numpy as np
 from agent.engine.graph import SearchGraph, Attempt
-from agent.engine.thompson import select_parent, compute_posterior, improved
+from agent.engine.thompson import select_parent, improved
 
 
 def test_graph_and_thompson():
