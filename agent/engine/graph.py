@@ -71,6 +71,20 @@ class SearchGraph:
         return [self.attempts[i] for i in self._similar.get(attempt_id, [])
                 if i in self.attempts]
 
+    def get_similar_with_score(self, attempt_id: str) -> list[tuple[Attempt, float]]:
+        """Get KNN similar neighbors with their cosine similarity scores."""
+        result = []
+        node = self.attempts.get(attempt_id)
+        if node is None or node.embedding is None:
+            return result
+        for aid in self._similar.get(attempt_id, []):
+            neighbor = self.attempts.get(aid)
+            if neighbor is None or neighbor.embedding is None:
+                continue
+            sim = _cosine_sim(node.embedding, neighbor.embedding)
+            result.append((neighbor, sim))
+        return result
+
     def get_roots(self) -> list[Attempt]:
         """Get all root nodes (no parent)."""
         return [a for a in self.attempts.values() if a.parent_id is None]

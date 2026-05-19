@@ -27,31 +27,37 @@ def improved(child: Attempt, parent: Attempt) -> bool:
     return child.metric > parent.metric
 
 
-def compute_posterior(node_id: str, graph: SearchGraph) -> tuple[int, int]:
+def compute_posterior(node_id: str, graph: SearchGraph) -> tuple[float, float]:
     """
     Compute Beta posterior for "from this node, does the next step improve?"
 
     Evidence:
-      1. This node's own children (direct experience).
-      2. This node's KNN similar neighbors' children (borrowed experience).
+      1. This node's own children (direct experience, weight=1).
+      2. This node's KNN similar neighbors' children (weighted by cosine similarity).
+
+    Similarity-weighted evidence ensures that highly similar neighbors contribute
+    more, while loosely similar ones have diminished influence. Direct experience
+    always has full weight.
 
     Returns (alpha, beta) parameters for Beta distribution.
     """
-    alpha, beta = 1, 1
+    alpha, beta = 1.0, 1.0
     node = graph.attempts[node_id]
 
+    # Direct experience (full weight)
     for child in graph.get_children(node_id):
         if improved(child, node):
-            alpha += 1
+            alpha += 1.0
         else:
-            beta += 1
+            beta += 1.0
 
-    for neighbor in graph.get_similar(node_id):
+    # Borrowed experience (weighted by similarity)
+    for neighbor, sim in graph.get_similar_with_score(node_id):
         for child in graph.get_children(neighbor.id):
             if improved(child, neighbor):
-                alpha += 1
+                alpha += sim
             else:
-                beta += 1
+                beta += sim
 
     return alpha, beta
 

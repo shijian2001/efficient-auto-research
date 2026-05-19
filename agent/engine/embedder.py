@@ -1,9 +1,11 @@
 """
-Node embedding: concat(plan_emb, code_emb, metric_vec, error_emb).
+Node embedding for building similarity edges.
 
-Uses a single text embedding model for all text parts. Missing parts are
-zero-filled so that all nodes live in the same vector space regardless of
-whether they have metric, error, or both.
+Only plan and code are used for similarity computation. Metric and error are
+intentionally excluded so that nodes with the same strategy are neighbors
+regardless of whether they succeeded or failed — enabling cross-outcome
+information sharing (e.g., a fix for a failed attempt can inform a similar
+failed attempt via the graph).
 """
 
 from __future__ import annotations
@@ -49,23 +51,18 @@ def embed_attempt(
     error: str | None,
 ) -> np.ndarray:
     """
-    Compute node embedding as concatenation of independently embedded parts.
+    Compute node embedding for KNN similarity edges.
 
-    - plan: strategy description
-    - code: full implementation (model handles length internally)
-    - metric: scalar value, expanded to a small vector
-    - error: error message text
+    Only plan and code determine similarity — two nodes with the same strategy
+    should be neighbors whether they succeeded or failed. This enables the
+    graph to connect a failed attempt with a successful fix of the same approach.
 
-    Missing parts are zero-filled.
+    Metric and error are stored in node attributes and used by improved()
+    for posterior updates, but do not affect graph topology.
     """
     dim = _get_dim()
 
     plan_emb = embed_text(plan) if plan else np.zeros(dim)
     code_emb = embed_text(code) if code else np.zeros(dim)
-    error_emb = embed_text(error) if error else np.zeros(dim)
 
-    metric_vec = np.zeros(16)
-    if metric is not None:
-        metric_vec[0] = metric
-
-    return np.concatenate([plan_emb, code_emb, metric_vec, error_emb])
+    return np.concatenate([plan_emb, code_emb])
