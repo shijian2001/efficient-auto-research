@@ -79,10 +79,10 @@ class SearchGraph:
     @property
     def kernel_matrix(self) -> np.ndarray:
         """
-        The kernel (similarity) matrix — adjacency matrix of the similarity graph.
+        The kernel matrix defining the GP prior: f ~ N(0, K).
 
         K_ij = cosine_sim(embedding_i, embedding_j).
-        This defines the GP prior: f ~ N(0, K).
+        PSD guaranteed (Gram matrix of normalized embeddings).
         """
         if self._kernel_matrix is None:
             return np.array([[1.0]])

@@ -1,11 +1,9 @@
 """
-Node embedding for building similarity edges.
+Node embedding for kernel computation.
 
-Only plan and code are used for similarity computation. Metric and error are
-intentionally excluded so that nodes with the same strategy are neighbors
-regardless of whether they succeeded or failed — enabling cross-outcome
-information sharing (e.g., a fix for a failed attempt can inform a similar
-failed attempt via the graph).
+Only plan and code are used. Metric and error are intentionally excluded so
+that nodes with the same strategy have high kernel similarity regardless of
+outcome — enabling cross-outcome information sharing through the GP posterior.
 """
 
 from __future__ import annotations
@@ -51,14 +49,14 @@ def embed_attempt(
     error: str | None,
 ) -> np.ndarray:
     """
-    Compute node embedding for kernel similarity computation.
+    Compute node embedding for kernel computation.
 
-    Only plan and code determine similarity — two nodes with the same strategy
-    should be neighbors whether they succeeded or failed. This enables the
-    graph to connect a failed attempt with a successful fix of the same approach.
+    Only plan and code determine kernel similarity — two nodes with the same
+    strategy have high correlation regardless of outcome. This enables
+    cross-outcome information sharing through the GP posterior.
 
     Metric and error are stored in node attributes and used by improved()
-    for posterior updates, but do not affect graph topology.
+    for posterior updates, but do not affect kernel values.
     """
     dim = _get_dim()
 

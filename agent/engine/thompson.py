@@ -1,20 +1,16 @@
 """
-Kernel Thompson Sampling on the search graph.
+Kernel Thompson Sampling for parent selection.
 
-Implements exact Kernel TS for Bernoulli rewards with Laplace approximation:
-  1. Each node has a latent parameter f_i (logit of success probability).
+GP classification with Laplace approximation:
+  1. Each node has a latent parameter f_i (logit of improvement probability).
   2. Prior: f ~ N(0, K), where K_ij = cosine_sim(embedding_i, embedding_j).
   3. Observation: y_i ∈ {0, 1} (did child improve over parent?).
   4. Posterior: Laplace approximation → N(f_hat, Sigma).
-  5. Thompson Sampling: sample from posterior → sigmoid → argmax.
-
-This is theoretically principled — it is the standard GP classification
-framework applied to the graph bandit setting. No pseudo-count approximation.
+  5. Thompson Sampling: joint sample from posterior → sigmoid → argmax.
 
 References:
-  - Filippi et al., 2010 (Parametric Bandits)
+  - Rasmussen & Williams, 2006 (GP Classification, Ch.3)
   - Chowdhury & Gopalan, 2017 (Kernelized TS)
-  - Kveton et al., 2020 (Kernel TS)
 """
 
 from __future__ import annotations
@@ -22,7 +18,6 @@ from __future__ import annotations
 import logging
 
 import numpy as np
-from numpy.linalg import cholesky, solve
 
 from agent.engine.graph import SearchGraph, Attempt
 
@@ -136,13 +131,12 @@ def select_parent(graph: SearchGraph) -> str | None:
     """
     Kernel Thompson Sampling: select which node to use as parent.
 
-    1. Build kernel matrix from node embeddings.
+    1. Get kernel matrix from graph (maintained incrementally).
     2. Collect binary observations (did children improve?).
     3. Compute Laplace-approximated GP posterior.
-    4. Sample from joint posterior.
+    4. Sample jointly from posterior.
     5. Convert to success probabilities via sigmoid.
-    6. Include "start fresh" candidate.
-    7. Pick argmax.
+    6. Pick argmax.
     """
     if not graph.attempts:
         return None
