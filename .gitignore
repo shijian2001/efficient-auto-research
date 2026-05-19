@@ -12,3 +12,4 @@ configs/*.local.yaml
 run_local.sh
 run_*.sh
 PROPOSAL.md
+PROPOSAL_CN.md
