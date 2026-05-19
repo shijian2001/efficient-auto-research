@@ -79,8 +79,10 @@ def select_parent(graph: SearchGraph) -> str | None:
         sample = float(np.random.beta(alpha, beta))
         candidates.append((node_id, sample))
 
+    # "Start fresh" candidate: posterior based on whether past roots were
+    # improved upon by their subtrees (same standard as other nodes).
     roots = graph.get_roots()
-    root_success = sum(1 for r in roots if r.metric is not None)
+    root_success = sum(1 for r in roots if graph.subtree_improved(r.id))
     root_fail = len(roots) - root_success
     draft_sample = float(np.random.beta(1 + root_success, 1 + root_fail))
     candidates.append((None, draft_sample))

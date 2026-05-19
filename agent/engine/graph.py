@@ -89,6 +89,18 @@ class SearchGraph:
         """Get all root nodes (no parent)."""
         return [a for a in self.attempts.values() if a.parent_id is None]
 
+    def subtree_improved(self, root_id: str) -> bool:
+        """Did any descendant of this node improve upon it?"""
+        root = self.attempts[root_id]
+        queue = [root_id]
+        while queue:
+            node_id = queue.pop(0)
+            for child in self.get_children(node_id):
+                if child.metric is not None and (root.metric is None or child.metric > root.metric):
+                    return True
+                queue.append(child.id)
+        return False
+
     def _build_similar_edges(self, new_attempt: Attempt) -> None:
         """Connect new node to its K nearest neighbors by cosine similarity."""
         if len(self.attempts) <= 1:
