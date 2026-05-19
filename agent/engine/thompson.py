@@ -181,7 +181,7 @@ def select_parent(graph: SearchGraph) -> str | None:
     # Collect observations
     obs_count, obs_success = _collect_observations(graph, node_ids)
 
-    # Compute posterior
+    # Compute posterior and sample
     if obs_count.sum() == 0:
         # No observations yet — sample from prior
         f_sample = np.random.multivariate_normal(np.zeros(n), K)
@@ -193,24 +193,10 @@ def select_parent(graph: SearchGraph) -> str | None:
         eigvals = np.maximum(eigvals, 0)  # clip negative eigenvalues
         f_sample = f_hat + eigvecs @ (np.sqrt(eigvals) * np.random.randn(n))
 
-    # Convert to success probabilities
+    # Convert to success probabilities and select argmax
     probs = _sigmoid(f_sample)
-
-    # "Start fresh" candidate
-    roots = graph.get_roots()
-    root_success = sum(1 for r in roots if graph.subtree_improved(r.id))
-    root_fail = len(roots) - root_success
-    draft_prob = float(np.random.beta(1 + root_success, 1 + root_fail))
-
-    # Argmax over all candidates
     best_idx = int(np.argmax(probs))
-    best_prob = probs[best_idx]
-
-    if draft_prob > best_prob:
-        logger.info(f"[KTS] Selected new draft (prob={draft_prob:.3f})")
-        return None
-    else:
-        chosen_id = node_ids[best_idx]
-        node = graph.attempts[chosen_id]
-        logger.info(f"[KTS] Selected node {chosen_id} (metric={node.metric}, prob={best_prob:.3f})")
-        return chosen_id
+    chosen_id = node_ids[best_idx]
+    node = graph.attempts[chosen_id]
+    logger.info(f"[KTS] Selected node {chosen_id} (metric={node.metric}, prob={probs[best_idx]:.3f})")
+    return chosen_id
