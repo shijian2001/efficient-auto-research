@@ -200,9 +200,9 @@ class GraphSearchEngine:
                 parts.append("Explain the root cause and how to fix it. Keep the fix minimal.")
 
         # Always include known errors to avoid repeating them
-        known_errors = self._collect_known_errors()
-        if known_errors:
-            parts.append(f"\nKnown errors to AVOID:\n{known_errors}")
+        errors = self._collect_known_errors()
+        if errors:
+            parts.append("\nKnown errors to AVOID:\n" + "\n".join(f"  - {e}" for e in errors))
 
         return "\n".join(parts)
 
@@ -228,7 +228,8 @@ Quality Requirements:
 - Use proper cross-validation for the metric
 - Match the sample submission file's format exactly (check column names and dtypes in Data Preview)
 - NO progress bars (no tqdm). Minimal prints. ONLY the final METRIC line matters.
-- Handle missing values and mixed types explicitly before modeling"""
+- Handle missing values and mixed types explicitly before modeling
+{self._error_warning()}"""
 
     def _build_code_user(self, parent: Attempt | None, plan: str) -> str:
         parts = [f"## Task\n{self.task_desc}"]
@@ -252,15 +253,21 @@ Quality Requirements:
 
     # --- Utilities ---
 
-    def _collect_known_errors(self) -> str:
-        """Collect unique errors from graph to warn LLM against repeating them."""
+    def _collect_known_errors(self) -> list[str]:
+        """Collect unique errors from graph."""
         errors = set()
         for a in self.graph.attempts.values():
             if a.error:
                 errors.add(a.error)
+        return list(errors)
+
+    def _error_warning(self) -> str:
+        """Format error warning for code generation prompt."""
+        errors = self._collect_known_errors()
         if not errors:
             return ""
-        return "\n".join(f"  - {e}" for e in errors)
+        lines = "\n".join(f"  - {e}" for e in errors)
+        return f"\nCRITICAL - Your code MUST NOT trigger these errors (seen in previous attempts):\n{lines}"
 
     def _best_metric_in_subtree(self, root_id: str) -> float | None:
         """Find the best metric in the entire subtree rooted at root_id (BFS)."""
