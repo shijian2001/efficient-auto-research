@@ -89,7 +89,7 @@ class GraphSearchEngine:
                     self.best_attempt = attempt
                     logger.info(f"  New best: {self.best_metric:.4f}")
 
-            # Log step for efficiency curve
+            # Log step for efficiency curve (write to disk immediately for observability)
             self._step_log.append({
                 "step": step,
                 "parent_id": parent_id,
@@ -99,6 +99,7 @@ class GraphSearchEngine:
                 "cumulative_tokens": self.total_in_tokens + self.total_out_tokens,
                 "elapsed_seconds": time.time() - self.start_time,
             })
+            self._save_report()
 
         # Ensure the best attempt's submission is the final one
         if self.best_attempt and self.best_attempt.code:
