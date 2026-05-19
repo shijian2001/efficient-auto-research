@@ -199,6 +199,11 @@ class GraphSearchEngine:
                     break
                 parts.append("Explain the root cause and how to fix it. Keep the fix minimal.")
 
+        # Always include known errors to avoid repeating them
+        known_errors = self._collect_known_errors()
+        if known_errors:
+            parts.append(f"\nKnown errors to AVOID:\n{known_errors}")
+
         return "\n".join(parts)
 
     def _build_code_system(self) -> str:
@@ -246,6 +251,16 @@ Quality Requirements:
         return "\n".join(parts)
 
     # --- Utilities ---
+
+    def _collect_known_errors(self) -> str:
+        """Collect unique errors from graph to warn LLM against repeating them."""
+        errors = set()
+        for a in self.graph.attempts.values():
+            if a.error:
+                errors.add(a.error)
+        if not errors:
+            return ""
+        return "\n".join(f"  - {e}" for e in errors)
 
     def _best_metric_in_subtree(self, root_id: str) -> float | None:
         """Find the best metric in the entire subtree rooted at root_id (BFS)."""
