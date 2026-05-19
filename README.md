@@ -1,18 +1,18 @@
 # Efficient Auto-Research via Kernel Thompson Sampling
 
-An Auto-Research framework that formulates LLM agent search as Kernel Thompson Sampling on the search tree, achieving principled and efficient parent selection with zero hyperparameters.
+An Auto-Research framework that formulates LLM agent search as GP Regression with Kernel Thompson Sampling on the search tree, achieving principled and efficient parent selection.
 
 ## Core Idea
 
-LLM agent search produces a tree of attempts (each derived from a parent). We model "can this node be improved?" as GP classification with a cosine kernel on plan+code embeddings. Kernel Thompson Sampling on the GP posterior selects the next parent — one observation informs all similar nodes via kernel correlation, reducing the total steps needed.
+LLM agent search produces a tree of attempts (each derived from a parent). We model "what metric can this node's children achieve?" as GP Regression with a cosine kernel on plan+code embeddings. Kernel Thompson Sampling on the exact GP posterior selects the next parent — one observation informs all similar nodes via kernel correlation, reducing the total steps needed.
 
 ## Method
 
-1. **Search Tree**: Each step produces an Attempt node. `derived_from` edges form a tree. Each edge yields a binary observation: did the child improve over its parent?
+1. **Search Tree**: Each step produces an Attempt node. `derived_from` edges form a tree. Each node's children produce continuous observations (their metric values).
 
-2. **GP Classification**: Prior $f \sim \mathcal{N}(0, K)$ where $K_{ij} = \cos(\text{emb}_i, \text{emb}_j)$. Likelihood: $y_i | f_i \sim \text{Bernoulli}(\sigma(f_i))$. Posterior via Laplace approximation.
+2. **GP Regression**: Prior $f \sim \mathcal{N}(0, K)$ where $K_{ij} = \cos(\text{emb}_i, \text{emb}_j)$. Observation: $y_{ij} = \text{child}_j\text{.metric}$. Posterior is exact closed-form (no approximation needed).
 
-3. **Kernel Thompson Sampling**: Sample jointly from the posterior → sigmoid → argmax selects the parent most likely to yield improvement. Kernel correlation ensures one observation updates beliefs about all similar nodes.
+3. **Kernel Thompson Sampling**: Sample jointly from the exact posterior → argmax selects the parent whose children are expected to have the highest metric. Kernel correlation ensures one observation updates beliefs about all similar nodes.
 
 4. **LLM Generation**: Given the selected parent, generate a plan then code. Execute, parse result, compute embedding, add to tree.
 
@@ -22,7 +22,7 @@ LLM agent search produces a tree of attempts (each derived from a parent). We mo
 - **UCT (MLEvolve)**: Needs many visits per node to converge → wastes steps.
 - **Kernel TS (ours)**: One observation propagates to all similar nodes via GP posterior → fewer steps to make informed decisions.
 
-Zero hyperparameters. No heuristic thresholds. No time-based phase switching.
+No heuristic thresholds. No time-based phase switching. Exact posterior (no approximation).
 
 ## Architecture
 
@@ -30,7 +30,7 @@ Zero hyperparameters. No heuristic thresholds. No time-based phase switching.
 agent/
 ├── engine/
 │   ├── graph.py       — Search tree (Attempt nodes + derived_from edges + kernel matrix)
-│   ├── thompson.py    — Kernel Thompson Sampling (GP classification + Laplace + joint sampling)
+│   ├── thompson.py    — Kernel Thompson Sampling (GP Regression + exact posterior + joint sampling)
 │   ├── embedder.py    — Node embedding (plan + code)
 │   ├── executor.py    — Code execution (subprocess with timeout + process group kill)
 │   └── search.py      — Main search loop
@@ -97,6 +97,5 @@ export OPENAI_BASE_URL="your-endpoint"  # optional, defaults to https://api.open
 
 ## References
 
-- Rasmussen & Williams, 2006. Gaussian Processes for Machine Learning, Ch.3 (GP Classification).
+- Rasmussen & Williams, 2006. Gaussian Processes for Machine Learning, Ch.2 (GP Regression).
 - Chowdhury & Gopalan, 2017. On Kernelized Multi-armed Bandits (Kernel TS regret bound).
-- Kveton et al., 2020. Randomized Exploration in Generalized Linear Bandits.
