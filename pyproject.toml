@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "auto-research"
 version = "0.1.0"
-description = "Efficient Auto-Research via Graph-based Thompson Sampling"
+description = "Efficient Auto-Research via Kernel Thompson Sampling"
 requires-python = ">=3.11"
 dependencies = [
     "openai>=1.10.0",

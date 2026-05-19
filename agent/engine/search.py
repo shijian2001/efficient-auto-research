@@ -1,5 +1,5 @@
 """
-Graph-based Thompson Sampling search loop.
+Kernel Thompson Sampling search loop.
 
 Each step:
   1. Thompson Sampling selects parent node (or start fresh)
@@ -40,7 +40,7 @@ class SearchConfig:
 
 
 class GraphSearchEngine:
-    """Main search engine using Graph-based Thompson Sampling."""
+    """Main search engine using Kernel Thompson Sampling."""
 
     def __init__(self, task_desc: str, data_dir: Path, work_dir: Path, config: SearchConfig):
         self.task_desc = task_desc

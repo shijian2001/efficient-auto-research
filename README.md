@@ -1,45 +1,63 @@
-# Efficient Auto-Research via Graph-Informed Thompson Sampling
+# Efficient Auto-Research via Kernel Thompson Sampling
 
-An Auto-Research framework that uses Graph-Informed Thompson Sampling to efficiently solve research tasks (e.g., Kaggle/MLE-bench competitions).
+An Auto-Research framework that formulates LLM agent search as Kernel Thompson Sampling on the search tree, achieving principled and efficient parent selection with zero hyperparameters.
 
 ## Core Idea
 
-The search history naturally forms a tree. By adding similarity edges (via node embeddings), the tree becomes a graph. Thompson Sampling on graph-derived posteriors enables informed decisions about which direction to explore next — reducing wasted steps and token consumption.
+LLM agent search produces a tree of attempts (each derived from a parent). We model "can this node be improved?" as GP classification with a cosine kernel on plan+code embeddings. Kernel Thompson Sampling on the GP posterior selects the next parent — one observation informs all similar nodes via kernel correlation, reducing the total steps needed.
+
+## Method
+
+1. **Search Tree**: Each step produces an Attempt node. `derived_from` edges form a tree. Each edge yields a binary observation: did the child improve over its parent?
+
+2. **GP Classification**: Prior $f \sim \mathcal{N}(0, K)$ where $K_{ij} = \cos(\text{emb}_i, \text{emb}_j)$. Likelihood: $y_i | f_i \sim \text{Bernoulli}(\sigma(f_i))$. Posterior via Laplace approximation.
+
+3. **Kernel Thompson Sampling**: Sample jointly from the posterior → sigmoid → argmax selects the parent most likely to yield improvement. Kernel correlation ensures one observation updates beliefs about all similar nodes.
+
+4. **LLM Generation**: Given the selected parent, generate a plan then code. Execute, parse result, compute embedding, add to tree.
+
+## Why It's Efficient
+
+- **Greedy (baseline)**: Always selects the highest-metric node → gets stuck at local optima.
+- **UCT (MLEvolve)**: Needs many visits per node to converge → wastes steps.
+- **Kernel TS (ours)**: One observation propagates to all similar nodes via GP posterior → fewer steps to make informed decisions.
+
+Zero hyperparameters. No heuristic thresholds. No time-based phase switching.
 
 ## Architecture
 
 ```
 agent/
 ├── engine/
-│   ├── graph.py       — Search graph (Attempt nodes + derived_from + similar edges)
-│   ├── thompson.py    — Thompson Sampling (posterior from graph, argmax selection)
-│   ├── embedder.py    — Node embedding (concat of plan, code, metric, error)
-│   ├── executor.py    — Code execution (subprocess with timeout)
-│   └── search.py      — Main search loop (orchestrates all components)
+│   ├── graph.py       — Search tree (Attempt nodes + derived_from edges + kernel matrix)
+│   ├── thompson.py    — Kernel Thompson Sampling (GP classification + Laplace + joint sampling)
+│   ├── embedder.py    — Node embedding (plan + code)
+│   ├── executor.py    — Code execution (subprocess with timeout + process group kill)
+│   └── search.py      — Main search loop
 ├── llm/
 │   └── __init__.py    — LLM API (OpenAI-compatible)
 └── run.py             — CLI entry point
 
 eval/
-└── mlebench.py        — MLE-bench evaluation (runs agent + grades with official grader)
+└── mlebench.py        — MLE-bench evaluation (runs agent + official grading)
 ```
 
 ## Quick Start
 
 ```bash
-# Set environment variables
+# Set LLM credentials
 export OPENAI_API_KEY="your-key"
 export OPENAI_BASE_URL="your-endpoint"
-# Model specified via --model flag (default: gpt-4o)
 
-# Run on a single competition
+# Run on a single task
 python agent/run.py \
   --data_dir /path/to/competition/data \
   --desc_file /path/to/description.md \
   --output /path/to/submission.csv \
   --max_steps 50 \
+  --model gpt-4o
 
-# Run via eval (with official mlebench grading)
+# Run with official MLE-bench grading
 python -m eval.mlebench \
   --agent agent/run.py \
   --competition spaceship-titanic \
@@ -47,14 +65,6 @@ python -m eval.mlebench \
   --timeout 3600 \
   -- --max_steps 50
 ```
-
-## Method
-
-1. **Graph Construction**: Each execution step produces an Attempt node. Nodes are connected by `derived_from` edges (tree). Cross-node correlation is captured by the kernel matrix (cosine similarity on embeddings).
-
-2. **Kernel Thompson Sampling**: Nodes define a GP prior via their kernel (cosine similarity on embeddings). Binary observations (did child improve over parent?) update the posterior via Laplace approximation. Joint sampling from the posterior → sigmoid → argmax selects the next parent.
-
-3. **LLM Generation**: Given the selected parent, generate a plan (brief) then code (complete script). Execute, parse metric or error, embed the result, add to graph.
 
 ## Configuration
 
@@ -68,13 +78,11 @@ python -m eval.mlebench \
 ## Setup
 
 ```bash
-# Install dependencies
 pip install -e .
 
-# For MLE-bench evaluation, also install mlebench:
+# For MLE-bench evaluation:
 pip install -e /path/to/mle-bench
 
-# Set your LLM API credentials
 export OPENAI_API_KEY="your-key"
 export OPENAI_BASE_URL="your-endpoint"  # optional, defaults to https://api.openai.com/v1
 ```
@@ -85,3 +93,10 @@ export OPENAI_BASE_URL="your-endpoint"  # optional, defaults to https://api.open
 - `openai >= 1.10.0`
 - `numpy >= 1.24.0`
 - `sentence-transformers >= 2.0.0`
+- `tf-keras >= 2.16.0`
+
+## References
+
+- Rasmussen & Williams, 2006. Gaussian Processes for Machine Learning, Ch.3 (GP Classification).
+- Chowdhury & Gopalan, 2017. On Kernelized Multi-armed Bandits (Kernel TS regret bound).
+- Kveton et al., 2020. Randomized Exploration in Generalized Linear Bandits.

@@ -1,13 +1,13 @@
 """
-Search graph: Attempt nodes + derived_from edges (tree) + kernel-weighted similarity edges (graph).
+Search tree with kernel matrix for Kernel Thompson Sampling.
 
-The graph has two types of edges:
-  - derived_from: parent-child relationship (sparse, tree structure).
-  - similarity: kernel-weighted edges between all node pairs (dense, defines GP prior).
+Nodes: Attempt (one per execution step).
+Edges: derived_from (parent-child, forming a tree).
+Kernel: K_ij = cosine_sim(embedding_i, embedding_j), maintained incrementally.
 
-The kernel matrix K (where K_ij = cosine_sim(embedding_i, embedding_j)) is the
-adjacency matrix of the similarity graph. It is maintained incrementally as nodes
-are added, and used directly by Kernel Thompson Sampling for posterior computation.
+The derived_from edges define where observations occur (binary: did child improve parent?).
+The kernel matrix defines the GP prior correlation between nodes.
+Together they enable Kernel Thompson Sampling for parent selection.
 """
 
 from __future__ import annotations
@@ -35,16 +35,14 @@ class Attempt:
 
 class SearchGraph:
     """
-    Search history as a kernel-weighted graph.
+    Search tree with incrementally maintained kernel matrix.
 
-    Nodes: Attempt (one type, representing a single code execution).
-    Edges:
-      - derived_from: parent-child (sparse tree, used to define observations).
-      - similarity: kernel-weighted (dense, K_ij = cosine_sim(emb_i, emb_j)).
+    Nodes: Attempt (one per execution step).
+    Edges: derived_from (parent-child, tree structure).
+    Kernel: K_ij = cosine_sim(embedding_i, embedding_j).
 
-    The kernel matrix is the graph's adjacency matrix — it defines the GP prior
-    for Kernel Thompson Sampling. Nodes that are similar (high K_ij) share
-    information through the GP posterior, enabling cross-branch learning.
+    The tree defines observation structure (where rewards are observed).
+    The kernel defines GP prior correlation (how observations propagate).
     """
 
     def __init__(self) -> None:
