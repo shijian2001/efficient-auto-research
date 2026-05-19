@@ -43,28 +43,6 @@ def _sigmoid(x: np.ndarray) -> np.ndarray:
     return np.where(x >= 0, 1 / (1 + np.exp(-x)), np.exp(x) / (1 + np.exp(x)))
 
 
-def _build_kernel_matrix(graph: SearchGraph, node_ids: list[str]) -> np.ndarray:
-    """Build kernel matrix K where K_ij = cosine_sim(node_i, node_j)."""
-    n = len(node_ids)
-    K = np.eye(n)  # diagonal = 1 (self-similarity)
-    for i in range(n):
-        emb_i = graph.attempts[node_ids[i]].embedding
-        if emb_i is None:
-            continue
-        for j in range(i + 1, n):
-            emb_j = graph.attempts[node_ids[j]].embedding
-            if emb_j is None:
-                continue
-            norm_i = np.linalg.norm(emb_i)
-            norm_j = np.linalg.norm(emb_j)
-            if norm_i > 0 and norm_j > 0:
-                sim = float(np.dot(emb_i, emb_j) / (norm_i * norm_j))
-            else:
-                sim = 0.0
-            K[i, j] = sim
-            K[j, i] = sim
-    return K
-
 
 def _collect_observations(graph: SearchGraph, node_ids: list[str]) -> tuple[np.ndarray, np.ndarray]:
     """
@@ -169,14 +147,14 @@ def select_parent(graph: SearchGraph) -> str | None:
     if not graph.attempts:
         return None
 
-    node_ids = list(graph.attempts.keys())
+    node_ids = graph.node_ids
     n = len(node_ids)
 
     if n == 0:
         return None
 
-    # Build kernel matrix
-    K = _build_kernel_matrix(graph, node_ids)
+    # Get kernel matrix (maintained incrementally by graph)
+    K = graph.kernel_matrix
 
     # Collect observations
     obs_count, obs_success = _collect_observations(graph, node_ids)
