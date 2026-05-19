@@ -1,15 +1,15 @@
 """
-Kernel Thompson Sampling for parent selection.
+Kernel Thompson Sampling for parent selection (GP Regression).
 
-GP classification with Laplace approximation:
-  1. Each node has a latent parameter f_i (logit of improvement probability).
+GP Regression model:
+  1. Each node has a latent value f_i = expected metric of its children.
   2. Prior: f ~ N(0, K), where K_ij = cosine_sim(embedding_i, embedding_j).
-  3. Observation: y_i ∈ {0, 1} (did child improve over parent?).
-  4. Posterior: Laplace approximation → N(f_hat, Sigma).
-  5. Thompson Sampling: joint sample from posterior → sigmoid → argmax.
+  3. Observation: y_ij = child_j's metric (continuous, observed when node i is selected as parent).
+  4. Posterior: exact closed-form (Gaussian prior + Gaussian likelihood = Gaussian posterior).
+  5. Thompson Sampling: joint sample from posterior → argmax.
 
 References:
-  - Rasmussen & Williams, 2006 (GP Classification, Ch.3)
+  - Rasmussen & Williams, 2006 (GP Regression, Ch.2)
   - Chowdhury & Gopalan, 2017 (Kernelized TS)
 """
 
@@ -23,120 +23,39 @@ from agent.engine.graph import SearchGraph, Attempt
 
 logger = logging.getLogger("AutoResearch")
 
-
-def improved(child: Attempt, parent: Attempt) -> bool:
-    """Did the child bring improvement over the parent?"""
-    if child.metric is None:
-        return False
-    if parent.metric is None:
-        return True
-    return child.metric > parent.metric
+# Observation noise variance (standard GP regression parameter)
+NOISE_VARIANCE = 0.01
 
 
-def _sigmoid(x: np.ndarray) -> np.ndarray:
-    """Numerically stable sigmoid."""
-    return np.where(x >= 0, 1 / (1 + np.exp(-x)), np.exp(x) / (1 + np.exp(x)))
-
-
-
-def _collect_observations(graph: SearchGraph, node_ids: list[str]) -> tuple[np.ndarray, np.ndarray]:
+def _collect_observations(graph: SearchGraph, node_ids: list[str]) -> tuple[list[int], list[float]]:
     """
-    Collect observations for each node.
+    Collect observations: for each node, gather its children's metrics.
 
     Returns:
-      obs_count: number of children observed per node
-      obs_success: number of successful children per node
+      obs_indices: which node each observation belongs to
+      obs_values: the observed metric values
     """
-    n = len(node_ids)
-    obs_count = np.zeros(n)
-    obs_success = np.zeros(n)
+    obs_indices = []
+    obs_values = []
 
     for i, nid in enumerate(node_ids):
-        node = graph.attempts[nid]
         for child in graph.get_children(nid):
-            obs_count[i] += 1
-            if improved(child, node):
-                obs_success[i] += 1
+            if child.metric is not None:
+                obs_indices.append(i)
+                obs_values.append(child.metric)
 
-    return obs_count, obs_success
-
-
-def _laplace_approximation(
-    K: np.ndarray,
-    obs_count: np.ndarray,
-    obs_success: np.ndarray,
-    max_iter: int = 20,
-    tol: float = 1e-6,
-) -> tuple[np.ndarray, np.ndarray]:
-    """
-    Laplace approximation for GP classification posterior.
-
-    Model:
-      f ~ N(0, K)                    (prior)
-      y_i | f_i ~ Bernoulli(σ(f_i))  (likelihood, aggregated over children)
-
-    For nodes with multiple children, the log-likelihood is:
-      ℓ_i(f_i) = s_i * log(σ(f_i)) + (n_i - s_i) * log(1 - σ(f_i))
-    where s_i = successes, n_i = total observations.
-
-    Returns:
-      f_hat: posterior mode (MAP estimate)
-      Sigma: posterior covariance (Laplace approximation)
-    """
-    n = len(obs_count)
-    f = np.zeros(n)  # initialize at prior mean
-
-    # Regularize K for numerical stability
-    K_reg = K + 1e-6 * np.eye(n)
-
-    for iteration in range(max_iter):
-        p = _sigmoid(f)
-
-        # Gradient of log-likelihood
-        grad_ll = obs_success - obs_count * p
-
-        # Hessian of log-likelihood (diagonal: -n_i * p_i * (1-p_i))
-        W = obs_count * p * (1 - p)
-        W = np.maximum(W, 1e-10)  # numerical stability
-
-        # Newton step for posterior mode: f_new = K @ (K + W^{-1})^{-1} @ (f + W^{-1} @ grad_ll)
-        # Equivalent: solve (K^{-1} + diag(W)) f = K^{-1} @ 0 + grad_ll + W @ f
-        # Simplified: (I + K @ diag(W)) @ b = K @ (grad_ll + W @ f), then f_new = K @ (grad_ll + W @ f) - K @ diag(W) @ ...
-        # Use standard form: f_new = K @ inv(I + diag(sqrt(W)) @ K @ diag(sqrt(W))) @ diag(sqrt(W)) @ (f + diag(1/W) @ grad_ll)
-
-        # Simpler direct approach: solve (K_inv + diag(W)) f = grad_ll + W * f_old
-        # Since we have K, use Woodbury: (K_inv + W)^{-1} = K - K @ (I + W @ K)^{-1} @ W @ K
-        # But simplest for N<50: direct solve
-
-        A = np.linalg.inv(K_reg) + np.diag(W)
-        b = grad_ll + W * f
-        f_new = np.linalg.solve(A, b)
-
-        if np.max(np.abs(f_new - f)) < tol:
-            f = f_new
-            break
-        f = f_new
-
-    # Posterior covariance: Sigma = (K^{-1} + diag(W))^{-1}
-    p = _sigmoid(f)
-    W = obs_count * p * (1 - p)
-    W = np.maximum(W, 1e-10)
-    A = np.linalg.inv(K_reg) + np.diag(W)
-    Sigma = np.linalg.inv(A)
-
-    return f, Sigma
+    return obs_indices, obs_values
 
 
 def select_parent(graph: SearchGraph) -> str | None:
     """
-    Kernel Thompson Sampling: select which node to use as parent.
+    Kernel Thompson Sampling via GP Regression.
 
-    1. Get kernel matrix from graph (maintained incrementally).
-    2. Collect binary observations (did children improve?).
-    3. Compute Laplace-approximated GP posterior.
+    1. Get kernel matrix from graph.
+    2. Collect continuous observations (children's metrics).
+    3. Compute exact GP posterior (closed form).
     4. Sample jointly from posterior.
-    5. Convert to success probabilities via sigmoid.
-    6. Pick argmax.
+    5. Pick argmax.
     """
     if not graph.attempts:
         return None
@@ -147,28 +66,51 @@ def select_parent(graph: SearchGraph) -> str | None:
     if n == 0:
         return None
 
-    # Get kernel matrix (maintained incrementally by graph)
     K = graph.kernel_matrix
+    obs_indices, obs_values = _collect_observations(graph, node_ids)
 
-    # Collect observations
-    obs_count, obs_success = _collect_observations(graph, node_ids)
-
-    # Compute posterior and sample
-    if obs_count.sum() == 0:
-        # No observations yet — sample from prior
-        f_sample = np.random.multivariate_normal(np.zeros(n), K)
+    if not obs_values:
+        # No observations — sample from prior
+        K_reg = K + 1e-6 * np.eye(n)
+        f_sample = np.random.multivariate_normal(np.zeros(n), K_reg)
     else:
-        f_hat, Sigma = _laplace_approximation(K, obs_count, obs_success)
-        # Sample from posterior N(f_hat, Sigma)
-        # Use eigendecomposition for numerical stability
-        eigvals, eigvecs = np.linalg.eigh(Sigma)
-        eigvals = np.maximum(eigvals, 0)  # clip negative eigenvalues
-        f_sample = f_hat + eigvecs @ (np.sqrt(eigvals) * np.random.randn(n))
+        # GP Regression exact posterior
+        # K_obs: kernel values between observation points
+        # k_star: kernel values between all nodes and observation points
+        m = len(obs_values)
+        y = np.array(obs_values)
 
-    # Convert to success probabilities and select argmax
-    probs = _sigmoid(f_sample)
-    best_idx = int(np.argmax(probs))
+        # Build observation kernel matrix (m x m)
+        K_obs = np.zeros((m, m))
+        for i in range(m):
+            for j in range(m):
+                K_obs[i, j] = K[obs_indices[i], obs_indices[j]]
+        K_obs += NOISE_VARIANCE * np.eye(m)
+
+        # Build cross-kernel matrix (n x m)
+        K_cross = np.zeros((n, m))
+        for j in range(m):
+            K_cross[:, j] = K[:, obs_indices[j]]
+
+        # Posterior mean and covariance (exact closed form)
+        # mu = K_cross @ K_obs^{-1} @ y
+        # Sigma = K - K_cross @ K_obs^{-1} @ K_cross^T
+        L = np.linalg.cholesky(K_obs)
+        alpha = np.linalg.solve(L.T, np.linalg.solve(L, y))
+        mu = K_cross @ alpha
+
+        v = np.linalg.solve(L, K_cross.T)
+        Sigma = K - v.T @ v
+        Sigma += 1e-6 * np.eye(n)  # numerical stability
+
+        # Joint sample from posterior
+        eigvals, eigvecs = np.linalg.eigh(Sigma)
+        eigvals = np.maximum(eigvals, 0)
+        f_sample = mu + eigvecs @ (np.sqrt(eigvals) * np.random.randn(n))
+
+    # Select argmax
+    best_idx = int(np.argmax(f_sample))
     chosen_id = node_ids[best_idx]
     node = graph.attempts[chosen_id]
-    logger.info(f"[KTS] Selected node {chosen_id} (metric={node.metric}, prob={probs[best_idx]:.3f})")
+    logger.info(f"[KTS] Selected node {chosen_id} (metric={node.metric}, sampled_value={f_sample[best_idx]:.3f})")
     return chosen_id

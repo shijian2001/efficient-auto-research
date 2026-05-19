@@ -6,7 +6,7 @@ sys.path.insert(0, str(Path(__file__).parent.parent))
 
 import numpy as np
 from agent.engine.graph import SearchGraph, Attempt
-from agent.engine.thompson import select_parent, improved
+from agent.engine.thompson import select_parent
 
 
 def test_graph_and_thompson():
@@ -25,8 +25,8 @@ def test_graph_and_thompson():
 
     assert len(graph.attempts) == 3
     assert len(graph.get_children("a1")) == 2
-    assert improved(a3, a1)
-    assert not improved(a2, a1)
+    assert a3.metric > a1.metric  # a3 improved over a1
+    assert a2.metric is None       # a2 has no metric (error)
 
     # Thompson sampling should work
     selections = {}
