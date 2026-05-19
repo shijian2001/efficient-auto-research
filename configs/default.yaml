@@ -1,0 +1,11 @@
+# AutoResearch default configuration
+#
+# LLM API config via environment variables:
+#   OPENAI_API_KEY: your API key
+#   OPENAI_BASE_URL: your endpoint (default: https://api.openai.com/v1)
+
+agent:
+  max_steps: 50
+  timeout: 43200
+  k_neighbors: 5
+  model: gpt-4o

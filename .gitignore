@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+results/
+*.log
+cache/
+
+# Local scripts and configs (may contain paths/keys)
+configs/local.yaml
+configs/*.local.yaml
+run_local.sh
+run_*.sh
+PROPOSAL.md
