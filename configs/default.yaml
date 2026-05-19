@@ -7,5 +7,4 @@
 agent:
   max_steps: 50
   timeout: 43200
-  k_neighbors: 5
   model: gpt-4o

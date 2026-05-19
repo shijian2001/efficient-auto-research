@@ -32,7 +32,6 @@ def main():
     parser.add_argument("--timeout", type=int, default=43200)
     parser.add_argument("--max_steps", type=int, default=50)
     parser.add_argument("--model", type=str, default=None)
-    parser.add_argument("--k_neighbors", type=int, default=5)
     args = parser.parse_args()
 
     model = args.model or "gpt-4o"
@@ -50,12 +49,11 @@ def main():
     config = SearchConfig(
         max_steps=args.max_steps,
         time_limit=args.timeout,
-        k_neighbors=args.k_neighbors,
         model=model,
         exec_timeout=min(3600, args.timeout // 3),
     )
 
-    logger.info(f"Starting: model={model}, steps={args.max_steps}, K={args.k_neighbors}")
+    logger.info(f"Starting: model={model}, steps={args.max_steps}")
     engine = GraphSearchEngine(task_desc=task_desc, data_dir=data_dir, work_dir=work_dir, config=config)
     result = engine.run()
 

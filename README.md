@@ -38,7 +38,6 @@ python agent/run.py \
   --desc_file /path/to/description.md \
   --output /path/to/submission.csv \
   --max_steps 50 \
-  --k_neighbors 5
 
 # Run via eval (with official mlebench grading)
 python -m eval.mlebench \
@@ -51,9 +50,9 @@ python -m eval.mlebench \
 
 ## Method
 
-1. **Graph Construction**: Each execution step produces an Attempt node. Nodes are connected by `derived_from` edges (tree) and `similar` edges (KNN on embeddings, turning the tree into a graph).
+1. **Graph Construction**: Each execution step produces an Attempt node. Nodes are connected by `derived_from` edges (tree). Cross-node correlation is captured by the kernel matrix (cosine similarity on embeddings).
 
-2. **Thompson Sampling**: To select the next parent node, compute a Beta posterior for each candidate from its own children + similar neighbors' children results. Sample from each posterior, pick argmax.
+2. **Kernel Thompson Sampling**: Nodes define a GP prior via their kernel (cosine similarity on embeddings). Binary observations (did child improve over parent?) update the posterior via Laplace approximation. Joint sampling from the posterior → sigmoid → argmax selects the next parent.
 
 3. **LLM Generation**: Given the selected parent, generate a plan (brief) then code (complete script). Execute, parse metric or error, embed the result, add to graph.
 
@@ -63,7 +62,6 @@ python -m eval.mlebench \
 |-----------|---------|-------------|
 | `max_steps` | 50 | Maximum search steps |
 | `time_limit` | 43200 | Total time budget (seconds) |
-| `k_neighbors` | 5 | KNN neighbors for similar edges |
 | `model` | gpt-4o | LLM model name |
 | `exec_timeout` | 3600 | Per-step code execution timeout |
 

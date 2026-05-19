@@ -1,10 +1,10 @@
 """
-Search graph: Attempt nodes + derived_from edges (tree) + similar edges (graph).
+Search graph: Attempt nodes + derived_from edges.
 
 The graph grows incrementally as the search progresses. Each execution step
-produces a new Attempt node. Similarity edges are built via KNN on node
-embeddings, turning the search tree into a graph that enables cross-branch
-information sharing.
+produces a new Attempt node. The derived_from edges form a tree structure.
+Cross-node correlation is handled by the kernel matrix in Thompson Sampling
+(computed directly from node embeddings, not stored as explicit edges).
 """
 
 from __future__ import annotations
@@ -35,77 +35,49 @@ class SearchGraph:
     Search history as a graph.
 
     Nodes: Attempt (one type, representing a single code execution).
-    Edges:
-      - derived_from: parent-child relationship (forms a tree).
-      - similar: KNN on embeddings (cross-branch bridges, turns tree into graph).
+    Edges: derived_from (parent-child relationship, forms a tree).
 
-    The similar edges enable Thompson Sampling to borrow experience from
-    structurally related nodes when estimating expected reward.
+    Cross-node information sharing is handled by the kernel matrix in
+    Kernel Thompson Sampling, which uses node embeddings to compute
+    pairwise similarity without explicit edge storage.
     """
 
-    def __init__(self, k: int = 5) -> None:
-        self.k = k
+    def __init__(self) -> None:
         self.attempts: dict[str, Attempt] = {}
         self._children: dict[str, list[str]] = {}
-        self._similar: dict[str, list[str]] = {}
 
     def add_attempt(self, attempt: Attempt) -> None:
-        """Add a new attempt node and build its edges."""
+        """Add a new attempt node and build derived_from edge."""
         self.attempts[attempt.id] = attempt
         self._children.setdefault(attempt.id, [])
-        self._similar.setdefault(attempt.id, [])
 
         if attempt.parent_id and attempt.parent_id in self.attempts:
             self._children.setdefault(attempt.parent_id, []).append(attempt.id)
-
-        if attempt.embedding is not None:
-            self._build_similar_edges(attempt)
 
     def get_children(self, attempt_id: str) -> list[Attempt]:
         """Get direct children (via derived_from edge)."""
         return [self.attempts[i] for i in self._children.get(attempt_id, [])
                 if i in self.attempts]
 
-    def get_similar(self, attempt_id: str) -> list[Attempt]:
-        """Get KNN similar neighbors."""
-        return [self.attempts[i] for i in self._similar.get(attempt_id, [])
-                if i in self.attempts]
-
-    def get_similar_with_score(self, attempt_id: str) -> list[tuple[Attempt, float]]:
-        """Get KNN similar neighbors with their cosine similarity scores."""
-        result = []
-        node = self.attempts.get(attempt_id)
-        if node is None or node.embedding is None:
-            return result
-        for aid in self._similar.get(attempt_id, []):
-            neighbor = self.attempts.get(aid)
-            if neighbor is None or neighbor.embedding is None:
-                continue
-            sim = _cosine_sim(node.embedding, neighbor.embedding)
-            result.append((neighbor, sim))
-        return result
-
     def get_roots(self) -> list[Attempt]:
         """Get all root nodes (no parent)."""
         return [a for a in self.attempts.values() if a.parent_id is None]
 
-    def _build_similar_edges(self, new_attempt: Attempt) -> None:
-        """Connect new node to its K nearest neighbors by cosine similarity."""
-        if len(self.attempts) <= 1:
-            return
+    def most_similar(self, attempt_id: str, n: int = 3) -> list[Attempt]:
+        """Find the n most similar nodes by embedding cosine similarity."""
+        node = self.attempts.get(attempt_id)
+        if node is None or node.embedding is None:
+            return []
 
         sims: list[tuple[str, float]] = []
         for aid, a in self.attempts.items():
-            if aid == new_attempt.id or a.embedding is None:
+            if aid == attempt_id or a.embedding is None:
                 continue
-            sim = _cosine_sim(new_attempt.embedding, a.embedding)
+            sim = _cosine_sim(node.embedding, a.embedding)
             sims.append((aid, sim))
 
         sims.sort(key=lambda x: x[1], reverse=True)
-
-        for aid, _ in sims[:self.k]:
-            self._similar[new_attempt.id].append(aid)
-            self._similar.setdefault(aid, []).append(new_attempt.id)
+        return [self.attempts[aid] for aid, _ in sims[:n]]
 
 
 def _cosine_sim(a: np.ndarray, b: np.ndarray) -> float:

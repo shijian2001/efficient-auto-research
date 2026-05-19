@@ -10,7 +10,7 @@ from agent.engine.thompson import select_parent, improved
 
 
 def test_graph_and_thompson():
-    graph = SearchGraph(k=3)
+    graph = SearchGraph()
 
     a1 = Attempt(id="a1", plan="xgboost", code="...", metric=0.79,
                  embedding=np.random.randn(100))

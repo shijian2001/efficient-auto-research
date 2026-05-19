@@ -51,7 +51,7 @@ def embed_attempt(
     error: str | None,
 ) -> np.ndarray:
     """
-    Compute node embedding for KNN similarity edges.
+    Compute node embedding for kernel similarity computation.
 
     Only plan and code determine similarity — two nodes with the same strategy
     should be neighbors whether they succeeded or failed. This enables the

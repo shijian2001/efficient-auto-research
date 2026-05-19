@@ -34,7 +34,6 @@ logger = logging.getLogger("AutoResearch")
 class SearchConfig:
     max_steps: int = 50
     time_limit: int = 43200
-    k_neighbors: int = 5
     model: str = "gpt-4o"
     temperature: float = 0.7
     exec_timeout: int = 3600  # per-step code execution timeout
@@ -49,7 +48,7 @@ class GraphSearchEngine:
         self.work_dir = work_dir
         self.config = config
 
-        self.graph = SearchGraph(k=config.k_neighbors)
+        self.graph = SearchGraph()
         self.executor = Executor(work_dir=work_dir, timeout=config.exec_timeout)
 
         self.best_attempt: Attempt | None = None
@@ -189,7 +188,7 @@ class GraphSearchEngine:
             elif parent.error:
                 parts.append(f"Error: {parent.error}")
                 # Graph context: find fixes from similar nodes
-                for s in self.graph.get_similar(parent.id):
+                for s in self.graph.most_similar(parent.id):
                     for child in self.graph.get_children(s.id):
                         if child.metric is not None:
                             parts.append(f"A similar attempt was fixed by: {child.plan}")
@@ -326,7 +325,6 @@ Quality Requirements:
             "total_tokens": self.total_in_tokens + self.total_out_tokens,
             "total_time_seconds": time.time() - self.start_time if self.start_time else 0,
             "graph_nodes": len(self.graph.attempts),
-            "graph_similar_edges": sum(len(v) for v in self.graph._similar.values()) // 2,
             "step_log": self._step_log,
         }
         path = self.work_dir / "report.json"
