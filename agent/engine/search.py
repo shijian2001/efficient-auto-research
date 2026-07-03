@@ -14,6 +14,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import shutil
 import time
 import uuid
 from dataclasses import dataclass
@@ -58,11 +59,14 @@ class GraphSearchEngine:
         self.total_out_tokens = 0
         self._data_preview: str | None = None
         self._step_log: list[dict] = []
+        self._sample_submission_path: Path | None = None
+        self._submission_paths: dict[str, str] = {}
 
     def run(self) -> Path | None:
         """Run search loop. Returns path to best submission or None."""
         self.start_time = time.time()
         submission_path = self.work_dir / "submission.csv"
+        best_submission_path = self.work_dir / "best_submission.csv"
 
         for step in range(self.config.max_steps):
             if time.time() - self.start_time > self.config.time_limit:
@@ -87,6 +91,9 @@ class GraphSearchEngine:
                 if self.best_metric is None or attempt.metric > self.best_metric:
                     self.best_metric = attempt.metric
                     self.best_attempt = attempt
+                    saved_submission = self._submission_paths.get(attempt.id)
+                    if saved_submission:
+                        shutil.copy2(saved_submission, best_submission_path)
                     logger.info(f"  New best: {self.best_metric:.4f}")
 
             # Log step for efficiency curve (write to disk immediately for observability)
@@ -101,8 +108,10 @@ class GraphSearchEngine:
             })
             self._save_report()
 
-        # Ensure the best attempt's submission is the final one
-        if self.best_attempt and self.best_attempt.code:
+        # Ensure the final submission is the already validated best artifact.
+        if best_submission_path.exists():
+            shutil.copy2(best_submission_path, submission_path)
+        elif self.best_attempt and self.best_attempt.code:
             logger.info(f"Re-running best attempt (metric={self.best_metric}) to produce final submission")
             self.executor.run(self.best_attempt.code, filename="best_final.py")
 
@@ -130,9 +139,27 @@ class GraphSearchEngine:
         # Execute
         result = self.executor.run(code, filename=f"step_{step:03d}.py")
 
-        # Parse metric and error
-        metric = self._parse_metric(result.stdout) if result.success else None
-        error = self._parse_error(result.stderr) if not result.success else None
+        # Parse metric and validate the produced submission artifact.
+        metric = None
+        error = None
+        submission_copy = None
+        if result.success:
+            metric = self._parse_metric(result.stdout)
+            if metric is None:
+                error = "MetricMissingError: stdout did not contain final METRIC=<score>"
+            else:
+                valid_submission, validation_error, submission_copy = self._validate_and_save_submission(step, attempt_id)
+                if not valid_submission:
+                    metric = None
+                    error = validation_error
+        else:
+            error = self._parse_error(result.stderr)
+
+        if submission_copy:
+            self._submission_paths[attempt_id] = str(submission_copy)
+
+        # Persist full per-step trace for later analysis (plan + code + exec I/O).
+        self._save_step_trace(step, attempt_id, parent, plan, code, result, metric, error, submission_copy)
 
         # Compute embedding
         embedding = embed_attempt(plan, code, metric, error)
@@ -153,16 +180,32 @@ class GraphSearchEngine:
         """Generate a brief plan."""
         system = "You are a Kaggle Grandmaster. Output ONLY a brief plan (3-5 sentences): what you will do, why it suits this task, and how you will validate. No code."
         user = self._build_plan_prompt(parent)
-        text, in_tok, out_tok = llm_query(system, user, model=self.config.model, max_tokens=300)
+        text, in_tok, out_tok = llm_query(system, user, model=self.config.model)
         return text.strip(), in_tok, out_tok
 
     def _generate_code(self, parent: Attempt | None, plan: str) -> tuple[str, int, int]:
         """Generate complete Python code."""
         system = self._build_code_system()
         user = self._build_code_user(parent, plan)
-        text, in_tok, out_tok = llm_query(system, user, model=self.config.model, max_tokens=8192)
-        code = self._extract_code(text)
-        return code, in_tok, out_tok
+        total_in = 0
+        total_out = 0
+        last_text = ""
+        for retry in range(20):
+            text, in_tok, out_tok = llm_query(system, user, model=self.config.model)
+            total_in += in_tok
+            total_out += out_tok
+            last_text = text
+            code = self._extract_code(text)
+            if code:
+                return code, total_in, total_out
+            user = (
+                self._build_code_user(parent, plan)
+                + "\n\nYour previous response did not contain a valid Python code block. "
+                "Return ONLY one fenced ```python code block with a complete executable script. "
+                "Do not include explanations, markdown outside the code block, or diffs."
+            )
+        logger.warning("Failed to extract a valid Python code block. Last response starts with: %r", last_text[:200])
+        return "", total_in, total_out
 
     # --- Prompt construction ---
 
@@ -209,6 +252,16 @@ class GraphSearchEngine:
     def _build_code_system(self) -> str:
         data_dir_abs = str(self.data_dir.resolve())
         submission_abs = str((self.work_dir / "submission.csv").resolve())
+        task_lower = f"{data_dir_abs}\n{self.task_desc}".lower()
+        extra_guidance = ""
+        if "mlsp-2013-birds" in task_lower or "mlsp 2013 bird" in task_lower:
+            extra_guidance = """
+	MLSP 2013 birds-specific guidance:
+	- Keep the script under 180 lines.
+	- Use the provided tabular feature files only: supplemental_data/histogram_of_segments.txt and/or supplemental_data/segment_features.txt.
+	- Do not generate audio, image, spectrogram, CNN, or deep-learning pipelines.
+	- Build per-record features, parse known labels from essential_data/rec_labels_test_hidden.txt where labels are not '?', train one-vs-rest LogisticRegression/RandomForest/ExtraTrees models, validate AUC by CVfolds_2.txt, and write Id,Probability for all rows in sample_submission.csv.
+"""
         return f"""You are a Kaggle Grandmaster. Write a COMPLETE, competition-winning Python script.
 
 Data & Output:
@@ -216,14 +269,17 @@ Data & Output:
 - Save submission CSV to EXACTLY: {submission_abs}
 - The VERY LAST line of stdout MUST be: print(f'METRIC={{score}}')
 
-Environment:
-- Available packages: numpy, pandas, scikit-learn, xgboost, lightgbm, torch, torchvision, transformers, scipy, statsmodels, and others. All pre-installed.
-- For neural networks, use PyTorch.
-- Your code must finish within {self.config.exec_timeout} seconds.
-- All data is already prepared in the data directory. No need to download or unzip anything.
-- Do NOT use tqdm or progress bars. Do NOT access the internet.
+	Environment:
+	- Available packages: numpy, pandas, scikit-learn, xgboost, lightgbm, torch, torchvision, transformers, scipy, statsmodels, and others. All pre-installed.
+	- For neural networks, use PyTorch.
+	- Your code must finish within {self.config.exec_timeout} seconds.
+	- All data is already prepared in the data directory. No need to download or unzip anything.
+	- Do NOT use tqdm or progress bars. Do NOT access the internet.
+	- Output exactly one fenced ```python code block and nothing else.
+	- Keep the script concise and practical, preferably under 250 lines. Avoid long comments, verbose logging, or multiple alternative pipelines.
+{extra_guidance}
 
-Quality Requirements:
+		Quality Requirements:
 - Split data FIRST, then fit all transformers on train only (prevent data leakage)
 - Use proper cross-validation for the metric
 - Match the sample submission file's format exactly (check column names and dtypes in Data Preview)
@@ -303,17 +359,34 @@ Quality Requirements:
         other = [f.name for f in self.data_dir.iterdir() if f.suffix not in (".md", ".csv")]
         if other:
             parts.append(f"Other files: {', '.join(other)}")
+        sample_path = self._find_sample_submission()
+        if sample_path:
+            parts.append(f"Sample submission path: {sample_path}")
         self._data_preview = "\n\n".join(parts) if parts else ""
         return self._data_preview
 
-    def _extract_code(self, text: str) -> str:
-        match = re.search(r"```python\s*\n(.*?)```", text, re.DOTALL)
+    def _extract_code(self, text: str) -> str | None:
+        match = re.search(r"```\s*(?:python|py)\s*\n(.*?)```", text, re.DOTALL | re.IGNORECASE)
         if match:
-            return match.group(1).strip()
-        match = re.search(r"```\s*\n(.*?)```", text, re.DOTALL)
-        if match:
-            return match.group(1).strip()
-        return text.strip()
+            code = match.group(1).strip()
+            return code if self._is_plausible_python(code) else None
+        return None
+
+    def _is_plausible_python(self, code: str) -> bool:
+        if not code:
+            return False
+        forbidden_markers = ("```", "diff --git", "*** Begin Patch", "SEARCH/REPLACE", "<<<<<<<", ">>>>>>>")
+        if any(marker in code for marker in forbidden_markers):
+            return False
+        first_line = code.lstrip().splitlines()[0].strip().lower()
+        prose_prefixes = ("looking at", "here is", "here's", "i will", "we need", "the code")
+        if first_line.startswith(prose_prefixes):
+            return False
+        try:
+            compile(code, "<llm_code>", "exec")
+        except SyntaxError:
+            return False
+        return True
 
     def _parse_error(self, stderr: str) -> str | None:
         """Extract the error line from stderr (find the actual exception)."""
@@ -338,6 +411,131 @@ Quality Requirements:
                 except ValueError:
                     pass
         return None
+
+    def _find_sample_submission(self) -> Path | None:
+        """Find the sample submission file, preferring exact obvious names."""
+        if self._sample_submission_path is not None:
+            return self._sample_submission_path
+
+        candidates = [
+            p for p in self.data_dir.rglob("*.csv")
+            if "sample" in p.name.lower() and "submission" in p.name.lower()
+        ]
+        if candidates:
+            candidates.sort(key=lambda p: (len(p.parts), len(p.name), str(p)))
+            self._sample_submission_path = candidates[0]
+        return self._sample_submission_path
+
+    def _read_csv_header_and_count(self, path: Path) -> tuple[list[str], int]:
+        import csv
+
+        with path.open(newline="") as f:
+            reader = csv.reader(f)
+            try:
+                header = next(reader)
+            except StopIteration:
+                return [], 0
+            count = sum(1 for _ in reader)
+        return header, count
+
+    def _validate_and_save_submission(self, step: int, attempt_id: str) -> tuple[bool, str | None, Path | None]:
+        """Validate current submission.csv and persist a per-attempt copy if valid."""
+        submission_path = self.work_dir / "submission.csv"
+        if not submission_path.exists():
+            return False, "SubmissionMissingError: submission.csv was not created", None
+
+        sample_path = self._find_sample_submission()
+        if sample_path is None:
+            saved = self._copy_step_submission(step, attempt_id, submission_path)
+            return True, None, saved
+
+        try:
+            sample_header, sample_rows = self._read_csv_header_and_count(sample_path)
+            submission_header, submission_rows = self._read_csv_header_and_count(submission_path)
+        except Exception as exc:
+            return False, f"SubmissionFormatError: failed to read submission CSV: {exc}", None
+
+        if not submission_header:
+            return False, "SubmissionFormatError: submission.csv is empty", None
+        if submission_header != sample_header:
+            return False, (
+                "SubmissionFormatError: column mismatch. "
+                f"expected={sample_header}, got={submission_header}"
+            ), None
+        if sample_rows and submission_rows != sample_rows:
+            return False, (
+                "SubmissionFormatError: row count mismatch. "
+                f"expected={sample_rows}, got={submission_rows}"
+            ), None
+        content_error = self._check_submission_content(submission_path, submission_header)
+        if content_error:
+            return False, content_error, None
+
+        saved = self._copy_step_submission(step, attempt_id, submission_path)
+        return True, None, saved
+
+    def _copy_step_submission(self, step: int, attempt_id: str, submission_path: Path) -> Path:
+        submission_dir = self.work_dir / "submissions"
+        submission_dir.mkdir(parents=True, exist_ok=True)
+        saved = submission_dir / f"step_{step:03d}_{attempt_id}.csv"
+        shutil.copy2(submission_path, saved)
+        return saved
+
+    def _check_submission_content(self, path: Path, header: list[str]) -> str | None:
+        """Catch empty or placeholder prediction values without rejecting simple baselines."""
+        import csv
+
+        if len(header) < 2:
+            return None
+        prediction_columns = header[1:]
+        checked_rows = 0
+
+        with path.open(newline="") as f:
+            reader = csv.DictReader(f)
+            for row in reader:
+                checked_rows += 1
+                for column in prediction_columns:
+                    value = (row.get(column) or "").strip()
+                    if value == "":
+                        return f"SubmissionContentError: empty value in prediction column {column!r}"
+                    if value.lower() in {"nan", "none", "null", "placeholder", "todo"}:
+                        return f"SubmissionContentError: placeholder value {value!r} in {column!r}"
+                if checked_rows >= 1000:
+                    break
+
+        if checked_rows == 0:
+            return "SubmissionContentError: submission has no prediction rows"
+        return None
+
+    def _save_step_trace(self, step, attempt_id, parent, plan, code, result, metric, error, submission_copy=None):
+        """Persist the full reasoning + execution trace of one step to disk.
+
+        report.json only keeps the parsed metric/error; this captures the LLM plan,
+        the generated code, and the raw stdout/stderr so a run can be fully analyzed.
+        """
+        trace_dir = self.work_dir / "traces"
+        trace_dir.mkdir(parents=True, exist_ok=True)
+        trace = {
+            "step": step,
+            "attempt_id": attempt_id,
+            "parent_id": parent.id if parent else None,
+            "parent_plan": parent.plan if parent else None,
+            "parent_metric": parent.metric if parent else None,
+            "plan": plan,
+            "code": code,
+            "stdout": result.stdout,
+            "stderr": result.stderr,
+            "returncode": result.returncode,
+            "exec_time": result.exec_time,
+            "timed_out": result.timed_out,
+            "metric": metric,
+            "error": error,
+            "submission_copy": str(submission_copy) if submission_copy else None,
+            "best_so_far": self.best_metric,
+            "elapsed_seconds": time.time() - self.start_time if self.start_time else 0,
+        }
+        path = trace_dir / f"step_{step:03d}.json"
+        path.write_text(json.dumps(trace, indent=2))
 
     def _save_report(self):
         report = {

@@ -5,6 +5,7 @@ from __future__ import annotations
 import os
 import signal
 import subprocess
+import sys
 import time
 from dataclasses import dataclass
 from pathlib import Path
@@ -41,12 +42,23 @@ class Executor:
         self._step += 1
 
         script = self.work_dir / filename
+
+        preflight_error = self._preflight_error(code, filename)
+        if preflight_error:
+            return ExecutionResult(
+                stdout="",
+                stderr=preflight_error,
+                returncode=-2,
+                exec_time=0.0,
+                timed_out=False,
+            )
+
         script.write_text(code)
 
         start = time.time()
         try:
             proc = subprocess.Popen(
-                ["python", str(script)],
+                [sys.executable, str(script)],
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
@@ -71,3 +83,43 @@ class Executor:
                 exec_time=time.time() - start,
                 timed_out=True,
             )
+
+    def _preflight_error(self, code: str, filename: str) -> str | None:
+        """Reject obvious non-Python responses before paying subprocess cost."""
+        if not code or not code.strip():
+            return "CodePreflightError: empty code"
+
+        stripped = code.lstrip()
+        forbidden_prefixes = (
+            "looking at",
+            "here is",
+            "here's",
+            "i will",
+            "we need",
+            "the code",
+            "this script",
+        )
+        first_line = stripped.splitlines()[0].strip().lower()
+        if first_line.startswith(forbidden_prefixes):
+            return f"CodePreflightError: response appears to contain prose, first line={first_line[:80]!r}"
+
+        forbidden_markers = (
+            "```",
+            "<<<<<<<",
+            "=======",
+            ">>>>>>>",
+            "diff --git",
+            "*** Begin Patch",
+            "SEARCH/REPLACE",
+            "@@",
+        )
+        for marker in forbidden_markers:
+            if marker in code:
+                return f"CodePreflightError: response contains non-Python marker {marker!r}"
+
+        try:
+            compile(code, filename, "exec")
+        except SyntaxError as exc:
+            return f"SyntaxError before execution: {exc.msg} ({filename}, line {exc.lineno})"
+
+        return None

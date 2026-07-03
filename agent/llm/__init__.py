@@ -1,4 +1,9 @@
-"""LLM API: thin wrapper around OpenAI-compatible endpoints."""
+"""LLM API: thin wrapper around OpenAI-compatible endpoints.
+
+All provider-specific concerns (model rewriting, reasoning effort, retries
+against the upstream, timeouts, token usage logging) live in the local relay
+proxy (docker-eval/llm_relay_proxy.py). Point OPENAI_BASE_URL at the proxy.
+"""
 
 from __future__ import annotations
 
@@ -29,14 +34,14 @@ def query(
     user_message: str,
     model: str | None = None,
     temperature: float = 0.7,
-    max_tokens: int = 8192,
 ) -> tuple[str, int, int]:
     """
     Call LLM and return (response_text, input_tokens, output_tokens).
 
-    Retries up to 3 times on failure with exponential backoff.
+    Retries up to 3 times on failure with backoff. Upstream-level retries,
+    timeouts and token accounting are handled by the relay proxy.
     """
-    model = model or "gpt-4o"
+    model = model or "gpt-5.5"
     client = get_client()
 
     messages = []
@@ -50,7 +55,6 @@ def query(
                 model=model,
                 messages=messages,
                 temperature=temperature,
-                max_tokens=max_tokens,
             )
             text = resp.choices[0].message.content or ""
             usage = resp.usage
