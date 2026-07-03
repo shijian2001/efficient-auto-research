@@ -22,9 +22,13 @@ def get_client() -> OpenAI:
     """Get or create the OpenAI client (singleton)."""
     global _client
     if _client is None:
+        # High-effort reasoning calls can exceed the SDK default 600s read
+        # timeout; default to unlimited (the relay proxy owns upstream limits).
+        timeout_env = os.environ.get("LLM_CLIENT_TIMEOUT", "").strip()
         _client = OpenAI(
             api_key=os.environ.get("OPENAI_API_KEY", ""),
             base_url=os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+            timeout=float(timeout_env) if timeout_env else None,
         )
     return _client
 
