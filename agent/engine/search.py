@@ -252,16 +252,6 @@ class GraphSearchEngine:
     def _build_code_system(self) -> str:
         data_dir_abs = str(self.data_dir.resolve())
         submission_abs = str((self.work_dir / "submission.csv").resolve())
-        task_lower = f"{data_dir_abs}\n{self.task_desc}".lower()
-        extra_guidance = ""
-        if "mlsp-2013-birds" in task_lower or "mlsp 2013 bird" in task_lower:
-            extra_guidance = """
-	MLSP 2013 birds-specific guidance:
-	- Keep the script under 180 lines.
-	- Use the provided tabular feature files only: supplemental_data/histogram_of_segments.txt and/or supplemental_data/segment_features.txt.
-	- Do not generate audio, image, spectrogram, CNN, or deep-learning pipelines.
-	- Build per-record features, parse known labels from essential_data/rec_labels_test_hidden.txt where labels are not '?', train one-vs-rest LogisticRegression/RandomForest/ExtraTrees models, validate AUC by CVfolds_2.txt, and write Id,Probability for all rows in sample_submission.csv.
-"""
         return f"""You are a Kaggle Grandmaster. Write a COMPLETE, competition-winning Python script.
 
 Data & Output:
@@ -269,17 +259,16 @@ Data & Output:
 - Save submission CSV to EXACTLY: {submission_abs}
 - The VERY LAST line of stdout MUST be: print(f'METRIC={{score}}')
 
-	Environment:
-	- Available packages: numpy, pandas, scikit-learn, xgboost, lightgbm, torch, torchvision, transformers, scipy, statsmodels, and others. All pre-installed.
-	- For neural networks, use PyTorch.
-	- Your code must finish within {self.config.exec_timeout} seconds.
-	- All data is already prepared in the data directory. No need to download or unzip anything.
-	- Do NOT use tqdm or progress bars. Do NOT access the internet.
-	- Output exactly one fenced ```python code block and nothing else.
-	- Keep the script concise and practical, preferably under 250 lines. Avoid long comments, verbose logging, or multiple alternative pipelines.
-{extra_guidance}
+Environment:
+- Available packages: numpy, pandas, scikit-learn, xgboost, lightgbm, torch, torchvision, transformers, scipy, statsmodels, and others. All pre-installed.
+- For neural networks, use PyTorch.
+- Your code must finish within {self.config.exec_timeout} seconds.
+- All data is already prepared in the data directory. No need to download or unzip anything.
+- Do NOT use tqdm or progress bars. Do NOT access the internet.
+- Output exactly one fenced ```python code block and nothing else.
+- Keep the script concise and practical, preferably under 250 lines. Avoid long comments, verbose logging, or multiple alternative pipelines.
 
-		Quality Requirements:
+Quality Requirements:
 - Split data FIRST, then fit all transformers on train only (prevent data leakage)
 - Use proper cross-validation for the metric
 - Match the sample submission file's format exactly (check column names and dtypes in Data Preview)
