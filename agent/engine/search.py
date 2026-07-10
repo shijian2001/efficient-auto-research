@@ -115,6 +115,15 @@ class GraphSearchEngine:
             logger.info(f"Re-running best attempt (metric={self.best_metric}) to produce final submission")
             self.executor.run(self.best_attempt.code, filename="best_final.py")
 
+        # Side artifact: top-K ensemble of the best validated submissions.
+        # The main submission.csv stays the single best (locally validated);
+        # the ensemble cannot be scored locally, so it ships alongside for
+        # offline comparison rather than replacing the primary artifact.
+        try:
+            self._ensemble_top_k(k=5)
+        except Exception as exc:
+            logger.warning(f"Top-K ensemble failed (non-fatal): {exc}")
+
         self._save_report()
         return submission_path if submission_path.exists() else None
 
@@ -290,21 +299,59 @@ Quality Requirements:
                 parts.append(f"\n## Buggy Code\n```python\n{parent.code}\n```")
                 parts.append(f"\n## Error\n{parent.error}")
             else:
-                parts.append(f"\n## Current Code (improve this)\n```python\n{parent.code}\n```")
                 if parent.metric is not None:
-                    parts.append(f"\n## Current Metric: {parent.metric:.4f}")
+                    parts.append(
+                        f"\n## Current Code (metric={parent.metric:.4f} — this pipeline WORKS)\n"
+                        f"```python\n{parent.code}\n```"
+                    )
+                    parts.append(
+                        "\nInstructions: MODIFY the working code above. Keep the overall "
+                        "pipeline intact; change or add ONE component as described in the plan. "
+                        "Do NOT rewrite from scratch. Return the complete modified script."
+                    )
+                else:
+                    parts.append(f"\n## Current Code (improve this)\n```python\n{parent.code}\n```")
 
         return "\n".join(parts)
 
     # --- Utilities ---
 
-    def _collect_known_errors(self) -> list[str]:
-        """Collect unique errors from graph."""
-        errors = set()
-        for a in self.graph.attempts.values():
-            if a.error:
-                errors.add(a.error)
-        return list(errors)
+    def _collect_known_errors(self, limit: int = 8) -> list[str]:
+        """Collect errors from graph, aggregated by exception type.
+
+        Raw error strings rarely transfer to freshly written code, so repeated
+        failures of the same type are merged into one line with a count and a
+        generic lesson — the model learns the pitfall class, not one instance.
+        """
+        by_type: dict[str, list[str]] = {}
+        for aid in self.graph.node_ids:  # node_ids preserves insertion order
+            a = self.graph.attempts[aid]
+            if not a.error:
+                continue
+            m = re.search(r"\b(\w+Error)\b", a.error)
+            key = m.group(1) if m else a.error.split(":")[0][:40]
+            by_type.setdefault(key, []).append(a.error)
+
+        lessons = {
+            "TypeError": "defensively validate types/shapes before operating on them",
+            "ValueError": "check array shapes, unpack counts, and category coverage first",
+            "KeyError": "verify keys/columns exist before indexing",
+            "IndexError": "guard index bounds; don't assume non-empty results",
+            "FileNotFoundError": "list actual files first; never hard-code paths or extensions",
+            "StopIteration": "handle empty iterators from parsing/lookup misses",
+            "TimeoutError": "budget runtime; subsample or reduce epochs to finish in time",
+            "MemoryError": "reduce batch/feature size; process in chunks",
+        }
+
+        out = []
+        # Most recent error types last in insertion order → keep the newest ones
+        for key, msgs in list(by_type.items())[-limit:]:
+            latest = msgs[-1].strip().replace("\n", " ")[:200]
+            count = f" ({len(msgs)}x)" if len(msgs) > 1 else ""
+            lesson = lessons.get(key)
+            suffix = f" — lesson: {lesson}" if lesson else ""
+            out.append(f"{key}{count}: {latest}{suffix}")
+        return out
 
     def _error_warning(self) -> str:
         """Format error warning for code generation prompt."""
@@ -495,6 +542,82 @@ Quality Requirements:
         if checked_rows == 0:
             return "SubmissionContentError: submission has no prediction rows"
         return None
+
+    def _ensemble_top_k(self, k: int = 5) -> Path | None:
+        """Weighted-average ensemble of the top-k validated per-attempt submissions.
+
+        Only numeric prediction columns are fused (weights = each attempt's metric).
+        If any prediction column is non-numeric (e.g. free-text answers), or fewer
+        than 2 candidates exist, no ensemble is produced. Output goes to
+        workspace/ensemble_submission.csv as a side artifact; the primary
+        submission.csv is never replaced here.
+        """
+        import pandas as pd
+
+        scored = [
+            (a.metric, self._submission_paths.get(a.id))
+            for a in self.graph.attempts.values()
+            if a.metric is not None and self._submission_paths.get(a.id)
+        ]
+        scored = [(m, p) for m, p in scored if Path(p).exists()]
+        scored.sort(key=lambda t: t[0], reverse=True)
+        top = scored[:k]
+        if len(top) < 2:
+            logger.info(f"Ensemble skipped: only {len(top)} scored submissions")
+            return None
+
+        frames = []
+        weights = []
+        id_col = None
+        pred_cols = None
+        for metric, path in top:
+            df = pd.read_csv(path)
+            if id_col is None:
+                id_col = df.columns[0]
+                pred_cols = list(df.columns[1:])
+            if list(df.columns) != [id_col] + pred_cols:
+                logger.info("Ensemble skipped: column mismatch across submissions")
+                return None
+            numeric = df[pred_cols].apply(pd.to_numeric, errors="coerce")
+            if numeric.isna().any().any():
+                logger.info("Ensemble skipped: non-numeric prediction values (text task?)")
+                return None
+            df[pred_cols] = numeric
+            frames.append(df.set_index(id_col))
+            weights.append(metric)
+
+        base_index = frames[0].index
+        if any(not f.index.equals(base_index) for f in frames[1:]):
+            # Align by ID; bail out if IDs don't fully overlap
+            common = base_index
+            for f in frames[1:]:
+                common = common.intersection(f.index)
+            if len(common) != len(base_index):
+                logger.info("Ensemble skipped: submission ID sets differ")
+                return None
+            frames = [f.loc[base_index] for f in frames]
+
+        w = pd.Series(weights, dtype=float)
+        w = w / w.sum()
+        fused = sum(f[pred_cols] * wi for f, wi in zip(frames, w))
+        out = fused.reset_index()
+        out.columns = [id_col] + pred_cols
+
+        ensemble_path = self.work_dir / "ensemble_submission.csv"
+        out.to_csv(ensemble_path, index=False)
+
+        # Reuse existing content check as a final self-check
+        content_error = self._check_submission_content(ensemble_path, [id_col] + pred_cols)
+        if content_error:
+            logger.warning(f"Ensemble self-check failed ({content_error}); removing artifact")
+            ensemble_path.unlink(missing_ok=True)
+            return None
+
+        logger.info(
+            f"Ensemble written: {ensemble_path.name} from top-{len(top)} "
+            f"(metrics {', '.join(f'{m:.4f}' for m, _ in top)})"
+        )
+        return ensemble_path
 
     def _save_step_trace(self, step, attempt_id, parent, plan, code, result, metric, error, submission_copy=None):
         """Persist the full reasoning + execution trace of one step to disk.
