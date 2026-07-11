@@ -15,6 +15,7 @@ import json
 import logging
 import re
 import shutil
+import subprocess
 import time
 import uuid
 from dataclasses import dataclass
@@ -29,6 +30,44 @@ from agent.engine.executor import Executor
 from agent.llm import query as llm_query
 
 logger = logging.getLogger("AutoResearch")
+
+# Code version stamped into report.json so every run is traceable to its commit.
+# Resolved from this source file's own repo (the running code), not the cwd —
+# under worktree-based iteration the two differ. Cached: git is invoked once.
+_GIT_INFO: dict | None = None
+
+
+def _git_info() -> dict:
+    """Return {'commit', 'branch', 'dirty'} for the repo holding this source file.
+
+    All fields fall back to None if git is unavailable or this file is not in a
+    git repo (e.g. shipped without .git). Never raises.
+    """
+    global _GIT_INFO
+    if _GIT_INFO is not None:
+        return _GIT_INFO
+
+    repo_dir = Path(__file__).resolve().parent
+
+    def _run(args: list[str]) -> str | None:
+        try:
+            out = subprocess.run(
+                ["git", "-C", str(repo_dir), *args],
+                capture_output=True, text=True, timeout=10,
+            )
+            return out.stdout.strip() if out.returncode == 0 else None
+        except Exception:
+            return None
+
+    commit = _run(["rev-parse", "HEAD"])
+    branch = _run(["rev-parse", "--abbrev-ref", "HEAD"])
+    status = _run(["status", "--porcelain"])
+    _GIT_INFO = {
+        "commit": commit,
+        "branch": branch,
+        "dirty": bool(status) if status is not None else None,
+    }
+    return _GIT_INFO
 
 
 @dataclass
@@ -650,7 +689,11 @@ Quality Requirements:
         path.write_text(json.dumps(trace, indent=2))
 
     def _save_report(self):
+        git = _git_info()
         report = {
+            "git_commit": git["commit"],
+            "git_branch": git["branch"],
+            "git_dirty": git["dirty"],
             "total_steps": len(self.graph.attempts),
             "best_metric": self.best_metric,
             "total_in_tokens": self.total_in_tokens,
