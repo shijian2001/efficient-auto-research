@@ -100,6 +100,9 @@ class GraphSearchEngine:
         self._step_log: list[dict] = []
         self._sample_submission_path: Path | None = None
         self._submission_paths: dict[str, str] = {}
+        # Consecutive steps since the global best last improved. Feeds the
+        # stagnation-adaptive exploration temperature in Kernel TS.
+        self._stagnation = 0
 
     def run(self) -> Path | None:
         """Run search loop. Returns path to best submission or None."""
@@ -112,10 +115,10 @@ class GraphSearchEngine:
                 logger.info(f"Time limit reached at step {step}")
                 break
 
-            # Thompson sampling selects parent
-            parent_id = select_parent(self.graph)
+            # Thompson sampling selects parent (variance heated if best stagnant)
+            parent_id = select_parent(self.graph, self._stagnation)
             parent = self.graph.attempts.get(parent_id) if parent_id else None
-            logger.info(f"[Step {step}] parent={parent_id}, best={self.best_metric}")
+            logger.info(f"[Step {step}] parent={parent_id}, best={self.best_metric}, stagnation={self._stagnation}")
 
             # Generate and execute
             attempt = self._step(parent, step)
@@ -125,15 +128,22 @@ class GraphSearchEngine:
             # Add to graph
             self.graph.add_attempt(attempt)
 
-            # Track best
-            if attempt.metric is not None:
-                if self.best_metric is None or attempt.metric > self.best_metric:
-                    self.best_metric = attempt.metric
-                    self.best_attempt = attempt
-                    saved_submission = self._submission_paths.get(attempt.id)
-                    if saved_submission:
-                        shutil.copy2(saved_submission, best_submission_path)
-                    logger.info(f"  New best: {self.best_metric:.4f}")
+            # Track best + maintain stagnation counter (drives TS exploration temp).
+            improved = (
+                attempt.metric is not None
+                and (self.best_metric is None or attempt.metric > self.best_metric)
+            )
+            if improved:
+                self.best_metric = attempt.metric
+                self.best_attempt = attempt
+                saved_submission = self._submission_paths.get(attempt.id)
+                if saved_submission:
+                    shutil.copy2(saved_submission, best_submission_path)
+                logger.info(f"  New best: {self.best_metric:.4f}")
+                self._stagnation = 0
+            else:
+                # No improvement (worse metric or failed step) — search is stuck.
+                self._stagnation += 1
 
             # Log step for efficiency curve (write to disk immediately for observability)
             self._step_log.append({
@@ -300,6 +310,7 @@ class GraphSearchEngine:
     def _build_code_system(self) -> str:
         data_dir_abs = str(self.data_dir.resolve())
         submission_abs = str((self.work_dir / "submission.csv").resolve())
+        cache_abs = str((self.work_dir / "cache").resolve())
         return f"""You are a Kaggle Grandmaster. Write a COMPLETE, competition-winning Python script.
 
 Data & Output:
@@ -315,6 +326,16 @@ Environment:
 - Do NOT use tqdm or progress bars. Do NOT access the internet.
 - Output exactly one fenced ```python code block and nothing else.
 - Keep the script concise and practical, preferably under 250 lines. Avoid long comments, verbose logging, or multiple alternative pipelines.
+
+Persistent cache (reuse across steps to save time):
+- {cache_abs} persists across steps (create it with os.makedirs(..., exist_ok=True)).
+- Expensive intermediate artifacts that do not change between attempts can be
+  cached there and loaded instead of recomputed — e.g. a model fine-tuned on
+  external/auxiliary data, precomputed features/embeddings, or tokenized inputs.
+- Guard every cache use: load if the file exists AND matches the current config
+  (encode key settings into the filename), otherwise recompute and save. Never
+  let a stale or partial cache corrupt results; correctness comes first.
+- This frees the time budget to try more ideas rather than repeat identical work.
 
 Quality Requirements:
 - Split data FIRST, then fit all transformers on train only (prevent data leakage)

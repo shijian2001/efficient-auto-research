@@ -29,6 +29,26 @@ logger = logging.getLogger("AutoResearch")
 # Observation noise variance (standard GP regression parameter)
 NOISE_VARIANCE = 0.01
 
+# Stagnation-adaptive exploration temperature.
+# When the global best has not improved for several steps, the search is stuck
+# exploiting a local basin (self-observation pulls TS toward the current best,
+# collapsing exploration variance — see chaii regression 0.588->0.541). We then
+# scale the posterior *sampling* variance by a temperature T > 1 so Thompson
+# Sampling reaches farther, more distinct parents and can break out. This is a
+# pure search-layer knob: it does NOT touch LLM generation temperature.
+#   T = 1 + STAGNATION_GAIN * max(0, stagnation - STAGNATION_TRIGGER), capped.
+# stagnation=0 (best just improved) => T=1 => behaviour identical to before.
+STAGNATION_TRIGGER = 3   # grace steps before heating starts
+STAGNATION_GAIN = 0.5    # variance-temperature added per stagnant step
+STAGNATION_T_MAX = 3.0   # cap (≈ the high-variance regime of the fair-run)
+
+
+def stagnation_temperature(stagnation: int) -> float:
+    """Map a stagnation count to the TS sampling-variance temperature T >= 1."""
+    if stagnation <= STAGNATION_TRIGGER:
+        return 1.0
+    return min(STAGNATION_T_MAX, 1.0 + STAGNATION_GAIN * (stagnation - STAGNATION_TRIGGER))
+
 
 def _collect_observations(graph: SearchGraph, node_ids: list[str]) -> tuple[list[int], list[float]]:
     """
@@ -58,15 +78,20 @@ def _collect_observations(graph: SearchGraph, node_ids: list[str]) -> tuple[list
     return obs_indices, obs_values
 
 
-def select_parent(graph: SearchGraph) -> str | None:
+def select_parent(graph: SearchGraph, stagnation: int = 0) -> str | None:
     """
     Kernel Thompson Sampling via GP Regression.
 
     1. Get kernel matrix from graph.
     2. Collect continuous observations (children's metrics).
     3. Compute exact GP posterior (closed form).
-    4. Sample jointly from posterior.
+    4. Sample jointly from posterior (variance scaled by stagnation temperature).
     5. Pick argmax.
+
+    Args:
+      stagnation: number of consecutive steps the global best has not improved.
+        Drives the exploration temperature T (see stagnation_temperature). 0 =>
+        T=1 => identical to the un-heated posterior sample.
     """
     if not graph.attempts:
         return None
@@ -80,10 +105,13 @@ def select_parent(graph: SearchGraph) -> str | None:
     K = graph.kernel_matrix
     obs_indices, obs_values = _collect_observations(graph, node_ids)
 
+    # Exploration temperature: >1 only when the best has stagnated (see module top).
+    T = stagnation_temperature(stagnation)
+
     if not obs_values:
-        # No observations — sample from prior
+        # No observations — sample from prior (variance scaled by T)
         K_reg = K + 1e-6 * np.eye(n)
-        f_sample = np.random.multivariate_normal(np.zeros(n), K_reg)
+        f_sample = np.random.multivariate_normal(np.zeros(n), (T * T) * K_reg)
     else:
         # GP Regression exact posterior
         # K_obs: kernel values between observation points
@@ -114,14 +142,14 @@ def select_parent(graph: SearchGraph) -> str | None:
         Sigma = K - v.T @ v
         Sigma += 1e-6 * np.eye(n)  # numerical stability
 
-        # Joint sample from posterior
+        # Joint sample from posterior (std scaled by T to widen exploration)
         eigvals, eigvecs = np.linalg.eigh(Sigma)
         eigvals = np.maximum(eigvals, 0)
-        f_sample = mu + eigvecs @ (np.sqrt(eigvals) * np.random.randn(n))
+        f_sample = mu + T * (eigvecs @ (np.sqrt(eigvals) * np.random.randn(n)))
 
     # Select argmax
     best_idx = int(np.argmax(f_sample))
     chosen_id = node_ids[best_idx]
     node = graph.attempts[chosen_id]
-    logger.info(f"[KTS] Selected node {chosen_id} (metric={node.metric}, sampled_value={f_sample[best_idx]:.3f})")
+    logger.info(f"[KTS] Selected node {chosen_id} (metric={node.metric}, sampled_value={f_sample[best_idx]:.3f}, T={T:.2f}, stagnation={stagnation})")
     return chosen_id
