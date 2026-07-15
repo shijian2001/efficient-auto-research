@@ -91,15 +91,6 @@ class GraphSearchEngine:
         self.graph = SearchGraph()
         self.executor = Executor(work_dir=work_dir, timeout=config.exec_timeout)
 
-        # Optimization direction of the competition metric. The agent prints the
-        # raw metric (e.g. log-loss, AUC, Jaccard) with no sign convention, so a
-        # single hard-coded `metric > best` silently optimizes the WRONG way on
-        # lower-is-better tasks (log-loss/RMSE/MAE). We resolve the direction
-        # once from the task description via the LLM and route every "is this
-        # better?" comparison through it. sign=+1 => higher is better,
-        # sign=-1 => lower is better, so `sign * metric` is always maximized.
-        self._metric_sign: int = self._detect_metric_sign(task_desc)
-
         self.best_attempt: Attempt | None = None
         self.best_metric: float | None = None
         self.start_time: float | None = None
@@ -112,6 +103,17 @@ class GraphSearchEngine:
         # Consecutive steps since the global best last improved. Feeds the
         # stagnation-adaptive exploration temperature in Kernel TS.
         self._stagnation = 0
+
+        # Optimization direction of the competition metric. The agent prints the
+        # raw metric (e.g. log-loss, AUC, Jaccard) with no sign convention, so a
+        # single hard-coded `metric > best` silently optimizes the WRONG way on
+        # lower-is-better tasks (log-loss/RMSE/MAE). We resolve the direction
+        # once from the task description via the LLM and route every "is this
+        # better?" comparison through it. sign=+1 => higher is better,
+        # sign=-1 => lower is better, so `sign * metric` is always maximized.
+        # Runs last: it issues an LLM call that accumulates into the token
+        # counters above, so those must already exist.
+        self._metric_sign: int = self._detect_metric_sign(task_desc)
 
     def _detect_metric_sign(self, task_desc: str) -> int:
         """
