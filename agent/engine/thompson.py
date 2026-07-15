@@ -50,7 +50,9 @@ def stagnation_temperature(stagnation: int) -> float:
     return min(STAGNATION_T_MAX, 1.0 + STAGNATION_GAIN * (stagnation - STAGNATION_TRIGGER))
 
 
-def _collect_observations(graph: SearchGraph, node_ids: list[str]) -> tuple[list[int], list[float]]:
+def _collect_observations(
+    graph: SearchGraph, node_ids: list[str], metric_sign: int = 1
+) -> tuple[list[int], list[float]]:
     """
     Collect observations: each node's own metric plus its children's metrics.
 
@@ -58,9 +60,13 @@ def _collect_observations(graph: SearchGraph, node_ids: list[str]) -> tuple[list
     children yet, and without it the GP would have zero evidence at that point —
     the best node in the graph would look no more promising than an untried one.
 
+    Observations are multiplied by metric_sign (+1 higher-is-better, -1
+    lower-is-better) so that the downstream argmax over the posterior always
+    means "most promising parent" regardless of the competition's direction.
+
     Returns:
       obs_indices: which node each observation belongs to
-      obs_values: the observed metric values
+      obs_values: the observed (sign-oriented) metric values
     """
     obs_indices = []
     obs_values = []
@@ -69,16 +75,16 @@ def _collect_observations(graph: SearchGraph, node_ids: list[str]) -> tuple[list
         node = graph.attempts[nid]
         if node.metric is not None:
             obs_indices.append(i)
-            obs_values.append(node.metric)
+            obs_values.append(metric_sign * node.metric)
         for child in graph.get_children(nid):
             if child.metric is not None:
                 obs_indices.append(i)
-                obs_values.append(child.metric)
+                obs_values.append(metric_sign * child.metric)
 
     return obs_indices, obs_values
 
 
-def select_parent(graph: SearchGraph, stagnation: int = 0) -> str | None:
+def select_parent(graph: SearchGraph, stagnation: int = 0, metric_sign: int = 1) -> str | None:
     """
     Kernel Thompson Sampling via GP Regression.
 
@@ -92,6 +98,9 @@ def select_parent(graph: SearchGraph, stagnation: int = 0) -> str | None:
       stagnation: number of consecutive steps the global best has not improved.
         Drives the exploration temperature T (see stagnation_temperature). 0 =>
         T=1 => identical to the un-heated posterior sample.
+      metric_sign: +1 if higher metric is better, -1 if lower is better.
+        Observations are oriented by this sign so the final argmax targets the
+        genuinely best node on lower-is-better tasks (log-loss/RMSE/MAE).
     """
     if not graph.attempts:
         return None
@@ -103,7 +112,7 @@ def select_parent(graph: SearchGraph, stagnation: int = 0) -> str | None:
         return None
 
     K = graph.kernel_matrix
-    obs_indices, obs_values = _collect_observations(graph, node_ids)
+    obs_indices, obs_values = _collect_observations(graph, node_ids, metric_sign)
 
     # Exploration temperature: >1 only when the best has stagnated (see module top).
     T = stagnation_temperature(stagnation)

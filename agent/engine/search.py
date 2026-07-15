@@ -91,6 +91,15 @@ class GraphSearchEngine:
         self.graph = SearchGraph()
         self.executor = Executor(work_dir=work_dir, timeout=config.exec_timeout)
 
+        # Optimization direction of the competition metric. The agent prints the
+        # raw metric (e.g. log-loss, AUC, Jaccard) with no sign convention, so a
+        # single hard-coded `metric > best` silently optimizes the WRONG way on
+        # lower-is-better tasks (log-loss/RMSE/MAE). We resolve the direction
+        # once from the task description via the LLM and route every "is this
+        # better?" comparison through it. sign=+1 => higher is better,
+        # sign=-1 => lower is better, so `sign * metric` is always maximized.
+        self._metric_sign: int = self._detect_metric_sign(task_desc)
+
         self.best_attempt: Attempt | None = None
         self.best_metric: float | None = None
         self.start_time: float | None = None
@@ -104,6 +113,57 @@ class GraphSearchEngine:
         # stagnation-adaptive exploration temperature in Kernel TS.
         self._stagnation = 0
 
+    def _detect_metric_sign(self, task_desc: str) -> int:
+        """
+        Resolve the metric's optimization direction from the task description.
+
+        Returns +1 if a HIGHER metric is better (AUC, accuracy, F1, Jaccard,
+        kappa, ...), -1 if a LOWER metric is better (log-loss, RMSE, MAE,
+        error rate, ...). One cheap LLM call at startup, then cached for the
+        whole run; the direction is a fixed property of the competition.
+        Falls back to +1 (higher-is-better) if the description is empty or the
+        LLM answer can't be parsed — that matches the historical default.
+        """
+        if not task_desc or not task_desc.strip():
+            logger.warning("[metric-sign] empty task description; defaulting to higher-is-better (+1)")
+            return 1
+
+        system = (
+            "You are an expert ML competition analyst. Given a competition "
+            "description, determine whether the official evaluation metric is "
+            "one where a LOWER score is better (e.g. log loss, RMSE, MAE, "
+            "error rate) or a HIGHER score is better (e.g. AUC, accuracy, F1, "
+            "Jaccard, quadratic weighted kappa). Answer with EXACTLY one word: "
+            "LOWER or HIGHER. No explanation."
+        )
+        user = f"Competition description:\n\n{task_desc[:6000]}\n\nIs a LOWER or HIGHER metric better?"
+        try:
+            text, in_tok, out_tok = llm_query(system, user, model=self.config.model)
+            self.total_in_tokens += in_tok
+            self.total_out_tokens += out_tok
+            answer = text.strip().upper()
+            if "LOWER" in answer and "HIGHER" not in answer:
+                logger.info("[metric-sign] LOWER-is-better detected (sign=-1)")
+                return -1
+            if "HIGHER" in answer and "LOWER" not in answer:
+                logger.info("[metric-sign] HIGHER-is-better detected (sign=+1)")
+                return 1
+            logger.warning(f"[metric-sign] ambiguous LLM answer {answer!r}; defaulting to higher-is-better (+1)")
+            return 1
+        except Exception as exc:
+            logger.warning(f"[metric-sign] detection failed ({exc}); defaulting to higher-is-better (+1)")
+            return 1
+
+    def _is_better(self, metric: float | None, reference: float | None) -> bool:
+        """True if `metric` is strictly better than `reference` under the
+        competition's optimization direction. None metric is never better;
+        any real metric beats a None reference."""
+        if metric is None:
+            return False
+        if reference is None:
+            return True
+        return self._metric_sign * metric > self._metric_sign * reference
+
     def run(self) -> Path | None:
         """Run search loop. Returns path to best submission or None."""
         self.start_time = time.time()
@@ -115,8 +175,9 @@ class GraphSearchEngine:
                 logger.info(f"Time limit reached at step {step}")
                 break
 
-            # Thompson sampling selects parent (variance heated if best stagnant)
-            parent_id = select_parent(self.graph, self._stagnation)
+            # Thompson sampling selects parent (variance heated if best stagnant,
+            # observations oriented by the competition's metric direction)
+            parent_id = select_parent(self.graph, self._stagnation, self._metric_sign)
             parent = self.graph.attempts.get(parent_id) if parent_id else None
             logger.info(f"[Step {step}] parent={parent_id}, best={self.best_metric}, stagnation={self._stagnation}")
 
@@ -129,10 +190,8 @@ class GraphSearchEngine:
             self.graph.add_attempt(attempt)
 
             # Track best + maintain stagnation counter (drives TS exploration temp).
-            improved = (
-                attempt.metric is not None
-                and (self.best_metric is None or attempt.metric > self.best_metric)
-            )
+            # Direction-aware: _is_better respects the competition's metric sign.
+            improved = self._is_better(attempt.metric, self.best_metric)
             if improved:
                 self.best_metric = attempt.metric
                 self.best_attempt = attempt
@@ -428,7 +487,7 @@ Quality Requirements:
         while queue:
             node_id = queue.pop(0)
             for child in self.graph.get_children(node_id):
-                if child.metric is not None and (best is None or child.metric > best):
+                if self._is_better(child.metric, best):
                     best = child.metric
                 queue.append(child.id)
         return best
@@ -620,7 +679,8 @@ Quality Requirements:
             if a.metric is not None and self._submission_paths.get(a.id)
         ]
         scored = [(m, p) for m, p in scored if Path(p).exists()]
-        scored.sort(key=lambda t: t[0], reverse=True)
+        # Rank by the competition's direction so top-k are the genuinely best.
+        scored.sort(key=lambda t: self._metric_sign * t[0], reverse=True)
         top = scored[:k]
         if len(top) < 2:
             logger.info(f"Ensemble skipped: only {len(top)} scored submissions")
@@ -644,7 +704,14 @@ Quality Requirements:
                 return None
             df[pred_cols] = numeric
             frames.append(df.set_index(id_col))
-            weights.append(metric)
+            # Weight better submissions higher. For higher-is-better the metric
+            # itself is the weight (unchanged). For lower-is-better (log-loss/
+            # RMSE) a smaller metric is better, so weight by its inverse; fall
+            # back to equal weight if the metric is non-positive.
+            if self._metric_sign > 0:
+                weights.append(metric)
+            else:
+                weights.append(1.0 / metric if metric and metric > 0 else 1.0)
 
         base_index = frames[0].index
         if any(not f.index.equals(base_index) for f in frames[1:]):
@@ -717,6 +784,7 @@ Quality Requirements:
             "git_dirty": git["dirty"],
             "total_steps": len(self.graph.attempts),
             "best_metric": self.best_metric,
+            "metric_sign": self._metric_sign,
             "total_in_tokens": self.total_in_tokens,
             "total_out_tokens": self.total_out_tokens,
             "total_tokens": self.total_in_tokens + self.total_out_tokens,
