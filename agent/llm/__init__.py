@@ -37,7 +37,7 @@ def query(
     system_message: str,
     user_message: str,
     model: str | None = None,
-    temperature: float = 0.7,
+    temperature: float = 1.0,
 ) -> tuple[str, int, int]:
     """
     Call LLM and return (response_text, input_tokens, output_tokens).
