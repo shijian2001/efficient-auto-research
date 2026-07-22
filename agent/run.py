@@ -34,7 +34,7 @@ def main():
     parser.add_argument("--model", type=str, default=None)
     args = parser.parse_args()
 
-    model = args.model or "gpt-4o"
+    model = args.model or "gpt-5.5"
     data_dir = Path(args.data_dir).resolve()
     desc_file = Path(args.desc_file).resolve()
     output_path = Path(args.output).resolve()

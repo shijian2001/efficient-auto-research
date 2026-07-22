@@ -2,9 +2,12 @@
 Kernel Thompson Sampling for parent selection (GP Regression).
 
 GP Regression model:
-  1. Each node has a latent value f_i = expected metric of its children.
+  1. Each node has a latent value f_i = expected metric achievable from that node.
   2. Prior: f ~ N(0, K), where K_ij = cosine_sim(embedding_i, embedding_j).
-  3. Observation: y_ij = child_j's metric (continuous, observed when node i is selected as parent).
+  3. Observations: the node's own metric (direct evidence of the value at that
+     point in solution space) plus each child's metric (evidence of what
+     expanding from it yields). Without the self-observation a fresh
+     high-metric leaf has no observations at all, so TS keeps ignoring it.
   4. Posterior: exact closed-form (Gaussian prior + Gaussian likelihood = Gaussian posterior).
   5. Thompson Sampling: joint sample from posterior → argmax.
 
@@ -29,7 +32,11 @@ NOISE_VARIANCE = 0.01
 
 def _collect_observations(graph: SearchGraph, node_ids: list[str]) -> tuple[list[int], list[float]]:
     """
-    Collect observations: for each node, gather its children's metrics.
+    Collect observations: each node's own metric plus its children's metrics.
+
+    The self-observation is essential: a newly created high-metric node has no
+    children yet, and without it the GP would have zero evidence at that point —
+    the best node in the graph would look no more promising than an untried one.
 
     Returns:
       obs_indices: which node each observation belongs to
@@ -39,6 +46,10 @@ def _collect_observations(graph: SearchGraph, node_ids: list[str]) -> tuple[list
     obs_values = []
 
     for i, nid in enumerate(node_ids):
+        node = graph.attempts[nid]
+        if node.metric is not None:
+            obs_indices.append(i)
+            obs_values.append(node.metric)
         for child in graph.get_children(nid):
             if child.metric is not None:
                 obs_indices.append(i)

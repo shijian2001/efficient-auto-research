@@ -1,4 +1,9 @@
-"""LLM API: thin wrapper around OpenAI-compatible endpoints."""
+"""LLM API: thin wrapper around OpenAI-compatible endpoints.
+
+All provider-specific concerns (model rewriting, reasoning effort, retries
+against the upstream, timeouts, token usage logging) live in the local relay
+proxy (docker-eval/llm_relay_proxy.py). Point OPENAI_BASE_URL at the proxy.
+"""
 
 from __future__ import annotations
 
@@ -17,9 +22,13 @@ def get_client() -> OpenAI:
     """Get or create the OpenAI client (singleton)."""
     global _client
     if _client is None:
+        # High-effort reasoning calls can exceed the SDK default 600s read
+        # timeout; default to unlimited (the relay proxy owns upstream limits).
+        timeout_env = os.environ.get("LLM_CLIENT_TIMEOUT", "").strip()
         _client = OpenAI(
             api_key=os.environ.get("OPENAI_API_KEY", ""),
             base_url=os.environ.get("OPENAI_BASE_URL", "https://api.openai.com/v1"),
+            timeout=float(timeout_env) if timeout_env else None,
         )
     return _client
 
@@ -29,14 +38,14 @@ def query(
     user_message: str,
     model: str | None = None,
     temperature: float = 0.7,
-    max_tokens: int = 8192,
 ) -> tuple[str, int, int]:
     """
     Call LLM and return (response_text, input_tokens, output_tokens).
 
-    Retries up to 3 times on failure with exponential backoff.
+    Retries up to 3 times on failure with backoff. Upstream-level retries,
+    timeouts and token accounting are handled by the relay proxy.
     """
-    model = model or "gpt-4o"
+    model = model or "gpt-5.5"
     client = get_client()
 
     messages = []
@@ -50,7 +59,6 @@ def query(
                 model=model,
                 messages=messages,
                 temperature=temperature,
-                max_tokens=max_tokens,
             )
             text = resp.choices[0].message.content or ""
             usage = resp.usage
