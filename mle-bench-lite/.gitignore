@@ -1,0 +1,9 @@
+.venv/
+.uv-cache/
+.cache/
+tmp/
+results/*
+!results/.gitkeep
+logs/*.runtime.log
+__pycache__/
+*.pyc

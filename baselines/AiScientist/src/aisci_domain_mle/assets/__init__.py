@@ -1,0 +1,2 @@
+"""MLE prompt assets."""
+

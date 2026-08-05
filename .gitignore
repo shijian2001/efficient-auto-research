@@ -1,0 +1,91 @@
+# This repository is an integration tree. Nested upstream .git metadata is
+# intentionally not copied into the root repository.
+**/.git/
+
+# Local Python and UV environments/caches.
+**/.venv/
+**/.uv-cache/
+**/__pycache__/
+**/*.py[cod]
+**/.pytest_cache/
+**/.mypy_cache/
+**/.ruff_cache/
+**/.tox/
+**/.nox/
+**/.ipynb_checkpoints/
+**/*.egg-info/
+**/.coverage
+**/.coverage.*
+**/htmlcov/
+**/build/
+**/dist/
+
+# Local benchmark data and generated experiment trees.
+/mle-bench-data/
+/ear-worktrees/
+/experiment-campaigns/
+/cache/
+/run-logs/
+/analysis/
+/legacy/
+/mle-bench/runs/
+/mle-bench/cache/
+/mle-bench-lite/data
+/mle-bench-lite/source
+/mle-bench-lite/cache/
+/mle-bench-lite/logs/
+/mle-bench-lite/results/
+/mle-bench-lite/tmp/
+/terminal-bench-2/jobs/
+/terminal-bench-2/logs/
+/terminal-bench-2/results/
+/terminal-bench-2/home/
+
+# Agent and baseline runtime records.
+**/runs/
+**/docker_runs/
+**/run-logs/
+**/cache/
+**/logs/
+**/jobs/
+**/results/
+**/outputs/
+**/*token_usage*.jsonl
+**/*.log
+
+# Model weights, serialized training artifacts, and local databases.
+**/*.pt
+**/*.pth
+**/*.ckpt
+**/*.safetensors
+**/*.bin
+**/*.npy
+**/*.npz
+**/*.pkl
+**/*.pickle
+**/*.parquet
+**/*.arrow
+**/*.sqlite
+**/*.sqlite3
+**/*.db
+**/*.db-shm
+**/*.db-wal
+
+# Archives, installer images, and downloaded packages.
+**/*.zip
+**/*.tar
+**/*.tar.gz
+**/*.tgz
+**/*.7z
+**/*.iso
+**/*.squashfs
+**/*.whl
+
+# Credentials and machine-local configuration. Templates remain trackable.
+**/.env
+**/.env.*
+!**/.env.template
+**/*credentials*.json
+**/*secret*.json
+**/*.pem
+**/*.key

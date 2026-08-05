@@ -1,0 +1,2 @@
+"""Paper mode domain adapter."""
+

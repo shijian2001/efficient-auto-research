@@ -1,0 +1,232 @@
+{
+  "competitions": [
+    {
+      "archive": true,
+      "competition": "aerial-cactus-identification",
+      "directory": true,
+      "missing_required_dataset_files": [],
+      "prepared_bytes": 19359988,
+      "prepared_directory": true,
+      "prepared_file_count": 6,
+      "raw_directory": false
+    },
+    {
+      "archive": true,
+      "competition": "aptos2019-blindness-detection",
+      "directory": true,
+      "missing_required_dataset_files": [],
+      "prepared_bytes": 8603138569,
+      "prepared_directory": true,
+      "prepared_file_count": 3667,
+      "raw_directory": false
+    },
+    {
+      "archive": true,
+      "competition": "denoising-dirty-documents",
+      "directory": true,
+      "missing_required_dataset_files": [],
+      "prepared_bytes": 212069935,
+      "prepared_directory": true,
+      "prepared_file_count": 262,
+      "raw_directory": false
+    },
+    {
+      "archive": true,
+      "competition": "detecting-insults-in-social-commentary",
+      "directory": true,
+      "missing_required_dataset_files": [],
+      "prepared_bytes": 3228278,
+      "prepared_directory": true,
+      "prepared_file_count": 6,
+      "raw_directory": false
+    },
+    {
+      "archive": true,
+      "competition": "dog-breed-identification",
+      "directory": true,
+      "missing_required_dataset_files": [],
+      "prepared_bytes": 365032556,
+      "prepared_directory": true,
+      "prepared_file_count": 10226,
+      "raw_directory": false
+    },
+    {
+      "archive": true,
+      "competition": "dogs-vs-cats-redux-kernels-edition",
+      "directory": true,
+      "missing_required_dataset_files": [],
+      "prepared_bytes": 1141499406,
+      "prepared_directory": true,
+      "prepared_file_count": 25005,
+      "raw_directory": false
+    },
+    {
+      "archive": true,
+      "competition": "histopathologic-cancer-detection",
+      "directory": true,
+      "missing_required_dataset_files": [],
+      "prepared_bytes": 6157822887,
+      "prepared_directory": true,
+      "prepared_file_count": 220029,
+      "raw_directory": false
+    },
+    {
+      "archive": true,
+      "competition": "jigsaw-toxic-comment-classification-challenge",
+      "directory": true,
+      "missing_required_dataset_files": [],
+      "prepared_bytes": 139670081,
+      "prepared_directory": true,
+      "prepared_file_count": 5,
+      "raw_directory": true
+    },
+    {
+      "archive": true,
+      "competition": "leaf-classification",
+      "directory": true,
+      "missing_required_dataset_files": [],
+      "prepared_bytes": 28638887,
+      "prepared_directory": true,
+      "prepared_file_count": 995,
+      "raw_directory": false
+    },
+    {
+      "archive": true,
+      "competition": "mlsp-2013-birds",
+      "directory": true,
+      "missing_required_dataset_files": [],
+      "prepared_bytes": 661125431,
+      "prepared_directory": true,
+      "prepared_file_count": 1320,
+      "raw_directory": true
+    },
+    {
+      "archive": true,
+      "competition": "new-york-city-taxi-fare-prediction",
+      "directory": true,
+      "missing_required_dataset_files": [],
+      "prepared_bytes": 5664678894,
+      "prepared_directory": true,
+      "prepared_file_count": 6,
+      "raw_directory": false
+    },
+    {
+      "archive": true,
+      "competition": "nomad2018-predict-transparent-conductors",
+      "directory": true,
+      "missing_required_dataset_files": [],
+      "prepared_bytes": 10791684,
+      "prepared_directory": true,
+      "prepared_file_count": 2405,
+      "raw_directory": false
+    },
+    {
+      "archive": true,
+      "competition": "plant-pathology-2020-fgvc7",
+      "directory": true,
+      "missing_required_dataset_files": [],
+      "prepared_bytes": 401901785,
+      "prepared_directory": true,
+      "prepared_file_count": 1826,
+      "raw_directory": false
+    },
+    {
+      "archive": true,
+      "competition": "random-acts-of-pizza",
+      "directory": true,
+      "missing_required_dataset_files": [],
+      "prepared_bytes": 12749358,
+      "prepared_directory": true,
+      "prepared_file_count": 7,
+      "raw_directory": false
+    },
+    {
+      "archive": true,
+      "competition": "ranzcr-clip-catheter-line-classification",
+      "directory": true,
+      "missing_required_dataset_files": [],
+      "prepared_bytes": 6920272287,
+      "prepared_directory": true,
+      "prepared_file_count": 30088,
+      "raw_directory": false
+    },
+    {
+      "archive": true,
+      "competition": "siim-isic-melanoma-classification",
+      "directory": true,
+      "missing_required_dataset_files": [],
+      "prepared_bytes": 88694079049,
+      "prepared_directory": true,
+      "prepared_file_count": 66273,
+      "raw_directory": false
+    },
+    {
+      "archive": true,
+      "competition": "spooky-author-identification",
+      "directory": true,
+      "missing_required_dataset_files": [],
+      "prepared_bytes": 3355941,
+      "prepared_directory": true,
+      "prepared_file_count": 5,
+      "raw_directory": true
+    },
+    {
+      "archive": true,
+      "competition": "tabular-playground-series-dec-2021",
+      "directory": true,
+      "missing_required_dataset_files": [],
+      "prepared_bytes": 605851731,
+      "prepared_directory": true,
+      "prepared_file_count": 5,
+      "raw_directory": false
+    },
+    {
+      "archive": true,
+      "competition": "tabular-playground-series-may-2022",
+      "directory": true,
+      "missing_required_dataset_files": [],
+      "prepared_bytes": 355967466,
+      "prepared_directory": true,
+      "prepared_file_count": 6,
+      "raw_directory": false
+    },
+    {
+      "archive": true,
+      "competition": "text-normalization-challenge-english-language",
+      "directory": true,
+      "missing_required_dataset_files": [],
+      "prepared_bytes": 360331165,
+      "prepared_directory": true,
+      "prepared_file_count": 6,
+      "raw_directory": false
+    },
+    {
+      "archive": true,
+      "competition": "text-normalization-challenge-russian-language",
+      "directory": true,
+      "missing_required_dataset_files": [],
+      "prepared_bytes": 541915889,
+      "prepared_directory": true,
+      "prepared_file_count": 6,
+      "raw_directory": false
+    },
+    {
+      "archive": true,
+      "competition": "the-icml-2013-whale-challenge-right-whale-redux",
+      "directory": true,
+      "missing_required_dataset_files": [],
+      "prepared_bytes": 204620198,
+      "prepared_directory": true,
+      "prepared_file_count": 5,
+      "raw_directory": false
+    }
+  ],
+  "directory_count": 22,
+  "generated_at": "2026-08-05T13:15:18.166351+00:00",
+  "lite_task_count": 22,
+  "missing_directories": [],
+  "missing_or_empty_prepared": [],
+  "missing_required_dataset_files": {},
+  "prepared_nonempty_count": 22,
+  "required_files_complete_count": 22
+}

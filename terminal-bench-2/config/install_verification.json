@@ -1,0 +1,29 @@
+{
+  "checks": {
+    "dataset_maximum_gpus": 0,
+    "dataset_missing_required_files": 0,
+    "dataset_sha256": "12a9b01a33f980b7129187005d7046071614dc35a6e3eb92914f735e6bae723a",
+    "dataset_task_count": 89,
+    "docker_version": "27.4.1",
+    "harbor_version": "0.20.0",
+    "latest_successful_oracle": {
+      "finished_at": "2026-08-01T02:27:43.395378Z",
+      "result_path": "jobs/2026-08-01__10-26-31/openssl-selfsigned-cert__UfDWEWJ/result.json",
+      "reward": 1.0,
+      "task_name": "openssl-selfsigned-cert"
+    },
+    "python_version": "Python 3.12.13"
+  },
+  "generated_at": "2026-08-05T13:15:12.861844+00:00",
+  "installation_root": "/mnt/sdc/shijianwang/efficient-agent-research/terminal-bench-2",
+  "passed": {
+    "dataset_files_complete": true,
+    "dataset_has_89_tasks": true,
+    "dataset_requires_no_gpu": true,
+    "docker_available": true,
+    "harbor_0_20_0": true,
+    "oracle_smoke_passed": true,
+    "python_3_12": true
+  },
+  "status": "passed"
+}

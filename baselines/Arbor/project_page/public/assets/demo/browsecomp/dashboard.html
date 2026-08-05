@@ -1,0 +1,732 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>skill_20cycles — Research Dashboard</title>
+<style>
+:root {
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --text: #1e293b;
+  --text2: #475569;
+  --text3: #94a3b8;
+  --border: #e2e8f0;
+  --accent: #3b82f6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f172a;
+    --surface: #1e293b;
+    --text: #e2e8f0;
+    --text2: #94a3b8;
+    --text3: #64748b;
+    --border: #334155;
+    --accent: #60a5fa;
+  }
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  padding: 0;
+}
+.container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+.header {
+  background: linear-gradient(135deg, #1e40af 0%, #7c3aed 100%);
+  color: white;
+  padding: 32px 40px;
+  margin-bottom: 24px;
+  border-radius: 12px;
+}
+.header h1 { font-size: 28px; margin-bottom: 4px; font-weight: 700; }
+.header .subtitle { opacity: 0.85; font-size: 15px; }
+.header .meta-info { margin-top: 12px; font-size: 13px; opacity: 0.7; }
+.header .meta-info span { margin-right: 16px; }
+
+.section { margin-bottom: 28px; }
+.section-title {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 14px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.section-title::before {
+  content: '';
+  display: inline-block;
+  width: 4px;
+  height: 20px;
+  background: var(--accent);
+  border-radius: 2px;
+}
+
+/* Score cards */
+.cards { display: flex; gap: 16px; flex-wrap: wrap; }
+.score-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  flex: 1;
+  min-width: 200px;
+}
+.card-label { font-size: 14px; font-weight: 600; color: var(--text2); margin-bottom: 2px; }
+.card-sublabel { font-size: 12px; color: var(--text3); margin-bottom: 8px; }
+.card-row { display: flex; align-items: center; gap: 12px; margin: 8px 0; }
+.card-num-box { text-align: center; }
+.card-num-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.5px; }
+.card-num { font-size: 28px; font-weight: 700; color: var(--text); }
+.card-num-final { color: var(--accent); }
+.card-arrow { font-size: 24px; color: var(--text3); }
+.card-delta { font-size: 22px; font-weight: 700; text-align: center; }
+.card-stats { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.stat-badge {
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Chart */
+.chart-container {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  overflow-x: auto;
+}
+.chart-svg { width: 100%; height: auto; }
+
+/* Tree */
+.tree-container {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+}
+.tree-node {
+  margin: 4px 0 4px 12px;
+  border-radius: 6px;
+}
+.tree-node > .tree-node { margin-left: 20px; }
+.tree-summary {
+  padding: 8px 12px;
+  border-radius: 5px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 14px;
+  list-style: none;
+}
+.tree-summary::-webkit-details-marker { display: none; }
+.tree-summary::before {
+  content: '\25B6';
+  font-size: 10px;
+  color: var(--text3);
+  transition: transform 0.15s;
+}
+details[open] > .tree-summary::before { transform: rotate(90deg); }
+.tree-id { font-family: monospace; font-weight: 700; color: var(--accent); min-width: 40px; }
+.tree-score { font-weight: 700; font-size: 13px; }
+.tree-hyp-short { color: var(--text2); font-size: 13px; }
+.status-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: white;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.tree-detail {
+  padding: 12px 16px 12px 24px;
+  font-size: 13px;
+  color: var(--text2);
+  line-height: 1.7;
+}
+.tree-detail-hyp { margin-bottom: 8px; font-style: italic; }
+.tree-detail-section { margin-top: 8px; }
+.tree-detail-section strong { color: var(--text); }
+.tree-children { margin-left: 8px; }
+
+/* Table */
+.table-container {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow-x: auto;
+}
+.exp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.exp-table th {
+  padding: 10px 12px;
+  text-align: left;
+  background: var(--bg);
+  border-bottom: 2px solid var(--border);
+  font-weight: 600;
+  color: var(--text2);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.exp-table th:hover { color: var(--accent); }
+.exp-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.exp-table .rank { text-align: center; color: var(--text3); width: 40px; }
+.exp-table .nid { white-space: nowrap; }
+.exp-table .score-cell { white-space: nowrap; }
+.exp-table .delta-cell { white-space: nowrap; text-align: right; }
+.exp-table .hyp-cell { max-width: 280px; }
+.exp-table .insight-cell { max-width: 280px; color: var(--text2); }
+
+/* Insight block */
+.insight-block {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+}
+.insight-content {
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text2);
+}
+.insight-content strong { color: var(--text); }
+
+.empty { padding: 24px; text-align: center; color: var(--text3); }
+
+.footer {
+  text-align: center;
+  padding: 16px;
+  font-size: 12px;
+  color: var(--text3);
+}
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 2px solid var(--border);
+}
+.tab-btn {
+  padding: 8px 18px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text3);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: all 0.15s;
+}
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Filter buttons */
+.filters {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.filter-btn {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text2);
+}
+.filter-btn:hover, .filter-btn.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+@media print {
+  body { background: white; }
+  .header { break-inside: avoid; }
+  .tabs, .filter-btn { display: none; }
+  .tab-content { display: block !important; }
+  details { open: true; }
+  details[open] { break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <h1>skill_20cycles</h1>
+    <div class="subtitle">
+      browsecomp
+       &mdash; 10h06m30s
+      &mdash; 9 experiments, 1 merged
+    </div>
+    <div class="meta-info">
+      <span>CWD: /Users/eri/py_code/browsecomp</span><span>Git: main @ 8d9b176</span><span>Trunk: research/skill_20cycles/trunk</span><span>Config: research_config.yaml</span>
+    </div>
+  </div>
+
+  <!-- Score Cards -->
+  <div class="section">
+    <div class="cards">
+        <div class="score-card">
+          <div class="card-label">Test Set</div>
+          <div class="card-sublabel">Primary Metric</div>
+          <div class="card-row">
+            <div class="card-num-box">
+              <div class="card-num-label">Baseline</div>
+              <div class="card-num">32.7%</div>
+            </div>
+            <div class="card-arrow">&#8594;</div>
+            <div class="card-num-box">
+              <div class="card-num-label">Final</div>
+              <div class="card-num card-num-final">50.7%</div>
+            </div>
+          </div>
+          <div class="card-delta" style="color:#22c55e">+18.0%</div>
+        </div>
+
+        <div class="score-card">
+          <div class="card-label">Dev Set</div>
+          <div class="card-sublabel">Iteration</div>
+          <div class="card-row">
+            <div class="card-num-box">
+              <div class="card-num-label">Baseline</div>
+              <div class="card-num">50.0%</div>
+            </div>
+            <div class="card-arrow">&#8594;</div>
+            <div class="card-num-box">
+              <div class="card-num-label">Final</div>
+              <div class="card-num card-num-final">62.5%</div>
+            </div>
+          </div>
+          <div class="card-delta" style="color:#22c55e">+12.5%</div>
+        </div>
+
+    <div class="score-card">
+      <div class="card-label">Experiments</div>
+      <div class="card-stats">
+        <span class="stat-badge" style="background:#dbeafe;color:#3b82f6">done: 5</span><span class="stat-badge" style="background:#dcfce7;color:#22c55e">merged: 1</span><span class="stat-badge" style="background:#f3f4f6;color:#6b7280">pruned: 3</span>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- Tabs: Chart / Tree / Table -->
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('chart')">Score Chart</button>
+    <button class="tab-btn" onclick="switchTab('tree')">Idea Tree</button>
+    <button class="tab-btn" onclick="switchTab('table')">Experiment Table</button>
+  </div>
+
+  <div id="tab-chart" class="tab-content active">
+    <div class="section">
+      <div class="chart-container"><svg viewBox="0 0 660 328" class="chart-svg">
+<line x1="444" y1="0" x2="444" y2="328" stroke="#ef4444" stroke-dasharray="6,4" stroke-width="1.5" opacity="0.7"/><text x="444" y="324" fill="#ef4444" font-size="11" text-anchor="middle">Baseline 50.0%</text>
+<line x1="535" y1="0" x2="535" y2="328" stroke="#22c55e" stroke-dasharray="6,4" stroke-width="1.5" opacity="0.7"/><text x="535" y="324" fill="#22c55e" font-size="11" text-anchor="middle">Trunk 62.5%</text>
+<text x="72" y="23.599999999999998" fill="#555" font-size="12" text-anchor="end" font-family="monospace">5.4</text>
+<rect x="80" y="4" width="454.5" height="28" rx="4" fill="#22c55e" opacity="0.8"/>
+<text x="540.5454545454545" y="23.599999999999998" fill="#333" font-size="12" font-weight="600">62.5%</text>
+<text x="72" y="55.599999999999994" fill="#555" font-size="12" text-anchor="end" font-family="monospace">5.2</text>
+<rect x="80" y="36" width="418.2" height="28" rx="4" fill="#3b82f6" opacity="0.8"/>
+<text x="504.18181818181813" y="55.599999999999994" fill="#333" font-size="12" font-weight="600">57.5%</text>
+<text x="72" y="87.6" fill="#555" font-size="12" text-anchor="end" font-family="monospace">5</text>
+<rect x="80" y="68" width="400.0" height="28" rx="4" fill="#3b82f6" opacity="0.8"/>
+<text x="486.0" y="87.6" fill="#333" font-size="12" font-weight="600">55.0%</text>
+<text x="72" y="119.6" fill="#555" font-size="12" text-anchor="end" font-family="monospace">2</text>
+<rect x="80" y="100" width="381.8" height="28" rx="4" fill="#3b82f6" opacity="0.8"/>
+<text x="467.8181818181818" y="119.6" fill="#333" font-size="12" font-weight="600">52.5%</text>
+<text x="72" y="151.6" fill="#555" font-size="12" text-anchor="end" font-family="monospace">5.3</text>
+<rect x="80" y="132" width="381.8" height="28" rx="4" fill="#3b82f6" opacity="0.8"/>
+<text x="467.8181818181818" y="151.6" fill="#333" font-size="12" font-weight="600">52.5%</text>
+<text x="72" y="183.6" fill="#555" font-size="12" text-anchor="end" font-family="monospace">5.1</text>
+<rect x="80" y="164" width="345.5" height="28" rx="4" fill="#3b82f6" opacity="0.8"/>
+<text x="431.45454545454544" y="183.6" fill="#333" font-size="12" font-weight="600">47.5%</text>
+<text x="72" y="215.6" fill="#555" font-size="12" text-anchor="end" font-family="monospace">3</text>
+<rect x="80" y="196" width="327.3" height="28" rx="4" fill="#6b7280" opacity="0.8"/>
+<text x="413.27272727272725" y="215.6" fill="#333" font-size="12" font-weight="600">45.0%</text>
+<text x="72" y="247.6" fill="#555" font-size="12" text-anchor="end" font-family="monospace">1</text>
+<rect x="80" y="228" width="309.1" height="28" rx="4" fill="#6b7280" opacity="0.8"/>
+<text x="395.09090909090907" y="247.6" fill="#333" font-size="12" font-weight="600">42.5%</text>
+<text x="72" y="279.6" fill="#555" font-size="12" text-anchor="end" font-family="monospace">4</text>
+<rect x="80" y="260" width="181.8" height="28" rx="4" fill="#6b7280" opacity="0.8"/>
+<text x="267.8181818181818" y="279.6" fill="#333" font-size="12" font-weight="600">25.0%</text>
+</svg></div>
+    </div>
+  </div>
+
+  <div id="tab-tree" class="tab-content">
+    <div class="section">
+      <div class="filters">
+        <button class="filter-btn active" onclick="filterTree('all')">All</button>
+        <button class="filter-btn" onclick="filterTree('merged')">Merged</button>
+        <button class="filter-btn" onclick="filterTree('done')">Done</button>
+        <button class="filter-btn" onclick="filterTree('pending')">Pending</button>
+        <button class="filter-btn" onclick="filterTree('pruned')">Pruned</button>
+      </div>
+      <div class="tree-container" id="idea-tree">
+        <details class="tree-node" open style="border-left: 3px solid #3b82f6">
+          <summary class="tree-summary" style="background:#dbeafe">
+            <span class="tree-id">ROOT</span>
+            <span class="status-badge" style="background:#3b82f6">done</span>
+            
+            <span class="tree-hyp-short">Optimize BrowseComp search agent accuracy. The current pipeline is ...</span>
+          </summary>
+          <div class="tree-detail"><div class="tree-detail-hyp">Optimize BrowseComp search agent accuracy. The current pipeline is a minimal ReAct loop (single_agent_gpt.py, GPTAgent + SearchTool + VisitTool, GPT_SYSTEM_PROMPT in Gizmo/prompts/system_prompt.py). The evaluator (o3) runs on bc_val (40 questions) for B_dev iteration and bc_test (300 questions) for milestone verification — re-run the baseline yourself to establish the current B_dev score, do not assume any prior number. BrowseComp questions are adversarial multi-hop queries with 4–6 simultaneous constraints; the substring-match grader in run_eval.py accepts any answer string containing the gold (or vice versa). Do NOT modify run_eval.py or the data files.</div><div class="tree-detail-section"><strong>Insight:</strong><br># Global Research Insight: BrowseComp Agent Improvements<br><br>**The binding constraint is candidate retrieval coverage, not reasoning/judging sophistication.** Across all interventions, accuracy was bottlenecked by whether the correct entity ever entered the candidate pool — everything downstream is rearranging deck chairs.<br><br>**What didn&#x27;t work:**<br>- **Prompt-only self-correction** (structured belief tables, abstain gates): the model dresses up its first commitment without revising it (42.5%).<br>- **Same-model adversarial falsifiers**: shared failure modes reproduce trunk errors (52.5%).<br>- **Type-anchored enumeration via Wikipedia lists**: long-tail targets aren&#x27;t on list/category pages; empty plans waste budget (45%).<br>- **Question decomposition into independent sub-questions**: destroys the *conjunctive* disambiguation that makes BrowseComp answers findable (25%).<br>- **Persona-diversified ensembles**: stylistic constraints weaken individual agents; diversity ≠ coverage.<br><br>**What worked:**<br>- **Ensembling for coverage + a judge with its own tool budget and override authority**, gated by structural constraint-PASS checks (62.5%). This breaks the &quot;must pick one of N retrieved candidates&quot; ceiling on ~10% of questions.<br><br>**Actionable principle:** Spend compute on (a) more capable individual agents and (b) a tool-empowered, constraint-gated judge that can *exceed* the candidate set — not on prompt scaffolding, persona diversity, decomposition, or same-model critics.</div></div>
+          <div class="tree-children">
+        <details class="tree-node" open style="border-left: 3px solid #6b7280">
+          <summary class="tree-summary" style="background:#f3f4f6">
+            <span class="tree-id">1</span>
+            <span class="status-badge" style="background:#6b7280">pruned</span>
+            <span class="tree-score">42.5% <span style="color:#ef4444;font-size:12px">(-20.0)</span></span>
+            <span class="tree-hyp-short">Mechanism: Restructure the agent loop around an explicit constraint...</span>
+          </summary>
+          <div class="tree-detail"><div class="tree-detail-hyp">Mechanism: Restructure the agent loop around an explicit constraint checklist + multi-candidate beam — parse the question into an enumerated list of atomic constraints up-front; maintain ≥2 candidate answers as a structured belief state; after each tool round update a per-candidate × per-constraint pass/fail/unknown table; only finalize when one candidate has all constraints passed and no surviving alternative passes equally.
+Hypothesis: 9/20 baseline failures are confidently-wrong entities that satisfy 2-3 constraints; forcing the agent to evaluate ALL constraints against MULTIPLE candidates structurally prevents premature commitment (the bottleneck CLASS named in Q1).
+Observable: B_dev ≥ +10pp, with the qualitative shift that &quot;wrong-entity&quot; failures convert to either correct or &quot;no answer&quot; rather than confident-wrong (e.g. Tony Blair, Emma Stone, Lil Mosey style errors disappear).
+Conflicts: none — attacks an unexplored axis (no prior node).</div><div class="tree-detail-section"><strong>Insight:</strong><br>A prompt-only &#x27;structured belief state&#x27; is insufficient to overcome the model&#x27;s bias toward committing to the first plausible candidate—it just dresses up the same wrong commitment in a PASS/FAIL table. The per-turn table also eats into the token budget, reducing useful tool rounds. Enforcing the gate likely requires a separate judge model.<br>[Pruned: Prompt-only structured belief state regressed (-7.5pp); superseded by 5.4 ensemble.]</div><div class="tree-detail-section"><strong>Result:</strong> Restructured agent loop with constraint checklist + multi-candidate beam + finalize gate scored 42.5% (17/40) on B_dev, −7.5pp vs the 50% baseline; only 4/23 failures shifted to refusals while 19/23 remained confident wrong-entity answers.</div><div class="tree-detail-section"><strong>Branch:</strong> <code>research/skill_20cycles/1/mechanism-restructure-the-agent-loop-around-an-exp</code></div></div>
+          
+        </details>
+        <details class="tree-node" open style="border-left: 3px solid #3b82f6">
+          <summary class="tree-summary" style="background:#dbeafe">
+            <span class="tree-id">2</span>
+            <span class="status-badge" style="background:#3b82f6">done</span>
+            <span class="tree-score">52.5% <span style="color:#ef4444;font-size:12px">(-10.0)</span></span>
+            <span class="tree-hyp-short">Mechanism: Add a post-hoc adversarial falsification stage — once th...</span>
+          </summary>
+          <div class="tree-detail"><div class="tree-detail-hyp">Mechanism: Add a post-hoc adversarial falsification stage — once the main ReAct loop produces a tentative answer, spawn a &quot;Devil&#x27;s Advocate&quot; subroutine that (a) re-reads the question&#x27;s constraints, (b) explicitly searches for ALTERNATIVE candidate answers and for counter-evidence on each constraint of the current answer, (c) returns a verdict {confirm, replace-with-X, abstain}. If non-confirm, the loop re-enters investigation with the falsifier&#x27;s notes injected as context.
+Hypothesis: The trunk&#x27;s failure mode is overconfidence in the first plausible match; an adversarial pass operating with a contrary objective (find a better answer / break this one) breaks the confirmation-bias loop without trusting the same agent to second-guess itself.
+Observable: B_dev ≥ +10pp; specifically, cases where the baseline produced a confident wrong entity now either flip to correct or produce abstentions rather than confident-wrong predictions.
+Conflicts: none — attacks the verification axis with a separate-role agent, orthogonal to representation-level fixes (sibling 1).</div><div class="tree-detail-section"><strong>Insight:</strong><br>An adversarial falsifier using the same model and tools mostly confirms the original answer, since shared failure modes (unreachable evidence, same constraint-checking) reproduce the trunk&#x27;s conclusions. Breaking confirmation bias likely requires a different model/tool budget or a stricter abstain-default policy.</div><div class="tree-detail-section"><strong>Result:</strong> Falsifier stage achieved 52.5% (21/40) vs 50.0% baseline on B_dev — only +2.5pp, well below the +10pp target, with just one net-positive flip.</div><div class="tree-detail-section"><strong>Branch:</strong> <code>research/skill_20cycles/2/mechanism-add-a-post-hoc-adversarial-falsification</code></div></div>
+          
+        </details>
+        <details class="tree-node" open style="border-left: 3px solid #6b7280">
+          <summary class="tree-summary" style="background:#f3f4f6">
+            <span class="tree-id">3</span>
+            <span class="status-badge" style="background:#6b7280">pruned</span>
+            <span class="tree-score">45.0% <span style="color:#ef4444;font-size:12px">(-17.5)</span></span>
+            <span class="tree-hyp-short">Mechanism: Add a &quot;type-anchored enumeration&quot; retrieval stage — at t...</span>
+          </summary>
+          <div class="tree-detail"><div class="tree-detail-hyp">Mechanism: Add a &quot;type-anchored enumeration&quot; retrieval stage — at the start of each task, an enumerator LLM call extracts (entity_type, ≤2 hard discriminative constraints) from the question and issues list-style queries (&quot;list of &lt;type&gt; &lt;hard-filter&gt;&quot;, &quot;site:en.wikipedia.org intitle:list&quot;, category-page lookups). The returned page is parsed into a candidate-name population (≥10 names when possible) which is injected into the main ReAct agent&#x27;s context as &quot;Candidate population: [...]&quot;. The agent is instructed to sieve candidates against ALL constraints rather than guess.
+Hypothesis: ~half of baseline failures are long-tail entities (Sankomota, Ellison Bay, Morris Museum, Air City, Clare Wigfall, Ross Andel) that conjunctive keyword search never surfaces. Pre-fetching a candidate POPULATION via list/index pages converts the problem from open-ended search to closed-set filtering, where the agent&#x27;s verification ability is sufficient.
+Observable: B_dev ≥ +10pp; specifically, several gold answers from the obscure-entity wrong list (Sankomota, Ellison Bay, Morris Museum, Air City) flip to correct because they now appear in the candidate set.
+Conflicts: none — both prior siblings (1,2) attacked the verification axis; this attacks an unexplored retrieval-action-space axis. Counters root-insight requirement that interventions introduce asymmetry: the enumerator uses different query patterns than the trunk&#x27;s reformulation queries.</div><div class="tree-detail-section"><strong>Insight:</strong><br>Type-anchored enumeration fails when (1) Wikipedia list/category pages don&#x27;t actually contain the long-tail targets, and (2) o3 via Chat Completions frequently returns empty JSON plans, so half of questions skip retrieval entirely. The added latency/tokens on firing cases without recovering targeted entities reduced accuracy.<br>[Pruned: Type-anchored enumeration regressed (-5pp); superseded by 5.4.]</div><div class="tree-detail-section"><strong>Result:</strong> Enumerator produced candidate populations for only 12/40 questions; none contained the targeted obscure entities (Sankomota, Ellison Bay, Morris Museum, Air City, etc.). B_dev accuracy dropped from 50% (20/40) baseline to 45% (18/40).</div><div class="tree-detail-section"><strong>Branch:</strong> <code>research/skill_20cycles/3/mechanism-add-a-type-anchored-enumeration-retrieva</code></div></div>
+          
+        </details>
+        <details class="tree-node" open style="border-left: 3px solid #6b7280">
+          <summary class="tree-summary" style="background:#f3f4f6">
+            <span class="tree-id">4</span>
+            <span class="status-badge" style="background:#6b7280">pruned</span>
+            <span class="tree-score">25.0% <span style="color:#ef4444;font-size:12px">(-37.5)</span></span>
+            <span class="tree-hyp-short">Mechanism: Decompose-and-intersect orchestration — a planner LLM ca...</span>
+          </summary>
+          <div class="tree-detail"><div class="tree-detail-hyp">Mechanism: Decompose-and-intersect orchestration — a planner LLM call splits the question into K independent atomic sub-questions, each of which has a SET-valued answer (e.g. &quot;actresses born in cities whose flag has a legendary creature&quot;, &quot;stars of late-2010s American TV series&quot;). Spawn K parallel sub-agents, EACH with its own fresh context (no shared trajectory =&gt; no shared confirmation bias). Each sub-agent returns a list of ≥5 candidate answers. The orchestrator computes the set intersection; the singleton (or smallest) survivor is the final answer. If empty, relax the lowest-confidence sub-question and retry.
+Hypothesis: BrowseComp questions are conjunctions of atomic constraints; running them as ONE narrative biases the agent toward the first hypothesis that satisfies a few constraints. Solving each constraint INDEPENDENTLY in isolated contexts produces uncorrelated candidate lists; the intersection is forced to be the answer (analogy: SAT solver, constraint propagation).
+Observable: B_dev ≥ +10pp; qualitative shift = wrong-entity errors drop because no single sub-agent ever sees enough context to &quot;rationalize&quot; a wrong candidate, and intersection rejects partial matches.
+Conflicts: none on the orchestration axis. Counters node 2 (single sequential falsifier shared model bias) by enforcing cross-context isolation as the source of asymmetry root-insight requires; counters node 1 (in-context table = same model) by moving the structure into pipeline orchestration rather than prompting.</div><div class="tree-detail-section"><strong>Insight:</strong><br>Decomposing BrowseComp questions into independent set-valued sub-questions destroys the conjunctive disambiguation signal: individual constraints are often non-enumerable and match thousands of entities, so intersections are empty and the verifier picks wrong candidates. Cross-context isolation was achieved but harmful — joint constraints are what makes the answer findable.<br>[Pruned: Decompose-and-intersect destroyed conjunctive signal (-25pp); superseded by 5.4.]</div><div class="tree-detail-section"><strong>Result:</strong> Decompose-and-intersect orchestration scored 25% (10/40) on B_dev, halving the vanilla ReAct trunk baseline of 50% (20/40).</div><div class="tree-detail-section"><strong>Branch:</strong> <code>research/skill_20cycles/4/mechanism-decompose-and-intersect-orchestration-a</code></div></div>
+          
+        </details>
+        <details class="tree-node" open style="border-left: 3px solid #3b82f6">
+          <summary class="tree-summary" style="background:#dbeafe">
+            <span class="tree-id">5</span>
+            <span class="status-badge" style="background:#3b82f6">done</span>
+            <span class="tree-score">55.0% <span style="color:#ef4444;font-size:12px">(-7.5)</span></span>
+            <span class="tree-hyp-short">Mechanism: Cross-trajectory ensembling — run N=4 INDEPENDENT main R...</span>
+          </summary>
+          <div class="tree-detail"><div class="tree-detail-hyp">Mechanism: Cross-trajectory ensembling — run N=4 INDEPENDENT main ReAct agents in parallel on the same question (fresh context, fresh trajectory each), then a JUDGE LLM stage receives all N (answer, evidence-summary) tuples and selects the final answer using two structural signals: (a) cross-run AGREEMENT — answers that multiple agents converged to from different trajectories are weighted up; (b) constraint coverage — evidence cited explicitly satisfies more of the question&#x27;s atomic constraints. The judge is required to either pick one of the N answers OR pick &quot;abstain → re-run with cross-run notes&quot; (NOT free-form invent).
+Hypothesis: Self-correction inside one trajectory shares the model&#x27;s confirmation bias (root insight). N independent trajectories produce uncorrelated answer distributions; even when individual accuracy is 50%, agreement-of-2-out-of-4 strongly indicates correctness, and disagreement gives the judge a real signal. This converts the bias problem into an aggregation problem, which is solvable with a structural (not free-form) judge.
+Observable: B_dev ≥ +10pp; specifically, on questions where any individual run got the answer right, the ensemble should preserve it; the lift comes from N=4 sampling at least one correct trajectory more often than the trunk&#x27;s single shot.
+Conflicts: Counters node 2 (sequential same-context falsifier) by replacing self-critique with population-level aggregation — the asymmetry root-insight demanded comes from N independent contexts, not from a single second pass. Counters node 4 (decompose-and-intersect destroyed conjunctive signal) by keeping the FULL question intact in every sub-run — only aggregation differs.</div><div class="tree-detail-section"><strong>Insight:</strong><br>**Synthesis (Node 5: Cross-trajectory ensembling)**<br><br>Independent N=4 ensembling with a structural judge works, but the binding constraint is **candidate-set retrieval coverage**, not judge sophistication or trajectory diversity:<br><br>1. **Diversity via personas backfires (5.1):** Style-constrained agents waste budget on ill-fitting actions, weakening every candidate. BrowseComp&#x27;s ceiling is tool-reachability, not action-distribution variety — keep agents capable, not stylistically varied.<br><br>2. **Summary→evidence judge upgrade gives only marginal lift (5.2, 5.3):** When all 4 runs miss the entity, no amount of judge verification recovers it. Run-to-run variance (~±5pp) swamps small parser/prompt fixes on 40-Q dev.<br><br>3. **Judge override with its own tool budget is the real unlock (5.4, +62.5%):** Allowing the judge to *exceed* the candidate set, gated by constraint-PASS checks, fired on ~10% of questions and broke the correlated-failure ceiling. This validates that &quot;must pick one of N&quot; was the true bottleneck.<br><br>**Actionable takeaway:** Ensemble for *coverage*, not diversity. Invest compute in (a) more capable individual agents and (b) a tool-empowered judge with override authority + structural constraint gating — not in persona variation or prompt-only judges.</div><div class="tree-detail-section"><strong>Result:</strong> N=4 independent ReAct agents with an o3 structural judge scored 22/40 = 55% on B_dev, +5pp over the 50% trunk baseline but below the +10pp target, at ~4x wallclock.</div><div class="tree-detail-section"><strong>Branch:</strong> <code>research/skill_20cycles/5/mechanism-cross-trajectory-ensembling-run-n-4-inde</code></div></div>
+          <div class="tree-children">
+        <details class="tree-node"  style="border-left: 3px solid #3b82f6">
+          <summary class="tree-summary" style="background:#dbeafe">
+            <span class="tree-id">5.1</span>
+            <span class="status-badge" style="background:#3b82f6">done</span>
+            <span class="tree-score">47.5% <span style="color:#ef4444;font-size:12px">(-15.0)</span></span>
+            <span class="tree-hyp-short">Mechanism: Heterogeneous role-diversified ensemble — extend node 5&#x27;...</span>
+          </summary>
+          <div class="tree-detail"><div class="tree-detail-hyp">Mechanism: Heterogeneous role-diversified ensemble — extend node 5&#x27;s N-agent ensemble by giving each agent a DIFFERENT system-prompt persona that biases its action distribution toward a complementary search strategy. Concretely 4 personas: (R1) &quot;Type-anchored enumerator&quot; — first 3 turns must be list/category queries (Wikipedia lists, &quot;list of X&quot;, site:en.wikipedia.org intitle:list); (R2) &quot;Contradiction hunter&quot; — every search MUST include negative/exclusionary terms targeting the question&#x27;s most distinctive constraint; (R3) &quot;Document spelunker&quot; — prefer visit over search, exhaust each promising URL with deep reads + reference-following; (R4) &quot;Lateral re-phraser&quot; — required to issue queries in ≥2 languages and via paraphrases that drop the most popular keyword. Same judge stage as node 5 receives all 4 (answer, evidence) tuples.
+Hypothesis: Node 5&#x27;s +5pp ceiling is set by correlated cross-run failures: identical persona → identical search distribution → all 4 trajectories starve on the same long-tail evidence. Forcing structurally different action distributions raises the union-coverage probability; even if individual personas are slightly weaker, P(at least one persona surfaces the gold entity) rises sharply because their failure sets are uncorrelated by construction.
+Observable: B_dev ≥ +10pp over baseline (≥60%); qualitatively, gold entities currently unreachable for all 4 homogeneous runs (Sankomota, Ellison Bay, Morris Museum) appear in at least one persona&#x27;s evidence trace.
+Conflicts: Counters node 4 (decompose-and-intersect destroyed conjunctive signal) by keeping the FULL question intact in every persona — only the SEARCH POLICY is diversified, not the question. Counters node 3 (single-shot enumerator failed because Wikipedia coverage was thin) by combining the enumerator strategy with 3 alternative strategies so its failures are recoverable. Counters node 5&#x27;s correlation ceiling by introducing structural diversity rather than relying on temperature-driven variance.</div><div class="tree-detail-section"><strong>Insight:</strong><br>Diversifying ensemble agents via persona-specific search policies hurt rather than helped: constrained personas wasted budget on style-mandated actions ill-suited to many questions, producing individually weaker candidates that the judge couldn&#x27;t reliably filter. Confirms that BrowseComp&#x27;s ceiling is retrieval-tool reachability, not action-distribution diversity.</div><div class="tree-detail-section"><strong>Result:</strong> Heterogeneous 4-persona ensemble scored 47.5% (19/40), below the 50% trunk baseline and 7.5pp below node-5&#x27;s homogeneous 55% ensemble.</div><div class="tree-detail-section"><strong>Branch:</strong> <code>research/skill_20cycles/5.1/mechanism-heterogeneous-role-diversified-ensemble</code></div></div>
+          
+        </details>
+        <details class="tree-node"  style="border-left: 3px solid #3b82f6">
+          <summary class="tree-summary" style="background:#dbeafe">
+            <span class="tree-id">5.2</span>
+            <span class="status-badge" style="background:#3b82f6">done</span>
+            <span class="tree-score">57.5% <span style="color:#ef4444;font-size:12px">(-5.0)</span></span>
+            <span class="tree-hyp-short">Mechanism: Evidence-grounded judge with constraint cross-check — ke...</span>
+          </summary>
+          <div class="tree-detail"><div class="tree-detail-hyp">Mechanism: Evidence-grounded judge with constraint cross-check — keep node 5&#x27;s homogeneous N=4 ensemble, but upgrade the judge stage from &quot;summary-only&quot; to &quot;evidence-grounded with verification budget&quot;. The judge: (1) builds the atomic-constraint checklist, (2) for EACH candidate answer it has access to that run&#x27;s full tool-call trace AND can issue its own additional search/visit calls (capped at 8) to verify any UNKNOWN cells; (3) selects only the candidate with strictly highest verified-PASS count; ties → most-supported by independent verification, never by run-count plurality alone.
+Hypothesis: Node 5&#x27;s +5pp ceiling persists because the judge sees only short answer-summaries and falls back to plurality voting — when 3/4 runs converge on a confident-wrong entity (correlated failure), plurality picks wrong. Giving the judge its own verification tool budget breaks plurality dominance: it can independently check whether the disagreeing 4th candidate actually satisfies the rare/distinctive constraint that the plurality fails on.
+Observable: B_dev ≥ +10pp over baseline (≥60%); qualitatively, cases where the correct answer was the MINORITY vote among the 4 runs (i.e. only 1 run got it right, but it was right) now flip from wrong→correct because the judge can independently verify constraints that distinguish them.
+Conflicts: Sibling 5.1 attacks correlation by diversifying agent SEARCH POLICIES; this attacks the same root-insight-mandated asymmetry by giving the JUDGE asymmetric capability (its own tool budget, evidence access). Different lever on the same problem; both could be combined later.</div><div class="tree-detail-section"><strong>Insight:</strong><br>Evidence-grounded judge with its own tool budget gives only a small lift over summary-judge ensemble; the dominant ceiling is candidate-set retrieval (when all 4 runs miss the entity, no judge verification can recover it). A parsing bug where the judge outputs &#x27;Candidate N&#x27; literally also costs several percent.</div><div class="tree-detail-section"><strong>Result:</strong> 57.5% (23/40) on B_dev, +2.5pp over node 5 baseline (55%) and +7.5pp over trunk (50%), missing the ≥60% target.</div><div class="tree-detail-section"><strong>Branch:</strong> <code>research/skill_20cycles/5.2/mechanism-evidence-grounded-judge-with-constraint</code></div></div>
+          
+        </details>
+        <details class="tree-node"  style="border-left: 3px solid #3b82f6">
+          <summary class="tree-summary" style="background:#dbeafe">
+            <span class="tree-id">5.3</span>
+            <span class="status-badge" style="background:#3b82f6">done</span>
+            <span class="tree-score">52.5% <span style="color:#ef4444;font-size:12px">(-10.0)</span></span>
+            <span class="tree-hyp-short">Mechanism: Fix the judge-output extraction bug in node 5.2 — when t...</span>
+          </summary>
+          <div class="tree-detail"><div class="tree-detail-hyp">Mechanism: Fix the judge-output extraction bug in node 5.2 — when the judge agent emits &quot;FINAL_ANSWER: Candidate N&quot; instead of the verbatim text, parse with regex `Candidate\s*(\d+)` and look up that run&#x27;s prediction. Also tighten JUDGE_AGENT_PROMPT with an explicit example: &quot;WRONG: &#x27;FINAL_ANSWER: Candidate 2&#x27; / RIGHT: &#x27;FINAL_ANSWER: Sankomota&#x27;&quot;. Keep the rest of 5.2 (evidence-grounded judge with 8-tool budget) unchanged.
+Hypothesis: 5.2&#x27;s reported 57.5% score is artificially depressed by an output-format slip — the judge often selected the right candidate but referred to it by index, which then failed substring grading. Fixing the parser converts those silent successes into recorded successes (subagent estimated &quot;several percent&quot; lift), pushing 5.2 over the +10pp merge threshold.
+Observable: B_dev ≥ 60% (≥+10pp); failure-detail diff vs 5.2 should show questions previously graded wrong with prediction=&quot;Candidate N&quot; now graded correct with prediction=the actual candidate.
+Conflicts: none — directly fixes a defect in sibling 5.2 without changing the mechanism. Validated by 5.2&#x27;s own failure analysis.</div><div class="tree-detail-section"><strong>Insight:</strong><br>The parser fix was correctly applied but rarely triggered on this 40-question dev set — the judge mostly emitted verbatim text already, and the two extraction failures were empty-judge-text cases the fix can&#x27;t address. Run-to-run ensemble variance (~±5pp) dominates any small lift from the fix.</div><div class="tree-detail-section"><strong>Result:</strong> Achieved 52.5% (21/40) on dev, below node 5.2&#x27;s reported 57.5% and well below the +10pp merge threshold of 60%.</div><div class="tree-detail-section"><strong>Branch:</strong> <code>research/skill_20cycles/5.3/mechanism-fix-the-judge-output-extraction-bug-in-n</code></div></div>
+          
+        </details>
+        <details class="tree-node"  style="border-left: 3px solid #22c55e">
+          <summary class="tree-summary" style="background:#dcfce7">
+            <span class="tree-id">5.4</span>
+            <span class="status-badge" style="background:#22c55e">merged</span>
+            <span class="tree-score">62.5% <span style="color:#888;font-size:12px">(0.0)</span></span>
+            <span class="tree-hyp-short">Mechanism: Judge-with-override — extend 5.2&#x27;s evidence-grounded jud...</span>
+          </summary>
+          <div class="tree-detail"><div class="tree-detail-hyp">Mechanism: Judge-with-override — extend 5.2&#x27;s evidence-grounded judge so that, after independently verifying constraints for the N=4 candidates, if NO candidate has all constraints PASS the judge is permitted to keep searching/visiting (extended budget = 20 tool rounds) and emit a NEW candidate answer it discovered itself. The judge-agent is given explicit &quot;fresh answer&quot; authority with the requirement that its own answer must show ALL atomic constraints PASS in its trajectory before being emitted; otherwise it falls back to the highest-coverage existing candidate. Apply the verbatim-extraction fix from 5.3.
+Hypothesis: The current ensemble ceiling is set by the rule &quot;judge must pick from N=4 candidates&quot; (root insight: when all 4 runs miss the long-tail entity, no aggregation recovers). Allowing the judge to act as a fifth agent — armed with the question + the 4 failed candidates&#x27; constraint-failure analysis, which is asymmetric information none of the original agents had — opens the action space exactly when it&#x27;s needed (correlated-failure cases). This breaks the retrieval ceiling without adding a free-form invention path.
+Observable: B_dev ≥ 60% (≥+10pp); qualitatively, on questions where 5/5.2 returned a confident-wrong entity (e.g. Sankomota, Ellison Bay, Morris Museum cases), the judge&#x27;s override should emit the gold via its own search. Override-rate trace metric: how many questions where the judge produced a non-candidate answer.
+Conflicts: Counters root insight&#x27;s &quot;candidate-set retrieval ceiling&quot; claim — by adding the judge&#x27;s OWN tool budget and FREEDOM to emit non-candidate answers, we directly attack the retrieval ceiling (rather than working around it). Differs from 5.2: 5.2 forced &quot;must pick from candidates&quot;; this lifts that constraint precisely when it bites.</div><div class="tree-detail-section"><strong>Insight:</strong><br>Granting the judge override authority with its own tool budget and constraint-PASS gating breaks the candidate-set retrieval ceiling on correlated-failure cases. The override fired on 10% of questions and contributed meaningful net lift, supporting the hypothesis that &#x27;must pick from candidates&#x27; was the binding constraint.</div><div class="tree-detail-section"><strong>Result:</strong> B_dev accuracy reached 62.5% (25/40), +12.5pp over trunk baseline (50%) and +5pp over 5.2 (57.5%), meeting the ≥60% target. Judge override fired on 4/40 questions (10%).</div><div class="tree-detail-section"><strong>Branch:</strong> <code>research/skill_20cycles/5.4/mechanism-judge-with-override-extend-5-2-s-evidenc</code></div></div>
+          
+        </details></div>
+        </details></div>
+        </details></div>
+    </div>
+  </div>
+
+  <div id="tab-table" class="tab-content">
+    <div class="section">
+      <div class="table-container">
+    <table class="exp-table">
+      <thead>
+        <tr>
+          <th>#</th><th>Node</th><th>Score</th><th>Delta</th>
+          <th>Status</th><th>Hypothesis</th><th>Insight</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="background:#dcfce722">
+          <td class="rank">1</td>
+          <td class="nid"><code>5.4</code></td>
+          <td class="score-cell"><strong>62.5%</strong></td>
+          <td class="delta-cell"><span style="color:#888">0.0</span></td>
+          <td><span class="status-badge" style="background:#22c55e">merged</span></td>
+          <td class="hyp-cell" title="Mechanism: Judge-with-override — extend 5.2&#x27;s evidence-grounded judge so that, after independently verifying constraints for the N=4 candidates, if NO candidate has all constraints PASS the judge is permitted to keep searching/visiting (extended budget = 20 tool rounds) and emit a NEW candidate answer it discovered itself. The judge-agent is given explicit &quot;fresh answer&quot; authority with the requirement that its own answer must show ALL atomic constraints PASS in its trajectory before being emitted; otherwise it falls back to the highest-coverage existing candidate. Apply the verbatim-extraction fix from 5.3.
+Hypothesis: The current ensemble ceiling is set by the rule &quot;judge must pick from N=4 candidates&quot; (root insight: when all 4 runs miss the long-tail entity, no aggregation recovers). Allowing the judge to act as a fifth agent — armed with the question + the 4 failed candidates&#x27; constraint-failure analysis, which is asymmetric information none of the original agents had — opens the action space exactly when it&#x27;s needed (correlated-failure cases). This breaks the retrieval ceiling without adding a free-form invention path.
+Observable: B_dev ≥ 60% (≥+10pp); qualitatively, on questions where 5/5.2 returned a confident-wrong entity (e.g. Sankomota, Ellison Bay, Morris Museum cases), the judge&#x27;s override should emit the gold via its own search. Override-rate trace metric: how many questions where the judge produced a non-candidate answer.
+Conflicts: Counters root insight&#x27;s &quot;candidate-set retrieval ceiling&quot; claim — by adding the judge&#x27;s OWN tool budget and FREEDOM to emit non-candidate answers, we directly attack the retrieval ceiling (rather than working around it). Differs from 5.2: 5.2 forced &quot;must pick from candidates&quot;; this lifts that constraint precisely when it bites.">Mechanism: Judge-with-override — extend 5.2&#x27;s evidence-gr...</td>
+          <td class="insight-cell" title="Granting the judge override authority with its own tool budget and constraint-PASS gating breaks the candidate-set retrieval ceiling on correlated-failure cases. The override fired on 10% of questions and contributed meaningful net lift, supporting the hypothesis that &#x27;must pick from candidates&#x27; was the binding constraint.">Granting the judge override authority with its own tool b...</td>
+        </tr>
+        <tr style="background:#dbeafe22">
+          <td class="rank">2</td>
+          <td class="nid"><code>5.2</code></td>
+          <td class="score-cell"><strong>57.5%</strong></td>
+          <td class="delta-cell"><span style="color:#ef4444">-5.0</span></td>
+          <td><span class="status-badge" style="background:#3b82f6">done</span></td>
+          <td class="hyp-cell" title="Mechanism: Evidence-grounded judge with constraint cross-check — keep node 5&#x27;s homogeneous N=4 ensemble, but upgrade the judge stage from &quot;summary-only&quot; to &quot;evidence-grounded with verification budget&quot;. The judge: (1) builds the atomic-constraint checklist, (2) for EACH candidate answer it has access to that run&#x27;s full tool-call trace AND can issue its own additional search/visit calls (capped at 8) to verify any UNKNOWN cells; (3) selects only the candidate with strictly highest verified-PASS count; ties → most-supported by independent verification, never by run-count plurality alone.
+Hypothesis: Node 5&#x27;s +5pp ceiling persists because the judge sees only short answer-summaries and falls back to plurality voting — when 3/4 runs converge on a confident-wrong entity (correlated failure), plurality picks wrong. Giving the judge its own verification tool budget breaks plurality dominance: it can independently check whether the disagreeing 4th candidate actually satisfies the rare/distinctive constraint that the plurality fails on.
+Observable: B_dev ≥ +10pp over baseline (≥60%); qualitatively, cases where the correct answer was the MINORITY vote among the 4 runs (i.e. only 1 run got it right, but it was right) now flip from wrong→correct because the judge can independently verify constraints that distinguish them.
+Conflicts: Sibling 5.1 attacks correlation by diversifying agent SEARCH POLICIES; this attacks the same root-insight-mandated asymmetry by giving the JUDGE asymmetric capability (its own tool budget, evidence access). Different lever on the same problem; both could be combined later.">Mechanism: Evidence-grounded judge with constraint cross-...</td>
+          <td class="insight-cell" title="Evidence-grounded judge with its own tool budget gives only a small lift over summary-judge ensemble; the dominant ceiling is candidate-set retrieval (when all 4 runs miss the entity, no judge verification can recover it). A parsing bug where the judge outputs &#x27;Candidate N&#x27; literally also costs several percent.">Evidence-grounded judge with its own tool budget gives on...</td>
+        </tr>
+        <tr style="background:#dbeafe22">
+          <td class="rank">3</td>
+          <td class="nid"><code>5</code></td>
+          <td class="score-cell"><strong>55.0%</strong></td>
+          <td class="delta-cell"><span style="color:#ef4444">-7.5</span></td>
+          <td><span class="status-badge" style="background:#3b82f6">done</span></td>
+          <td class="hyp-cell" title="Mechanism: Cross-trajectory ensembling — run N=4 INDEPENDENT main ReAct agents in parallel on the same question (fresh context, fresh trajectory each), then a JUDGE LLM stage receives all N (answer, evidence-summary) tuples and selects the final answer using two structural signals: (a) cross-run AGREEMENT — answers that multiple agents converged to from different trajectories are weighted up; (b) constraint coverage — evidence cited explicitly satisfies more of the question&#x27;s atomic constraints. The judge is required to either pick one of the N answers OR pick &quot;abstain → re-run with cross-run notes&quot; (NOT free-form invent).
+Hypothesis: Self-correction inside one trajectory shares the model&#x27;s confirmation bias (root insight). N independent trajectories produce uncorrelated answer distributions; even when individual accuracy is 50%, agreement-of-2-out-of-4 strongly indicates correctness, and disagreement gives the judge a real signal. This converts the bias problem into an aggregation problem, which is solvable with a structural (not free-form) judge.
+Observable: B_dev ≥ +10pp; specifically, on questions where any individual run got the answer right, the ensemble should preserve it; the lift comes from N=4 sampling at least one correct trajectory more often than the trunk&#x27;s single shot.
+Conflicts: Counters node 2 (sequential same-context falsifier) by replacing self-critique with population-level aggregation — the asymmetry root-insight demanded comes from N independent contexts, not from a single second pass. Counters node 4 (decompose-and-intersect destroyed conjunctive signal) by keeping the FULL question intact in every sub-run — only aggregation differs.">Mechanism: Cross-trajectory ensembling — run N=4 INDEPEND...</td>
+          <td class="insight-cell" title="**Synthesis (Node 5: Cross-trajectory ensembling)**
+
+Independent N=4 ensembling with a structural judge works, but the binding constraint is **candidate-set retrieval coverage**, not judge sophistication or trajectory diversity:
+
+1. **Diversity via personas backfires (5.1):** Style-constrained agents waste budget on ill-fitting actions, weakening every candidate. BrowseComp&#x27;s ceiling is tool-reachability, not action-distribution variety — keep agents capable, not stylistically varied.
+
+2. **Summary→evidence judge upgrade gives only marginal lift (5.2, 5.3):** When all 4 runs miss the entity, no amount of judge verification recovers it. Run-to-run variance (~±5pp) swamps small parser/prompt fixes on 40-Q dev.
+
+3. **Judge override with its own tool budget is the real unlock (5.4, +62.5%):** Allowing the judge to *exceed* the candidate set, gated by constraint-PASS checks, fired on ~10% of questions and broke the correlated-failure ceiling. This validates that &quot;must pick one of N&quot; was the true bottleneck.
+
+**Actionable takeaway:** Ensemble for *coverage*, not diversity. Invest compute in (a) more capable individual agents and (b) a tool-empowered judge with override authority + structural constraint gating — not in persona variation or prompt-only judges.">**Synthesis (Node 5: Cross-trajectory ensembling)**  Inde...</td>
+        </tr>
+        <tr style="background:#dbeafe22">
+          <td class="rank">4</td>
+          <td class="nid"><code>2</code></td>
+          <td class="score-cell"><strong>52.5%</strong></td>
+          <td class="delta-cell"><span style="color:#ef4444">-10.0</span></td>
+          <td><span class="status-badge" style="background:#3b82f6">done</span></td>
+          <td class="hyp-cell" title="Mechanism: Add a post-hoc adversarial falsification stage — once the main ReAct loop produces a tentative answer, spawn a &quot;Devil&#x27;s Advocate&quot; subroutine that (a) re-reads the question&#x27;s constraints, (b) explicitly searches for ALTERNATIVE candidate answers and for counter-evidence on each constraint of the current answer, (c) returns a verdict {confirm, replace-with-X, abstain}. If non-confirm, the loop re-enters investigation with the falsifier&#x27;s notes injected as context.
+Hypothesis: The trunk&#x27;s failure mode is overconfidence in the first plausible match; an adversarial pass operating with a contrary objective (find a better answer / break this one) breaks the confirmation-bias loop without trusting the same agent to second-guess itself.
+Observable: B_dev ≥ +10pp; specifically, cases where the baseline produced a confident wrong entity now either flip to correct or produce abstentions rather than confident-wrong predictions.
+Conflicts: none — attacks the verification axis with a separate-role agent, orthogonal to representation-level fixes (sibling 1).">Mechanism: Add a post-hoc adversarial falsification stage...</td>
+          <td class="insight-cell" title="An adversarial falsifier using the same model and tools mostly confirms the original answer, since shared failure modes (unreachable evidence, same constraint-checking) reproduce the trunk&#x27;s conclusions. Breaking confirmation bias likely requires a different model/tool budget or a stricter abstain-default policy.">An adversarial falsifier using the same model and tools m...</td>
+        </tr>
+        <tr style="background:#dbeafe22">
+          <td class="rank">5</td>
+          <td class="nid"><code>5.3</code></td>
+          <td class="score-cell"><strong>52.5%</strong></td>
+          <td class="delta-cell"><span style="color:#ef4444">-10.0</span></td>
+          <td><span class="status-badge" style="background:#3b82f6">done</span></td>
+          <td class="hyp-cell" title="Mechanism: Fix the judge-output extraction bug in node 5.2 — when the judge agent emits &quot;FINAL_ANSWER: Candidate N&quot; instead of the verbatim text, parse with regex `Candidate\s*(\d+)` and look up that run&#x27;s prediction. Also tighten JUDGE_AGENT_PROMPT with an explicit example: &quot;WRONG: &#x27;FINAL_ANSWER: Candidate 2&#x27; / RIGHT: &#x27;FINAL_ANSWER: Sankomota&#x27;&quot;. Keep the rest of 5.2 (evidence-grounded judge with 8-tool budget) unchanged.
+Hypothesis: 5.2&#x27;s reported 57.5% score is artificially depressed by an output-format slip — the judge often selected the right candidate but referred to it by index, which then failed substring grading. Fixing the parser converts those silent successes into recorded successes (subagent estimated &quot;several percent&quot; lift), pushing 5.2 over the +10pp merge threshold.
+Observable: B_dev ≥ 60% (≥+10pp); failure-detail diff vs 5.2 should show questions previously graded wrong with prediction=&quot;Candidate N&quot; now graded correct with prediction=the actual candidate.
+Conflicts: none — directly fixes a defect in sibling 5.2 without changing the mechanism. Validated by 5.2&#x27;s own failure analysis.">Mechanism: Fix the judge-output extraction bug in node 5....</td>
+          <td class="insight-cell" title="The parser fix was correctly applied but rarely triggered on this 40-question dev set — the judge mostly emitted verbatim text already, and the two extraction failures were empty-judge-text cases the fix can&#x27;t address. Run-to-run ensemble variance (~±5pp) dominates any small lift from the fix.">The parser fix was correctly applied but rarely triggered...</td>
+        </tr>
+        <tr style="background:#dbeafe22">
+          <td class="rank">6</td>
+          <td class="nid"><code>5.1</code></td>
+          <td class="score-cell"><strong>47.5%</strong></td>
+          <td class="delta-cell"><span style="color:#ef4444">-15.0</span></td>
+          <td><span class="status-badge" style="background:#3b82f6">done</span></td>
+          <td class="hyp-cell" title="Mechanism: Heterogeneous role-diversified ensemble — extend node 5&#x27;s N-agent ensemble by giving each agent a DIFFERENT system-prompt persona that biases its action distribution toward a complementary search strategy. Concretely 4 personas: (R1) &quot;Type-anchored enumerator&quot; — first 3 turns must be list/category queries (Wikipedia lists, &quot;list of X&quot;, site:en.wikipedia.org intitle:list); (R2) &quot;Contradiction hunter&quot; — every search MUST include negative/exclusionary terms targeting the question&#x27;s most distinctive constraint; (R3) &quot;Document spelunker&quot; — prefer visit over search, exhaust each promising URL with deep reads + reference-following; (R4) &quot;Lateral re-phraser&quot; — required to issue queries in ≥2 languages and via paraphrases that drop the most popular keyword. Same judge stage as node 5 receives all 4 (answer, evidence) tuples.
+Hypothesis: Node 5&#x27;s +5pp ceiling is set by correlated cross-run failures: identical persona → identical search distribution → all 4 trajectories starve on the same long-tail evidence. Forcing structurally different action distributions raises the union-coverage probability; even if individual personas are slightly weaker, P(at least one persona surfaces the gold entity) rises sharply because their failure sets are uncorrelated by construction.
+Observable: B_dev ≥ +10pp over baseline (≥60%); qualitatively, gold entities currently unreachable for all 4 homogeneous runs (Sankomota, Ellison Bay, Morris Museum) appear in at least one persona&#x27;s evidence trace.
+Conflicts: Counters node 4 (decompose-and-intersect destroyed conjunctive signal) by keeping the FULL question intact in every persona — only the SEARCH POLICY is diversified, not the question. Counters node 3 (single-shot enumerator failed because Wikipedia coverage was thin) by combining the enumerator strategy with 3 alternative strategies so its failures are recoverable. Counters node 5&#x27;s correlation ceiling by introducing structural diversity rather than relying on temperature-driven variance.">Mechanism: Heterogeneous role-diversified ensemble — exte...</td>
+          <td class="insight-cell" title="Diversifying ensemble agents via persona-specific search policies hurt rather than helped: constrained personas wasted budget on style-mandated actions ill-suited to many questions, producing individually weaker candidates that the judge couldn&#x27;t reliably filter. Confirms that BrowseComp&#x27;s ceiling is retrieval-tool reachability, not action-distribution diversity.">Diversifying ensemble agents via persona-specific search ...</td>
+        </tr>
+        <tr style="background:#f3f4f622">
+          <td class="rank">7</td>
+          <td class="nid"><code>3</code></td>
+          <td class="score-cell"><strong>45.0%</strong></td>
+          <td class="delta-cell"><span style="color:#ef4444">-17.5</span></td>
+          <td><span class="status-badge" style="background:#6b7280">pruned</span></td>
+          <td class="hyp-cell" title="Mechanism: Add a &quot;type-anchored enumeration&quot; retrieval stage — at the start of each task, an enumerator LLM call extracts (entity_type, ≤2 hard discriminative constraints) from the question and issues list-style queries (&quot;list of &lt;type&gt; &lt;hard-filter&gt;&quot;, &quot;site:en.wikipedia.org intitle:list&quot;, category-page lookups). The returned page is parsed into a candidate-name population (≥10 names when possible) which is injected into the main ReAct agent&#x27;s context as &quot;Candidate population: [...]&quot;. The agent is instructed to sieve candidates against ALL constraints rather than guess.
+Hypothesis: ~half of baseline failures are long-tail entities (Sankomota, Ellison Bay, Morris Museum, Air City, Clare Wigfall, Ross Andel) that conjunctive keyword search never surfaces. Pre-fetching a candidate POPULATION via list/index pages converts the problem from open-ended search to closed-set filtering, where the agent&#x27;s verification ability is sufficient.
+Observable: B_dev ≥ +10pp; specifically, several gold answers from the obscure-entity wrong list (Sankomota, Ellison Bay, Morris Museum, Air City) flip to correct because they now appear in the candidate set.
+Conflicts: none — both prior siblings (1,2) attacked the verification axis; this attacks an unexplored retrieval-action-space axis. Counters root-insight requirement that interventions introduce asymmetry: the enumerator uses different query patterns than the trunk&#x27;s reformulation queries.">Mechanism: Add a &quot;type-anchored enumeration&quot; retrieval st...</td>
+          <td class="insight-cell" title="Type-anchored enumeration fails when (1) Wikipedia list/category pages don&#x27;t actually contain the long-tail targets, and (2) o3 via Chat Completions frequently returns empty JSON plans, so half of questions skip retrieval entirely. The added latency/tokens on firing cases without recovering targeted entities reduced accuracy.
+[Pruned: Type-anchored enumeration regressed (-5pp); superseded by 5.4.]">Type-anchored enumeration fails when (1) Wikipedia list/c...</td>
+        </tr>
+        <tr style="background:#f3f4f622">
+          <td class="rank">8</td>
+          <td class="nid"><code>1</code></td>
+          <td class="score-cell"><strong>42.5%</strong></td>
+          <td class="delta-cell"><span style="color:#ef4444">-20.0</span></td>
+          <td><span class="status-badge" style="background:#6b7280">pruned</span></td>
+          <td class="hyp-cell" title="Mechanism: Restructure the agent loop around an explicit constraint checklist + multi-candidate beam — parse the question into an enumerated list of atomic constraints up-front; maintain ≥2 candidate answers as a structured belief state; after each tool round update a per-candidate × per-constraint pass/fail/unknown table; only finalize when one candidate has all constraints passed and no surviving alternative passes equally.
+Hypothesis: 9/20 baseline failures are confidently-wrong entities that satisfy 2-3 constraints; forcing the agent to evaluate ALL constraints against MULTIPLE candidates structurally prevents premature commitment (the bottleneck CLASS named in Q1).
+Observable: B_dev ≥ +10pp, with the qualitative shift that &quot;wrong-entity&quot; failures convert to either correct or &quot;no answer&quot; rather than confident-wrong (e.g. Tony Blair, Emma Stone, Lil Mosey style errors disappear).
+Conflicts: none — attacks an unexplored axis (no prior node).">Mechanism: Restructure the agent loop around an explicit ...</td>
+          <td class="insight-cell" title="A prompt-only &#x27;structured belief state&#x27; is insufficient to overcome the model&#x27;s bias toward committing to the first plausible candidate—it just dresses up the same wrong commitment in a PASS/FAIL table. The per-turn table also eats into the token budget, reducing useful tool rounds. Enforcing the gate likely requires a separate judge model.
+[Pruned: Prompt-only structured belief state regressed (-7.5pp); superseded by 5.4 ensemble.]">A prompt-only &#x27;structured belief state&#x27; is insufficient t...</td>
+        </tr>
+        <tr style="background:#f3f4f622">
+          <td class="rank">9</td>
+          <td class="nid"><code>4</code></td>
+          <td class="score-cell"><strong>25.0%</strong></td>
+          <td class="delta-cell"><span style="color:#ef4444">-37.5</span></td>
+          <td><span class="status-badge" style="background:#6b7280">pruned</span></td>
+          <td class="hyp-cell" title="Mechanism: Decompose-and-intersect orchestration — a planner LLM call splits the question into K independent atomic sub-questions, each of which has a SET-valued answer (e.g. &quot;actresses born in cities whose flag has a legendary creature&quot;, &quot;stars of late-2010s American TV series&quot;). Spawn K parallel sub-agents, EACH with its own fresh context (no shared trajectory =&gt; no shared confirmation bias). Each sub-agent returns a list of ≥5 candidate answers. The orchestrator computes the set intersection; the singleton (or smallest) survivor is the final answer. If empty, relax the lowest-confidence sub-question and retry.
+Hypothesis: BrowseComp questions are conjunctions of atomic constraints; running them as ONE narrative biases the agent toward the first hypothesis that satisfies a few constraints. Solving each constraint INDEPENDENTLY in isolated contexts produces uncorrelated candidate lists; the intersection is forced to be the answer (analogy: SAT solver, constraint propagation).
+Observable: B_dev ≥ +10pp; qualitative shift = wrong-entity errors drop because no single sub-agent ever sees enough context to &quot;rationalize&quot; a wrong candidate, and intersection rejects partial matches.
+Conflicts: none on the orchestration axis. Counters node 2 (single sequential falsifier shared model bias) by enforcing cross-context isolation as the source of asymmetry root-insight requires; counters node 1 (in-context table = same model) by moving the structure into pipeline orchestration rather than prompting.">Mechanism: Decompose-and-intersect orchestration — a plan...</td>
+          <td class="insight-cell" title="Decomposing BrowseComp questions into independent set-valued sub-questions destroys the conjunctive disambiguation signal: individual constraints are often non-enumerable and match thousands of entities, so intersections are empty and the verifier picks wrong candidates. Cross-context isolation was achieved but harmful — joint constraints are what makes the answer findable.
+[Pruned: Decompose-and-intersect destroyed conjunctive signal (-25pp); superseded by 5.4.]">Decomposing BrowseComp questions into independent set-val...</td>
+        </tr></tbody>
+    </table></div>
+    </div>
+  </div>
+
+  <!-- Global Insights -->
+  
+  <div class="section">
+    <div class="section-title">Global Research Insights</div>
+    <div class="insight-block"><div class="insight-content"># Global Research Insight: BrowseComp Agent Improvements<br><br>**The binding constraint is candidate retrieval coverage, not reasoning/judging sophistication.** Across all interventions, accuracy was bottlenecked by whether the correct entity ever entered the candidate pool — everything downstream is rearranging deck chairs.<br><br>**What didn&#x27;t work:**<br>- **Prompt-only self-correction** (structured belief tables, abstain gates): the model dresses up its first commitment without revising it (42.5%).<br>- **Same-model adversarial falsifiers**: shared failure modes reproduce trunk errors (52.5%).<br>- **Type-anchored enumeration via Wikipedia lists**: long-tail targets aren&#x27;t on list/category pages; empty plans waste budget (45%).<br>- **Question decomposition into independent sub-questions**: destroys the *conjunctive* disambiguation that makes BrowseComp answers findable (25%).<br>- **Persona-diversified ensembles**: stylistic constraints weaken individual agents; diversity ≠ coverage.<br><br>**What worked:**<br>- **Ensembling for coverage + a judge with its own tool budget and override authority**, gated by structural constraint-PASS checks (62.5%). This breaks the &quot;must pick one of N retrieved candidates&quot; ceiling on ~10% of questions.<br><br>**Actionable principle:** Spend compute on (a) more capable individual agents and (b) a tool-empowered, constraint-gated judge that can *exceed* the candidate set — not on prompt scaffolding, persona diversity, decomposition, or same-model critics.</div></div>
+  </div>
+  
+
+  <div class="footer">
+    Generated by Research Agent &mdash; 2026-04-27
+  </div>
+</div>
+
+<script>
+function switchTab(name) {
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  event.target.classList.add('active');
+}
+
+function filterTree(status) {
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  document.querySelectorAll('.tree-node').forEach(node => {
+    if (status === 'all') {
+      node.style.display = '';
+      return;
+    }
+    const badge = node.querySelector(':scope > .tree-summary .status-badge');
+    if (badge && badge.textContent.trim().toLowerCase() === status) {
+      node.style.display = '';
+      // Also show all ancestors
+      let parent = node.parentElement;
+      while (parent) {
+        if (parent.classList && parent.classList.contains('tree-node')) {
+          parent.style.display = '';
+          parent.open = true;
+        }
+        parent = parent.parentElement;
+      }
+    } else {
+      node.style.display = 'none';
+    }
+  });
+}
+
+// Make table sortable
+document.querySelectorAll('.exp-table th').forEach((th, idx) => {
+  th.addEventListener('click', () => {
+    const table = th.closest('table');
+    const tbody = table.querySelector('tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    const dir = th.dataset.sortDir === 'asc' ? 'desc' : 'asc';
+    th.dataset.sortDir = dir;
+
+    rows.sort((a, b) => {
+      let av = a.cells[idx].textContent.trim();
+      let bv = b.cells[idx].textContent.trim();
+      const an = parseFloat(av.replace('%',''));
+      const bn = parseFloat(bv.replace('%',''));
+      if (!isNaN(an) && !isNaN(bn)) {
+        return dir === 'asc' ? an - bn : bn - an;
+      }
+      return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+    });
+
+    rows.forEach(r => tbody.appendChild(r));
+  });
+});
+</script>
+
+</body>
+</html>

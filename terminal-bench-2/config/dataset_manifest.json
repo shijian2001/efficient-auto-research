@@ -1,0 +1,937 @@
+{
+  "dataset": "Terminal-Bench 2.0",
+  "dataset_path": "/mnt/sdc/shijianwang/efficient-agent-research/terminal-bench-2/datasets/terminal-bench-2",
+  "file_count": 857,
+  "generated_at": "2026-08-05T13:15:12.072008+00:00",
+  "missing_required_files": [],
+  "resource_summary": {
+    "cpus": {
+      "maximum": 4,
+      "minimum": 1,
+      "values": [
+        1,
+        2,
+        4
+      ]
+    },
+    "gpus": {
+      "maximum": 0,
+      "minimum": 0,
+      "values": [
+        0
+      ]
+    },
+    "memory_mb": {
+      "maximum": 8192,
+      "minimum": 2048,
+      "values": [
+        2048,
+        4096,
+        8192
+      ]
+    },
+    "storage_mb": {
+      "maximum": 10240,
+      "minimum": 10240,
+      "values": [
+        10240
+      ]
+    }
+  },
+  "sha256": "12a9b01a33f980b7129187005d7046071614dc35a6e3eb92914f735e6bae723a",
+  "source_identifier": "terminal-bench@2.0",
+  "task_count": 89,
+  "tasks": [
+    {
+      "missing_required_files": [],
+      "name": "adaptive-rejection-sampler",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "bn-fit-modify",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "break-filter-js-from-html",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "build-cython-ext",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "build-pmars",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "build-pov-ray",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "caffe-cifar-10",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "cancel-async-tasks",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "chess-best-move",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "circuit-fibsqrt",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "cobol-modernization",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "code-from-image",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "compile-compcert",
+      "resources": {
+        "cpus": 2,
+        "gpus": 0,
+        "memory_mb": 4096,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "configure-git-webserver",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "constraints-scheduling",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "count-dataset-tokens",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "crack-7z-hash",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "custom-memory-heap-crash",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "db-wal-recovery",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "distribution-search",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "dna-assembly",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "dna-insert",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 4096,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "extract-elf",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "extract-moves-from-video",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "feal-differential-cryptanalysis",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "feal-linear-cryptanalysis",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "filter-js-from-html",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "financial-document-processor",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 4096,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "fix-code-vulnerability",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "fix-git",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "fix-ocaml-gc",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "gcode-to-text",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "git-leak-recovery",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "git-multibranch",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "gpt2-codegolf",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 4096,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "headless-terminal",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "hf-model-inference",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "install-windows-3.11",
+      "resources": {
+        "cpus": 2,
+        "gpus": 0,
+        "memory_mb": 4096,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "kv-store-grpc",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "large-scale-text-editing",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "largest-eigenval",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "llm-inference-batching-scheduler",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "log-summary-date-ranges",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "mailman",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "make-doom-for-mips",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "make-mips-interpreter",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "mcmc-sampling-stan",
+      "resources": {
+        "cpus": 4,
+        "gpus": 0,
+        "memory_mb": 8192,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "merge-diff-arc-agi-task",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 4096,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "model-extraction-relu-logits",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "modernize-scientific-stack",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "mteb-leaderboard",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 4096,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "mteb-retrieve",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "multi-source-data-merger",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "nginx-request-logging",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "openssl-selfsigned-cert",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "overfull-hbox",
+      "resources": {
+        "cpus": 2,
+        "gpus": 0,
+        "memory_mb": 4096,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "password-recovery",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "path-tracing",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "path-tracing-reverse",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "polyglot-c-py",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "polyglot-rust-c",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "portfolio-optimization",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 4096,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "protein-assembly",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 4096,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "prove-plus-comm",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "pypi-server",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "pytorch-model-cli",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "pytorch-model-recovery",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "qemu-alpine-ssh",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 4096,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "qemu-startup",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 4096,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "query-optimize",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "raman-fitting",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "regex-chess",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "regex-log",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "reshard-c4-data",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "rstan-to-pystan",
+      "resources": {
+        "cpus": 4,
+        "gpus": 0,
+        "memory_mb": 8192,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "sam-cell-seg",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 4096,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "sanitize-git-repo",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "schemelike-metacircular-eval",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "sparql-university",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "sqlite-db-truncate",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "sqlite-with-gcov",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "torch-pipeline-parallelism",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 4096,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "torch-tensor-parallelism",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 4096,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "train-fasttext",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 4096,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "tune-mjcf",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "video-processing",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "vulnerable-secret",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "winning-avg-corewars",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    },
+    {
+      "missing_required_files": [],
+      "name": "write-compressor",
+      "resources": {
+        "cpus": 1,
+        "gpus": 0,
+        "memory_mb": 2048,
+        "storage_mb": 10240
+      }
+    }
+  ],
+  "total_bytes": 45886574
+}

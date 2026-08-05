@@ -1,0 +1,12 @@
+.cache/
+.uv-cache/
+.venv/
+jobs/*
+!jobs/.gitkeep
+results/*
+!results/.gitkeep
+datasets/registry-cache/
+home/.cache/
+home/.config/
+*.pyc
+__pycache__/

@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg
+*.egg-info/
+.eggs/
+build/
+dist/
+*.so
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.venv-docs/
+
+# Packaging / tooling caches
+.mypy_cache/
+.ruff_cache/
+.pytest_cache/
+.tox/
+pip-wheel-metadata/
+
+# Documentation site build
+site/
+
+# Arbor runtime artifacts
+.arbor/
+research_sessions/
+*.log
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Project page build output
+project_page/node_modules/
+project_page/dist/

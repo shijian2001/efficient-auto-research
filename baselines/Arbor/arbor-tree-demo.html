@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>arbor · hypothesis tree replay</title>
+<style>
+  :root{
+    --bg:#0b0e14; --bg2:#0d1117; --panel:#161b22; --panel2:#1b212b;
+    --border:#2a313c; --border2:#30363d; --fg:#e3e9f0; --dim:#8b949e; --dim2:#6e7681;
+    --cyan:#39c5cf; --green:#3fb950; --yellow:#d29922; --magenta:#bc8cff;
+    --red:#f85149; --blue:#58a6ff;
+    --grad:linear-gradient(95deg,#39c5cf 0%,#58a6ff 45%,#bc8cff 100%);
+    --ui:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:radial-gradient(1200px 600px at 70% -10%,#11161f 0%,var(--bg) 60%);
+    color:var(--fg);font-family:var(--ui);font-size:15px;line-height:1.5;
+    display:flex;flex-direction:column;height:100vh;overflow:hidden}
+  .mono{font-family:var(--mono);font-feature-settings:"tnum" 1}
+
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;
+    padding:16px 24px 10px;border-bottom:1px solid var(--border);flex:0 0 auto}
+  .brand{font-weight:800;font-size:1.45em;letter-spacing:.2px;
+    background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .tagline{color:var(--dim);font-size:.88em}
+  .runmeta{margin-left:auto;text-align:right;color:var(--dim);font-size:.8em;max-width:52ch}
+  .runmeta b{color:var(--fg);font-weight:600}
+
+  .scorebar{display:flex;align-items:center;gap:24px;flex-wrap:wrap;
+    padding:12px 24px;border-bottom:1px solid var(--border);background:var(--bg2);flex:0 0 auto}
+  .stat{display:flex;flex-direction:column;gap:1px}
+  .stat .k{font-size:.7em;text-transform:uppercase;letter-spacing:.6px;color:var(--dim2)}
+  .stat .v{font-size:1.02em;font-weight:650}
+  .best .v{font-size:1.8em;line-height:1;color:var(--green);text-shadow:0 0 18px rgba(63,185,80,.35)}
+  .best .v .x{font-size:.5em;color:var(--dim);font-weight:500;margin-left:1px}
+  .legend{margin-left:auto;display:flex;gap:13px;flex-wrap:wrap;font-size:.76em;color:var(--dim)}
+  .legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:middle}
+
+  main{flex:1 1 auto;overflow:auto;padding:8px 0}
+  svg{display:block;width:100%;height:auto}
+
+  .edge{fill:none;stroke:var(--border2);stroke-width:1.6;
+    transition:stroke .4s,opacity .4s;opacity:0}
+  .edge.shown{opacity:.85}
+  .edge.merged{stroke:var(--green)}
+  .edge.pruned{stroke:var(--dim2);stroke-dasharray:3 4;opacity:.5}
+
+  .node{opacity:0;transition:opacity .45s ease}
+  .node.born{opacity:1}
+  .node.pruned{opacity:.55}
+  .node .dot{stroke:var(--bg);stroke-width:2;fill:var(--dim);transition:fill .4s}
+  .node.proposed .dot{fill:var(--yellow)}
+  .node.running  .dot{fill:var(--magenta)}
+  .node.running  .ring{stroke:var(--magenta);fill:none;opacity:.6;animation:pulse 1.2s ease-out infinite}
+  .node.done     .dot{fill:var(--blue)}
+  .node.merged   .dot{fill:var(--green);filter:drop-shadow(0 0 6px rgba(63,185,80,.8))}
+  .node.pruned   .dot{fill:var(--dim2)}
+  .node.failed   .dot{fill:var(--red)}
+  .ring{stroke:none;fill:none}
+  @keyframes pulse{0%{r:6px;opacity:.6}100%{r:15px;opacity:0}}
+  .nid{font-family:var(--mono);font-size:12px;fill:var(--dim2);dominant-baseline:middle}
+  .hyp{font-size:14.5px;fill:var(--fg);dominant-baseline:middle}
+  .node.pruned .hyp{fill:var(--dim)}
+  .node.proposed .hyp{fill:var(--dim)}
+  .score{font-family:var(--mono);font-size:13.5px;font-weight:700;fill:var(--green);
+    text-anchor:end;dominant-baseline:middle}
+  .node.pruned .score,.node.proposed .score,.node.running .score,.node.done .score{fill:var(--dim)}
+  .node.merged .score{fill:var(--green)}
+
+  footer{display:flex;align-items:center;gap:16px;padding:11px 24px;
+    border-top:1px solid var(--border);background:var(--bg2);flex:0 0 auto}
+  button.play{appearance:none;border:1px solid var(--border2);background:var(--panel2);
+    color:var(--fg);width:38px;height:38px;border-radius:50%;cursor:pointer;font-size:14px;
+    display:grid;place-items:center;transition:background .15s,border-color .15s}
+  button.play:hover{background:#232c3a;border-color:var(--cyan)}
+  .scrub{flex:1;display:flex;align-items:center;gap:12px}
+  input[type=range]{flex:1;accent-color:var(--cyan);cursor:pointer;height:4px}
+  .clock{font-family:var(--mono);font-size:.84em;color:var(--dim);min-width:10ch}
+  .speeds{display:flex;gap:6px}
+  .speeds button{appearance:none;border:1px solid var(--border2);background:transparent;
+    color:var(--dim);padding:4px 9px;border-radius:7px;cursor:pointer;font-size:.8em;font-weight:600}
+  .speeds button.on{color:var(--bg);background:var(--cyan);border-color:var(--cyan)}
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">arbor</span>
+  <span class="tagline">Grow evidence, not logs.</span>
+  <div class="runmeta">
+    <div><b id="m-run">—</b> <span id="m-model" class="mono"></span></div>
+    <div id="m-task"></div>
+  </div>
+</header>
+
+<div class="scorebar">
+  <div class="stat best"><span class="k">best</span>
+    <span class="v"><span id="s-best">—</span><span class="x" id="s-x"></span></span></div>
+  <div class="stat"><span class="k">baseline</span><span class="v mono" id="s-base">—</span></div>
+  <div class="stat"><span class="k">branches</span><span class="v mono" id="s-branches">0</span></div>
+  <div class="stat"><span class="k">merged</span><span class="v mono" id="s-merged">0</span></div>
+  <div class="stat"><span class="k">pruned</span><span class="v mono" id="s-pruned">0</span></div>
+  <div class="legend">
+    <span><i style="background:var(--yellow)"></i>proposed</span>
+    <span><i style="background:var(--magenta)"></i>running</span>
+    <span><i style="background:var(--blue)"></i>kept</span>
+    <span><i style="background:var(--green)"></i>merged</span>
+    <span><i style="background:var(--dim2)"></i>pruned</span>
+  </div>
+</div>
+
+<main><svg id="svg" preserveAspectRatio="xMinYMin meet"><g id="edges"></g><g id="nodes"></g></svg></main>
+
+<footer>
+  <button class="play" id="play" title="play / pause">▮▮</button>
+  <div class="scrub">
+    <input type="range" id="seek" min="0" max="1000" value="0">
+    <span class="clock"><span id="t-now">0:00</span> / <span id="t-end">0:00</span></span>
+  </div>
+  <div class="speeds" id="speeds"></div>
+</footer>
+
+<script>
+const DATA = {"meta": {"run_name": "demo", "model": "claude-opus-4-8", "task": "Optimize the k-NN classifier in solver.py for throughput on the held-out queries. Do NOT modify the evaluation harness or the data files.", "metric_direction": "maximize", "baseline_score": 1.0, "trunk_score": 13.1}, "events": [{"ts": 1750000000.0, "type": "session.start", "data": {"task": "Optimize the k-NN classifier in solver.py for throughput on the held-out queries. Do NOT modify the evaluation harness or the data files.", "cwd": "examples/algotune_knn", "provider": "anthropic", "model": "claude-opus-4-8"}}, {"ts": 1750000000.4, "type": "cycle.start", "data": {"cycle_num": 1, "total_cycles": 8}}, {"ts": 1750000000.7, "type": "cycle.phase", "data": {"phase": "observe"}}, {"ts": 1750000001.5, "type": "llm.thinking_delta", "data": {"agent": "coordinator", "node_id": "", "text": "Baseline is a Python double loop over training points. The distance matrix is the obvious first target."}}, {"ts": 1750000002.0, "type": "tool.start", "data": {"name": "TreeView", "args_preview": "", "agent": "coordinator", "node_id": ""}}, {"ts": 1750000002.6, "type": "tool.end", "data": {"name": "TreeView", "ok": true, "duration": 0.6, "agent": "coordinator", "node_id": ""}}, {"ts": 1750000002.9, "type": "cycle.phase", "data": {"phase": "ideate"}}, {"ts": 1750000003.5, "type": "idea.proposed", "data": {"node_id": "n1", "parent_id": "root", "hypothesis": "Vectorize pairwise distances with numpy broadcasting"}}, {"ts": 1750000003.8, "type": "cycle.phase", "data": {"phase": "select"}}, {"ts": 1750000004.1, "type": "cycle.phase", "data": {"phase": "dispatch"}}, {"ts": 1750000004.7, "type": "executor.start", "data": {"node_id": "n1", "idea": "", "branch": "arbor/n1-vectorize"}}, {"ts": 1750000005.5, "type": "llm.thinking_delta", "data": {"agent": "sub:n1", "node_id": "n1", "text": "Reading solver.py and the eval harness to find the hot path."}}, {"ts": 1750000006.1, "type": "tool.start", "data": {"name": "ReadFile", "args_preview": "solver.py", "agent": "sub:n1", "node_id": "n1"}}, {"ts": 1750000008.5, "type": "tool.end", "data": {"name": "ReadFile", "ok": true, "duration": 2.4, "agent": "sub:n1", "node_id": "n1"}}, {"ts": 1750000009.6, "type": "llm.call", "data": {"provider": "anthropic", "model": "claude-opus-4-8", "input_tokens": 9200, "output_tokens": 540, "cache_read_tokens": 7544, "cache_creation_tokens": 920, "uncached_input_tokens": 736, "agent": "sub:n1", "node_id": "n1"}}, {"ts": 1750000010.2, "type": "tool.start", "data": {"name": "EditFile", "args_preview": "solver.py: replace loop with np.linalg.norm broadcast", "agent": "sub:n1", "node_id": "n1"}}, {"ts": 1750000012.6, "type": "tool.end", "data": {"name": "EditFile", "ok": true, "duration": 2.4, "agent": "sub:n1", "node_id": "n1"}}, {"ts": 1750000013.7, "type": "llm.call", "data": {"provider": "anthropic", "model": "claude-opus-4-8", "input_tokens": 9200, "output_tokens": 540, "cache_read_tokens": 7544, "cache_creation_tokens": 920, "uncached_input_tokens": 736, "agent": "sub:n1", "node_id": "n1"}}, {"ts": 1750000014.5, "type": "llm.thinking_delta", "data": {"agent": "sub:n1", "node_id": "n1", "text": "Running the dev split to score this change."}}, {"ts": 1750000014.9, "type": "tool.start", "data": {"name": "Bash", "args_preview": "python eval.py --split dev", "agent": "sub:n1", "node_id": "n1"}}, {"ts": 1750000020.9, "type": "tool.end", "data": {"name": "Bash", "ok": true, "duration": 6.0, "agent": "sub:n1", "node_id": "n1"}}, {"ts": 1750000021.4, "type": "executor.end", "data": {"node_id": "n1", "duration": 6.0, "tokens": 41000, "status": "done", "score": 3.2}}, {"ts": 1750000021.7, "type": "cycle.phase", "data": {"phase": "backprop"}}, {"ts": 1750000022.5, "type": "llm.thinking_delta", "data": {"agent": "coordinator", "node_id": "n1", "text": "3.2\u00d7 speedup, accuracy unchanged on held-out. Broadcasting removes the Python loop overhead. Keep it."}}, {"ts": 1750000023.0, "type": "idea.completed", "data": {"node_id": "n1", "score": 3.2, "status": "done"}}, {"ts": 1750000023.3, "type": "cycle.phase", "data": {"phase": "decide"}}, {"ts": 1750000023.9, "type": "idea.merged", "data": {"node_id": "n1", "from_score": 1.0, "to_score": 3.2, "branch": "arbor/n1-vectorize"}}, {"ts": 1750000024.3, "type": "cycle.end", "data": {"cycle_num": 1, "duration": 22.0}}, {"ts": 1750000024.7, "type": "cycle.start", "data": {"cycle_num": 2, "total_cycles": 8}}, {"ts": 1750000025.0, "type": "cycle.phase", "data": {"phase": "ideate"}}, {"ts": 1750000025.8, "type": "llm.thinking_delta", "data": {"agent": "coordinator", "node_id": "", "text": "Vectorizing helped but it is still O(n\u00b2). A spatial index should dominate for the held-out query sizes."}}, {"ts": 1750000026.4, "type": "idea.proposed", "data": {"node_id": "n2", "parent_id": "n1", "hypothesis": "Replace brute force with scipy.spatial.cKDTree"}}, {"ts": 1750000026.7, "type": "cycle.phase", "data": {"phase": "dispatch"}}, {"ts": 1750000027.3, "type": "executor.start", "data": {"node_id": "n2", "idea": "", "branch": "arbor/n2-ckdtree"}}, {"ts": 1750000028.1, "type": "llm.thinking_delta", "data": {"agent": "sub:n2", "node_id": "n2", "text": "Reading solver.py and the eval harness to find the hot path."}}, {"ts": 1750000028.7, "type": "tool.start", "data": {"name": "ReadFile", "args_preview": "solver.py", "agent": "sub:n2", "node_id": "n2"}}, {"ts": 1750000031.1, "type": "tool.end", "data": {"name": "ReadFile", "ok": true, "duration": 2.4, "agent": "sub:n2", "node_id": "n2"}}, {"ts": 1750000032.2, "type": "llm.call", "data": {"provider": "anthropic", "model": "claude-opus-4-8", "input_tokens": 9200, "output_tokens": 540, "cache_read_tokens": 7544, "cache_creation_tokens": 920, "uncached_input_tokens": 736, "agent": "sub:n2", "node_id": "n2"}}, {"ts": 1750000032.8, "type": "tool.start", "data": {"name": "EditFile", "args_preview": "solver.py: build cKDTree(train), query(k)", "agent": "sub:n2", "node_id": "n2"}}, {"ts": 1750000035.2, "type": "tool.end", "data": {"name": "EditFile", "ok": true, "duration": 2.4, "agent": "sub:n2", "node_id": "n2"}}, {"ts": 1750000036.3, "type": "llm.call", "data": {"provider": "anthropic", "model": "claude-opus-4-8", "input_tokens": 9200, "output_tokens": 540, "cache_read_tokens": 7544, "cache_creation_tokens": 920, "uncached_input_tokens": 736, "agent": "sub:n2", "node_id": "n2"}}, {"ts": 1750000037.1, "type": "llm.thinking_delta", "data": {"agent": "sub:n2", "node_id": "n2", "text": "Running the dev split to score this change."}}, {"ts": 1750000037.5, "type": "tool.start", "data": {"name": "Bash", "args_preview": "python eval.py --split dev", "agent": "sub:n2", "node_id": "n2"}}, {"ts": 1750000042.9, "type": "tool.end", "data": {"name": "Bash", "ok": true, "duration": 5.4, "agent": "sub:n2", "node_id": "n2"}}, {"ts": 1750000043.4, "type": "executor.end", "data": {"node_id": "n2", "duration": 5.4, "tokens": 41000, "status": "done", "score": 8.7}}, {"ts": 1750000043.7, "type": "cycle.phase", "data": {"phase": "backprop"}}, {"ts": 1750000044.5, "type": "llm.thinking_delta", "data": {"agent": "coordinator", "node_id": "n2", "text": "8.7\u00d7. The KD-tree turns the query into O(log n). Big win \u2014 merge onto the trunk."}}, {"ts": 1750000045.0, "type": "idea.completed", "data": {"node_id": "n2", "score": 8.7, "status": "done"}}, {"ts": 1750000045.6, "type": "idea.merged", "data": {"node_id": "n2", "from_score": 3.2, "to_score": 8.7, "branch": "arbor/n2-ckdtree"}}, {"ts": 1750000046.0, "type": "cycle.end", "data": {"cycle_num": 2, "duration": 19.0}}, {"ts": 1750000046.4, "type": "cycle.start", "data": {"cycle_num": 3, "total_cycles": 8}}, {"ts": 1750000046.7, "type": "cycle.phase", "data": {"phase": "ideate"}}, {"ts": 1750000047.3, "type": "idea.proposed", "data": {"node_id": "n3", "parent_id": "n2", "hypothesis": "JIT-compile a custom distance kernel with numba @njit"}}, {"ts": 1750000047.6, "type": "cycle.phase", "data": {"phase": "dispatch"}}, {"ts": 1750000048.2, "type": "executor.start", "data": {"node_id": "n3", "idea": "", "branch": "arbor/n3-numba"}}, {"ts": 1750000049.0, "type": "llm.thinking_delta", "data": {"agent": "sub:n3", "node_id": "n3", "text": "Reading solver.py and the eval harness to find the hot path."}}, {"ts": 1750000049.6, "type": "tool.start", "data": {"name": "EditFile", "args_preview": "solver.py: add @njit kernel", "agent": "sub:n3", "node_id": "n3"}}, {"ts": 1750000052.0, "type": "tool.end", "data": {"name": "EditFile", "ok": true, "duration": 2.4, "agent": "sub:n3", "node_id": "n3"}}, {"ts": 1750000053.1, "type": "llm.call", "data": {"provider": "anthropic", "model": "claude-opus-4-8", "input_tokens": 9200, "output_tokens": 540, "cache_read_tokens": 7544, "cache_creation_tokens": 920, "uncached_input_tokens": 736, "agent": "sub:n3", "node_id": "n3"}}, {"ts": 1750000053.9, "type": "llm.thinking_delta", "data": {"agent": "sub:n3", "node_id": "n3", "text": "Running the dev split to score this change."}}, {"ts": 1750000054.3, "type": "tool.start", "data": {"name": "Bash", "args_preview": "python eval.py --split dev", "agent": "sub:n3", "node_id": "n3"}}, {"ts": 1750000061.5, "type": "tool.end", "data": {"name": "Bash", "ok": true, "duration": 7.2, "agent": "sub:n3", "node_id": "n3"}}, {"ts": 1750000062.0, "type": "executor.end", "data": {"node_id": "n3", "duration": 7.2, "tokens": 41000, "status": "done", "score": 6.1}}, {"ts": 1750000062.3, "type": "cycle.phase", "data": {"phase": "backprop"}}, {"ts": 1750000063.1, "type": "llm.thinking_delta", "data": {"agent": "coordinator", "node_id": "n3", "text": "6.1\u00d7 \u2014 slower than the cKDTree trunk (8.7\u00d7). The JIT kernel re-introduces the brute-force scan. Prune."}}, {"ts": 1750000063.6, "type": "idea.pruned", "data": {"node_id": "n3", "reason": "regression vs trunk (6.1\u00d7 < 8.7\u00d7)"}}, {"ts": 1750000064.0, "type": "cycle.end", "data": {"cycle_num": 3, "duration": 18.0}}, {"ts": 1750000064.4, "type": "cycle.start", "data": {"cycle_num": 4, "total_cycles": 8}}, {"ts": 1750000064.7, "type": "cycle.phase", "data": {"phase": "ideate"}}, {"ts": 1750000065.3, "type": "idea.proposed", "data": {"node_id": "n4", "parent_id": "n2", "hypothesis": "Batch all query points into one cKDTree.query call"}}, {"ts": 1750000065.6, "type": "cycle.phase", "data": {"phase": "dispatch"}}, {"ts": 1750000066.2, "type": "executor.start", "data": {"node_id": "n4", "idea": "", "branch": "arbor/n4-batch"}}, {"ts": 1750000067.0, "type": "llm.thinking_delta", "data": {"agent": "sub:n4", "node_id": "n4", "text": "Reading solver.py and the eval harness to find the hot path."}}, {"ts": 1750000067.6, "type": "tool.start", "data": {"name": "EditFile", "args_preview": "solver.py: vectorize query over the full batch, workers=-1", "agent": "sub:n4", "node_id": "n4"}}, {"ts": 1750000070.0, "type": "tool.end", "data": {"name": "EditFile", "ok": true, "duration": 2.4, "agent": "sub:n4", "node_id": "n4"}}, {"ts": 1750000071.1, "type": "llm.call", "data": {"provider": "anthropic", "model": "claude-opus-4-8", "input_tokens": 9200, "output_tokens": 540, "cache_read_tokens": 7544, "cache_creation_tokens": 920, "uncached_input_tokens": 736, "agent": "sub:n4", "node_id": "n4"}}, {"ts": 1750000071.9, "type": "llm.thinking_delta", "data": {"agent": "sub:n4", "node_id": "n4", "text": "Running the dev split to score this change."}}, {"ts": 1750000072.3, "type": "tool.start", "data": {"name": "Bash", "args_preview": "python eval.py --split dev", "agent": "sub:n4", "node_id": "n4"}}, {"ts": 1750000077.1, "type": "tool.end", "data": {"name": "Bash", "ok": true, "duration": 4.8, "agent": "sub:n4", "node_id": "n4"}}, {"ts": 1750000077.6, "type": "executor.end", "data": {"node_id": "n4", "duration": 4.8, "tokens": 41000, "status": "done", "score": 11.4}}, {"ts": 1750000077.9, "type": "cycle.phase", "data": {"phase": "backprop"}}, {"ts": 1750000078.7, "type": "llm.thinking_delta", "data": {"agent": "coordinator", "node_id": "n4", "text": "11.4\u00d7. Amortizing tree traversal across the batch and using all cores compounds with the index. Merge."}}, {"ts": 1750000079.2, "type": "idea.completed", "data": {"node_id": "n4", "score": 11.4, "status": "done"}}, {"ts": 1750000079.8, "type": "idea.merged", "data": {"node_id": "n4", "from_score": 8.7, "to_score": 11.4, "branch": "arbor/n4-batch"}}, {"ts": 1750000080.2, "type": "cycle.end", "data": {"cycle_num": 4, "duration": 16.0}}, {"ts": 1750000080.6, "type": "cycle.start", "data": {"cycle_num": 5, "total_cycles": 8}}, {"ts": 1750000080.9, "type": "cycle.phase", "data": {"phase": "ideate"}}, {"ts": 1750000081.5, "type": "idea.proposed", "data": {"node_id": "n5", "parent_id": "n4", "hypothesis": "Use float32 + C-contiguous arrays to cut memory bandwidth"}}, {"ts": 1750000082.1, "type": "idea.proposed", "data": {"node_id": "n6", "parent_id": "n4", "hypothesis": "Approximate NN via random-projection trees"}}, {"ts": 1750000082.4, "type": "cycle.phase", "data": {"phase": "dispatch"}}, {"ts": 1750000083.0, "type": "executor.start", "data": {"node_id": "n5", "idea": "", "branch": "arbor/n5-float32"}}, {"ts": 1750000083.8, "type": "llm.thinking_delta", "data": {"agent": "sub:n5", "node_id": "n5", "text": "Reading solver.py and the eval harness to find the hot path."}}, {"ts": 1750000084.4, "type": "tool.start", "data": {"name": "EditFile", "args_preview": "solver.py: cast to float32, np.ascontiguousarray", "agent": "sub:n5", "node_id": "n5"}}, {"ts": 1750000086.8, "type": "tool.end", "data": {"name": "EditFile", "ok": true, "duration": 2.4, "agent": "sub:n5", "node_id": "n5"}}, {"ts": 1750000087.9, "type": "llm.call", "data": {"provider": "anthropic", "model": "claude-opus-4-8", "input_tokens": 9200, "output_tokens": 540, "cache_read_tokens": 7544, "cache_creation_tokens": 920, "uncached_input_tokens": 736, "agent": "sub:n5", "node_id": "n5"}}, {"ts": 1750000088.7, "type": "llm.thinking_delta", "data": {"agent": "sub:n5", "node_id": "n5", "text": "Running the dev split to score this change."}}, {"ts": 1750000089.1, "type": "tool.start", "data": {"name": "Bash", "args_preview": "python eval.py --split dev", "agent": "sub:n5", "node_id": "n5"}}, {"ts": 1750000093.3, "type": "tool.end", "data": {"name": "Bash", "ok": true, "duration": 4.2, "agent": "sub:n5", "node_id": "n5"}}, {"ts": 1750000093.8, "type": "executor.end", "data": {"node_id": "n5", "duration": 4.2, "tokens": 41000, "status": "done", "score": 13.1}}, {"ts": 1750000094.1, "type": "cycle.phase", "data": {"phase": "backprop"}}, {"ts": 1750000094.9, "type": "llm.thinking_delta", "data": {"agent": "coordinator", "node_id": "n5", "text": "13.1\u00d7 and accuracy holds on the held-out split. float32 halves the bytes the tree touches. Merge."}}, {"ts": 1750000095.4, "type": "idea.completed", "data": {"node_id": "n5", "score": 13.1, "status": "done"}}, {"ts": 1750000096.0, "type": "idea.merged", "data": {"node_id": "n5", "from_score": 11.4, "to_score": 13.1, "branch": "arbor/n5-float32"}}, {"ts": 1750000096.4, "type": "cycle.phase", "data": {"phase": "dispatch"}}, {"ts": 1750000097.0, "type": "executor.start", "data": {"node_id": "n6", "idea": "", "branch": "arbor/n6-approx"}}, {"ts": 1750000097.8, "type": "llm.thinking_delta", "data": {"agent": "sub:n6", "node_id": "n6", "text": "Reading solver.py and the eval harness to find the hot path."}}, {"ts": 1750000098.4, "type": "tool.start", "data": {"name": "EditFile", "args_preview": "solver.py: random-projection forest, approx query", "agent": "sub:n6", "node_id": "n6"}}, {"ts": 1750000100.8, "type": "tool.end", "data": {"name": "EditFile", "ok": true, "duration": 2.4, "agent": "sub:n6", "node_id": "n6"}}, {"ts": 1750000101.9, "type": "llm.call", "data": {"provider": "anthropic", "model": "claude-opus-4-8", "input_tokens": 9200, "output_tokens": 540, "cache_read_tokens": 7544, "cache_creation_tokens": 920, "uncached_input_tokens": 736, "agent": "sub:n6", "node_id": "n6"}}, {"ts": 1750000102.7, "type": "llm.thinking_delta", "data": {"agent": "sub:n6", "node_id": "n6", "text": "Running the dev split to score this change."}}, {"ts": 1750000103.1, "type": "tool.start", "data": {"name": "Bash", "args_preview": "python eval.py --split dev", "agent": "sub:n6", "node_id": "n6"}}, {"ts": 1750000108.1, "type": "tool.end", "data": {"name": "Bash", "ok": true, "duration": 5.0, "agent": "sub:n6", "node_id": "n6"}}, {"ts": 1750000108.6, "type": "executor.end", "data": {"node_id": "n6", "duration": 5.0, "tokens": 41000, "status": "failed"}}, {"ts": 1750000109.1, "type": "idea.pruned", "data": {"node_id": "n6", "reason": "held-out accuracy 0.91 < 0.98 threshold"}}, {"ts": 1750000109.5, "type": "cycle.end", "data": {"cycle_num": 5, "duration": 21.0}}, {"ts": 1750000110.3, "type": "convergence.reached", "data": {"reason": "no improving idea in last cycle", "final_score": 13.1}}, {"ts": 1750000110.9, "type": "session.end", "data": {"duration": 110.3, "exit_reason": "converged", "turns": 47, "input_tokens": 612000, "output_tokens": 38400}}]};
+
+// ── model: fold events into per-node state at a virtual clock ────────────────
+const META = DATA.meta || {};
+const EVENTS = (DATA.events || []).filter(e => e && typeof e.ts === "number");
+const T0 = EVENTS.length ? EVENTS[0].ts : 0;
+const TEND = EVENTS.length ? EVENTS[EVENTS.length-1].ts : 0;
+const DURATION = Math.max(0.001, TEND - T0);
+const MIN = (META.metric_direction === "minimize");
+const BASE = (typeof META.baseline_score === "number") ? META.baseline_score : null;
+const ROOT = "·root·";   // synthetic trunk for nodes proposed against the baseline
+
+function buildTopology(){
+  const nodes = new Map();
+  const ensure = id => { if(!nodes.has(id)) nodes.set(id,{id,parent:ROOT,hyp:"",born:Infinity}); return nodes.get(id); };
+  nodes.set(ROOT,{id:ROOT,parent:null,hyp:"baseline",born:T0,synthetic:true});
+  for(const e of EVENTS){
+    const d = e.data||{};
+    if(e.type==="idea.proposed" && d.node_id){
+      const n = ensure(d.node_id);
+      n.hyp = (d.hypothesis||"").replace(/\s+/g," ").trim();
+      n.born = Math.min(n.born, e.ts); n.rawParent = d.parent_id;
+    } else if(d.node_id){ const n = ensure(d.node_id); n.born = Math.min(n.born, e.ts); }
+  }
+  for(const n of nodes.values()){
+    if(n.id===ROOT) continue;
+    n.parent = (n.rawParent && nodes.has(n.rawParent) && n.rawParent!==n.id) ? n.rawParent : ROOT;
+  }
+  return nodes;
+}
+const NODES = buildTopology();
+
+function stateAt(t){
+  const st = new Map();
+  for(const id of NODES.keys()) st.set(id,{state:"unborn",score:null});
+  st.get(ROOT).state = "merged"; st.get(ROOT).score = BASE;
+  let best = null;
+  const better = s => best===null || (MIN ? s<best : s>best);
+  for(const e of EVENTS){
+    if(e.ts - T0 > t) break;
+    const d = e.data||{}, id = d.node_id; if(!id || !st.has(id)) continue;
+    const s = st.get(id);
+    switch(e.type){
+      case "idea.proposed": s.state="proposed"; break;
+      case "executor.start": s.state="running"; break;
+      case "executor.end":
+        if(typeof d.score==="number"){ s.score=d.score; if(better(d.score)) best=d.score; }
+        if(s.state==="running") s.state=(d.status||"done"); break;
+      case "idea.completed":
+        if(typeof d.score==="number"){ s.score=d.score; if(better(d.score)) best=d.score; }
+        s.state=(d.status||"done"); break;
+      case "idea.merged":
+        if(typeof d.to_score==="number"){ s.score=d.to_score; if(better(d.to_score)) best=d.to_score; }
+        s.state="merged"; break;
+      case "idea.pruned": s.state="pruned"; break;
+    }
+  }
+  return {st,best};
+}
+
+// ── layout: indented dendrogram, one row per node (depth = x indent) ─────────
+// Logical coordinate space + viewBox => geometry never depends on the measured
+// element size, so it can't collapse to a pile when clientHeight is 0 at boot.
+const W = 940, ROW = 40, TOP = 26, LEFT = 30, INDENT = 30, DOT_R = 6;
+function layout(){
+  const children = new Map();
+  for(const n of NODES.values()){
+    if(n.id===ROOT) continue;
+    (children.get(n.parent) || children.set(n.parent,[]).get(n.parent)).push(n.id);
+  }
+  for(const arr of children.values()) arr.sort((a,b)=>NODES.get(a).born-NODES.get(b).born);
+  const rows = []; const pos = new Map();
+  (function walk(id,depth){
+    pos.set(id,{depth,row:rows.length}); rows.push(id);
+    for(const k of (children.get(id)||[])) walk(k,depth+1);
+  })(ROOT,0);
+  return {pos,rows,children,height:TOP*2 + Math.max(1,rows.length)*ROW};
+}
+const L = layout();
+const H = L.height;
+
+function coords(id){
+  const p = L.pos.get(id);
+  return { x: LEFT + p.depth*INDENT, y: TOP + p.row*ROW + ROW/2 };
+}
+function trunc(s,n){ s=s||""; return s.length<=n?s:s.slice(0,n-1)+"…"; }
+function fmtScore(v){ return v===null||v===undefined?"—":(Math.round(v*100)/100).toString(); }
+function fmtClock(sec){ sec=Math.max(0,sec); const m=Math.floor(sec/60),s=Math.floor(sec%60); return m+":"+String(s).padStart(2,"0"); }
+
+// ── build SVG once ───────────────────────────────────────────────────────────
+const svg = document.getElementById("svg");
+svg.setAttribute("viewBox", `0 0 ${W} ${H}`);
+svg.style.minHeight = H + "px";
+const gN = document.getElementById("nodes"), gE = document.getElementById("edges");
+const NS = "http://www.w3.org/2000/svg";
+const mk = (t,a)=>{const x=document.createElementNS(NS,t);for(const k in a)x.setAttribute(k,a[k]);return x;};
+const nodeEls = new Map(), edgeEls = new Map();
+const SCORE_X = W - 18;
+
+function buildSVG(){
+  for(const n of NODES.values()){
+    const c = coords(n.id);
+    if(n.parent){
+      const p = coords(n.parent);
+      // elbow: down the parent's column, then right into the child
+      const e = mk("path",{class:"edge", d:`M${p.x},${p.y+DOT_R} L${p.x},${c.y} L${c.x-DOT_R},${c.y}`});
+      gE.appendChild(e); edgeEls.set(n.id,e);
+    }
+    const g = mk("g",{class:"node", transform:`translate(${c.x},${c.y})`});
+    g.appendChild(mk("circle",{class:"ring", r:6, cx:0, cy:0}));
+    g.appendChild(mk("circle",{class:"dot", r:DOT_R, cx:0, cy:0}));
+    const idText = mk("text",{class:"nid", x:14, y:0});
+    idText.textContent = n.synthetic ? "base" : n.id;
+    const idW = (n.synthetic?4:String(n.id).length)*7.7 + 22;
+    const hyp = mk("text",{class:"hyp", x:idW, y:0});
+    const avail = SCORE_X - (c.x + idW) - 14;
+    hyp.textContent = trunc(n.synthetic ? "baseline solver" : n.hyp, Math.max(8, Math.floor(avail/8)));
+    const title = mk("title",{}); title.textContent = n.synthetic ? "baseline" : n.hyp;
+    hyp.appendChild(title);
+    const sc = mk("text",{class:"score", x:SCORE_X - c.x, y:0});
+    g.appendChild(idText); g.appendChild(hyp); g.appendChild(sc);
+    gN.appendChild(g); nodeEls.set(n.id,{g,sc});
+  }
+}
+
+function render(t){
+  const {st,best} = stateAt(t);
+  let merged=0, pruned=0, born=0;
+  for(const [id,info] of st){
+    const ui = nodeEls.get(id); if(!ui) continue;
+    const isBorn = info.state!=="unborn";
+    ui.g.setAttribute("class","node "+info.state+(isBorn?" born":""));
+    ui.sc.textContent = (info.score!=null && info.state!=="proposed" && info.state!=="running")
+      ? fmtScore(info.score)+(MIN?"":"×") : "";
+    if(id!==ROOT && isBorn) born++;
+    if(id!==ROOT && info.state==="merged") merged++;
+    if(info.state==="pruned"||info.state==="failed") pruned++;
+    const e = edgeEls.get(id);
+    if(e){
+      const parentBorn = st.get(NODES.get(id).parent)?.state!=="unborn";
+      e.setAttribute("class","edge"+((isBorn&&parentBorn)?" shown":"")
+        +(info.state==="merged"?" merged":"")
+        +((info.state==="pruned"||info.state==="failed")?" pruned":""));
+    }
+  }
+  document.getElementById("s-best").textContent = best===null?"—":fmtScore(best);
+  document.getElementById("s-x").textContent = (best===null||MIN)?"":"×";
+  document.getElementById("s-branches").textContent = born;
+  document.getElementById("s-merged").textContent = merged;
+  document.getElementById("s-pruned").textContent = pruned;
+  document.getElementById("t-now").textContent = fmtClock(t);
+}
+
+// ── playback engine ──────────────────────────────────────────────────────────
+let clock=0, playing=true, speed=12, last=null;
+const seek=document.getElementById("seek"), playBtn=document.getElementById("play");
+function setClock(t){ clock=Math.max(0,Math.min(DURATION,t)); seek.value=Math.round(clock/DURATION*1000); render(clock); }
+function tick(ts){
+  if(last===null) last=ts;
+  const dt=(ts-last)/1000; last=ts;
+  if(playing){ setClock(clock+dt*speed); if(clock>=DURATION){ playing=false; updatePlay(); } }
+  requestAnimationFrame(tick);
+}
+function updatePlay(){ playBtn.textContent = playing ? "▮▮" : "▶"; }
+playBtn.onclick=()=>{ if(clock>=DURATION) setClock(0); playing=!playing; last=null; updatePlay(); };
+seek.oninput=()=>{ playing=false; updatePlay(); setClock(seek.value/1000*DURATION); };
+
+const speeds=[1,4,12,40]; const sbox=document.getElementById("speeds");
+speeds.forEach(s=>{ const b=document.createElement("button"); b.textContent=s+"×";
+  if(s===speed)b.className="on";
+  b.onclick=()=>{ speed=s; [...sbox.children].forEach(c=>c.className=(c===b?"on":"")); };
+  sbox.appendChild(b); });
+
+// ── boot ─────────────────────────────────────────────────────────────────────
+document.getElementById("m-run").textContent = META.run_name||"session";
+document.getElementById("m-model").textContent = META.model||"";
+document.getElementById("m-task").textContent = trunc(META.task||"", 110);
+document.getElementById("s-base").textContent = BASE===null?"—":fmtScore(BASE)+(MIN?"":"×");
+document.getElementById("t-end").textContent = fmtClock(DURATION);
+buildSVG(); setClock(0); updatePlay(); requestAnimationFrame(tick);
+</script>
+</body>
+</html>

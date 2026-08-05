@@ -1,0 +1,20 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.pytest_cache/
+results/
+*.log
+cache/
+
+# Eval artifacts (per-run outputs, never version these — can be >1GB)
+docker_runs/
+runs/
+llm_token_usage.jsonl
+
+# Local scripts and configs (may contain paths/keys)
+configs/local.yaml
+configs/*.local.yaml
+run_local.sh
+run_*.sh
+PROPOSAL.md
+PROPOSAL_CN.md

@@ -1,0 +1,36 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# Arbor research config for the k-NN AlgoTune-style mini benchmark.
+#
+# Run from inside this directory:
+#   arbor run "maximize the speedup printed by 'bash eval.sh dev'; \
+#     iterate on dev, gate merges on 'bash eval.sh test'; \
+#     only edit solution.py; never touch task.py, eval.py, or eval.sh; \
+#     output must keep passing is_solution" \
+#     --yes --yes-cwd .
+#
+# Only the `llm:` block is usually needed — fill it in (or rely on `arbor setup`)
+# and the rest of these defaults are fine for a quick example run.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# LLM provider is inherited from your global `~/.arbor/config.yaml` (written by
+# `arbor setup`). Uncomment to pin a provider just for this project:
+#
+# llm:
+#   provider: anthropic
+#   model: claude-sonnet-4-20250514
+#   reasoning_effort: high
+#   # api_key:        # omit to read ANTHROPIC_API_KEY / OPENAI_API_KEY from env
+
+# This is a tiny, fast task — a short search is plenty.
+max_cycles: 6
+executor_max_turns: 30
+
+coordinator:
+  max_depth: 2
+  merge_threshold: 5.0   # require >=5% held-out speedup gain to merge
+
+executor:
+  max_turns: 30
+
+ui:
+  interaction_mode: auto   # auto | direction | review | collaborative

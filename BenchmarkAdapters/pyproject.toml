@@ -1,0 +1,9 @@
+[project]
+name = "benchmark-adapters"
+version = "0.1.0"
+description = "Shared environment and benchmark adapters for baseline agents"
+requires-python = ">=3.11,<3.13"
+dependencies = []
+
+[tool.uv]
+package = false

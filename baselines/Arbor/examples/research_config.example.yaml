@@ -1,0 +1,91 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# AutoResearch — example config
+#
+# Run:  coordinator --config research_config.example.yaml --cwd ./your-project \
+#                  --task "Improve validation accuracy"
+#
+# Only the `llm:` block is usually needed to get started — everything else has
+# sensible defaults. Flat keys (e.g. `model:` at top level) also work; the
+# nested form below is just clearer.
+# ─────────────────────────────────────────────────────────────────────────────
+
+llm:
+  # `provider` is the API type chosen by `arbor setup`:
+  #   auto             — probe the endpoint; use the Responses API when available,
+  #                      else chat completions (Claude → native Anthropic)
+  #   openai-responses — OpenAI / o-series via the Responses API (reasoning chain)
+  #   openai-chat      — any OpenAI-compatible chat-completions endpoint
+  #   anthropic        — native Anthropic Messages API (thinking + caching)
+
+  provider: anthropic
+  model: claude-sonnet-4-20250514
+  # api_key:                           # omit to read ANTHROPIC_API_KEY /
+  #                                    # OPENAI_API_KEY from the environment,
+  #                                    # or paste the key here / pass --api-key
+  # base_url:                          # set for proxies / vLLM / Ollama
+  reasoning_effort: high               # low | medium | high | none
+
+  # meta_model:                        # optional: a different model for the
+  #                                    # orchestrator than for executors
+
+# ── Loop / budget (optional — defaults are generous) ─────────────────────────
+# Orchestration knobs are top-level keys (not nested).
+max_cycles: 20
+executor_max_turns: 50
+
+timeout:                  # `timeout:` IS a real nested group
+  executor: 172800        # 48h
+  run_training_max: 604800  # 7d
+
+# ── Human-in-the-loop / observability (optional) ─────────────────────────────
+ui:
+  interaction_mode: auto  # auto | direction | review | collaborative
+  # webui_port: 8765       # set to expose the read-only WebUI
+
+# Literature search / idea novelty checks (optional). Zero-config: queries the
+# public alphaXiv API in-process — no search endpoint, no key. The backend
+# (alphaxiv-py) ships with arbor by default on Python >= 3.12.
+search:
+  enabled: true
+  builtin_backend: alphaxiv   # none (default) | alphaxiv
+  auto_search_on_add: false   # true => novelty-check each new idea BEFORE running it
+  # web_search_endpoint: ...  # bring-your-own BrowseComp-style HTTP backend instead
+
+# ─────────────────────────────────────────────────────────────────────────────
+# More LLM examples — copy the one you need into `llm:` above.
+# ─────────────────────────────────────────────────────────────────────────────
+#
+# OpenAI gpt-5 with the reasoning chain preserved (Responses API):
+#   provider: openai-responses
+#   model: gpt-5.5
+#   reasoning_effort: high             # api_key from OPENAI_API_KEY env
+#
+# DeepSeek (chat completions; reasoning_content shown live):
+#   provider: openai-chat
+#   model: deepseek-reasoner           # or deepseek-chat
+#   base_url: https://api.deepseek.com
+#   api_key: sk-...
+#
+# Qwen via Alibaba DashScope — let `auto` probe Responses vs chat:
+#   provider: auto
+#   model: qwen3.7-max
+#   base_url: https://dashscope.aliyuncs.com/compatible-mode/v1
+#   api_key: sk-...
+#
+# Self-hosted vLLM / Ollama (chat-only endpoint):
+#   provider: openai-chat
+#   model: Qwen/Qwen2.5-72B-Instruct
+#   base_url: http://localhost:8000/v1
+#   api_key: dummy
+#
+# A local proxy serving gpt-5.5 via the Responses API:
+#   provider: openai-responses
+#   model: gpt-5.5
+#   base_url: http://your-proxy/v1
+#   api_key: sk-...
+#
+# A Copilot-style proxy serving claude / gemini — `auto` picks the backend:
+#   provider: auto
+#   model: gemini-3.1-pro-preview
+#   base_url: http://localhost:4141/v1
+#   api_key: dummy

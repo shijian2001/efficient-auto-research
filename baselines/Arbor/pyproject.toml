@@ -1,0 +1,145 @@
+[project]
+name = "arbor-agent"
+dynamic = ["version"]
+description = "Arbor — an autonomous research agent that proposes ideas, edits code, runs experiments, and iterates on a hypothesis tree."
+readme = "README.md"
+requires-python = ">=3.10"
+license = "Apache-2.0"
+license-files = ["LICENSE"]
+keywords = ["ai", "agent", "autonomous-research", "llm", "experimentation"]
+authors = [{ name = "Jiajie Jin", email = "jinjiajie@ruc.edu.cn" }]
+dependencies = [
+    "anthropic>=0.52.0",
+    "openai>=1.30.0",
+    "litellm>=1.55.0",
+    "httpx>=0.27.0",
+    "requests>=2.28",
+    "tiktoken>=0.7.0",
+    "pypdf>=4.0",
+    "typer>=0.12.0",
+    "rich>=13.0",
+    "pyyaml>=6.0",
+    "prompt-toolkit>=3.0",
+    "pydantic>=2.0",
+    "pydantic-settings>=2.0",
+    # Zero-config alphaXiv literature-search backend (SearchAgent /
+    # `arbor idea-check`). Bundled by default so search works out of the box.
+    # `alphaxiv-py` requires Python >= 3.12, so it is gated by a marker: on
+    # Python 3.10/3.11 it is simply skipped and the backend degrades gracefully
+    # (a clear runtime message), keeping the base install on Python >= 3.10.
+    "alphaxiv-py>=0.6.0; python_version >= '3.12'",
+]
+
+[project.urls]
+Homepage = "https://github.com/RUC-NLPIR/Arbor"
+Repository = "https://github.com/RUC-NLPIR/Arbor"
+Issues = "https://github.com/RUC-NLPIR/Arbor/issues"
+
+[project.optional-dependencies]
+docs = [
+    "mkdocs-material>=9.5",
+    "mkdocs-static-i18n>=1.2",
+]
+# `arbor mcp` (run Arbor's deterministic tools as an MCP server for a host
+# coding agent). Kept optional so the base install stays lean — install with
+# `pip install arbor-agent[mcp]`.
+mcp = [
+    "mcp>=1.2.0",
+]
+
+[project.scripts]
+arbor = "arbor.cli.app:main"
+executor = "arbor.executor.main:cli"
+coordinator = "arbor.coordinator.main:cli"
+run-research = "arbor.run:cli"
+review-research = "arbor.review:cli"
+
+[build-system]
+requires = ["setuptools>=77.0", "setuptools-scm>=8.0"]
+build-backend = "setuptools.build_meta"
+
+# Version is derived automatically from the latest git tag (e.g. tag
+# `v0.2.0` -> version `0.2.0`). Never hard-code `version` here again; just
+# push a `v*` tag and CI publishes that version. `fallback_version` is only
+# used for local builds when no tag/git history is available.
+[tool.setuptools_scm]
+fallback_version = "0.1.0"
+
+# The code lives in `src/` on disk but is imported as the `arbor`
+# package, so we map the package root with `package-dir` and list the
+# sub-packages explicitly (auto-discovery can't rename `src/` -> the import
+# name). Add new sub-packages here when you create them.
+[tool.setuptools]
+package-dir = { "arbor" = "src", "arbor.skills_suite" = "skills" }
+packages = [
+    "arbor",
+    "arbor.cli",
+    "arbor.cli.commands",
+    "arbor.cli.intake",
+    "arbor.coordinator",
+    "arbor.coordinator.tools",
+    "arbor.core",
+    "arbor.core.llm",
+    "arbor.core.tools",
+    "arbor.core.tools.web",
+    "arbor.events",
+    "arbor.events.subscribers",
+    "arbor.executor",
+    "arbor.mcp",
+    "arbor.mle",
+    "arbor.plugins",
+    "arbor.report",
+    "arbor.search_agent",
+    "arbor.webui",
+    "arbor.zoo",
+    # The Agent Skill suite (top-level `skills/`) is shipped inside the wheel as
+    # `arbor.skills_suite` so `arbor install` can find and copy it after a plain
+    # `pip install`. `bundled_skills_root()` resolves to this directory.
+    "arbor.skills_suite",
+]
+
+[tool.setuptools.package-data]
+"arbor" = ["skills/*.md", "py.typed"]
+"arbor.cli" = ["assets/demo_session/*", "assets/*.html"]
+"arbor.webui" = ["index.html"]
+"arbor.plugins" = ["*.yaml", "*.yml"]
+# Ship every file in the skill suite verbatim (SKILL.md, agents/*.yaml,
+# references/*.md, scripts/*.py, …) so the installed copy is complete.
+"arbor.skills_suite" = ["**/*"]
+
+# ── Dev tooling ──────────────────────────────────────────────────────
+# Install with: `uv sync --group dev`  (or `pip install -e ".[dev]"` is NOT
+# enough — these live in a dependency group, use uv or `pip install <names>`).
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+    "ruff>=0.6",
+    "mypy>=1.10",
+    "types-PyYAML",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# Tests map the `arbor` package onto `src/` themselves, so no install is needed.
+addopts = "-q"
+
+[tool.ruff]
+target-version = "py310"
+# Match the existing codebase: long lines are common and intentional, so we
+# keep ruff's default rule set (pyflakes `F` + a subset of pycodestyle `E`)
+# rather than enabling line-length or import-sorting churn.
+extend-exclude = ["project_page", "site", "assets"]
+
+[tool.ruff.lint.per-file-ignores]
+# run_dashboard.py is a compact TUI key dispatcher that deliberately uses
+# `action(); return` one-liners throughout — respect that local idiom.
+"src/cli/run_dashboard.py" = ["E702"]
+
+[tool.mypy]
+# Advisory only for now: the codebase is large and largely untyped, so mypy
+# runs non-blocking in CI. Tighten these as type coverage grows.
+python_version = "3.10"
+ignore_missing_imports = true
+warn_unused_ignores = false
+warn_redundant_casts = true
+exclude = ["project_page", "site", "tests"]

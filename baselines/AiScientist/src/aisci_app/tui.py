@@ -1,0 +1,2349 @@
+from __future__ import annotations
+
+import csv
+import json
+import shlex
+import select
+import subprocess
+import sys
+import termios
+import time
+import tty
+from dataclasses import dataclass
+from pathlib import Path
+import re
+from typing import Any
+
+from rich import box
+from rich.cells import cell_len
+from rich.columns import Columns
+from rich.console import Console, Group, RenderableType
+from rich.layout import Layout
+from rich.live import Live
+from rich.panel import Panel
+from rich.table import Table
+from rich.text import Text
+
+from aisci_app.presentation import build_mle_job_spec, default_mle_llm_profile_name, paper_artifact_hints
+from aisci_app.service import JobService
+from aisci_core.models import JobRecord, JobStatus, PullPolicy
+from aisci_core.paths import ensure_job_dirs, resolve_job_paths
+from aisci_core.store import JobStore
+from aisci_domain_mle.preflight import MLELaunchPreflight, evaluate_mle_launch_preflight
+
+DEFAULT_REFRESH_SECONDS = 2.0
+GPU_REFRESH_SECONDS = 1.0
+MASCOT_FRAME_SECONDS = 2.0
+EVENT_LIMIT = 8
+PREVIEW_LINES = 18
+GPU_HISTORY_LENGTH = 20
+GPU_TEMP_MAX = 95
+GPU_QUERY = [
+    "nvidia-smi",
+    "--query-gpu=index,uuid,name,utilization.gpu,memory.used,memory.total,temperature.gpu",
+    "--format=csv,noheader,nounits",
+]
+GPU_PROCESS_QUERY = [
+    "nvidia-smi",
+    "--query-compute-apps=gpu_uuid,pid,process_name,used_gpu_memory",
+    "--format=csv,noheader,nounits",
+]
+DETAIL_TABS = ("overview", "events", "logs", "conversation")
+STATUS_STYLES = {
+    JobStatus.PENDING: "yellow",
+    JobStatus.RUNNING: "cyan",
+    JobStatus.SUCCEEDED: "green",
+    JobStatus.FAILED: "bold red",
+    JobStatus.CANCELLED: "magenta",
+}
+
+PHASE_LABELS = {
+    "ingest": "ingest",
+    "analyze": "analyze",
+    "prioritize": "prioritize",
+    "implement": "implement",
+    "validate": "validate",
+    "finalize": "finalize",
+}
+
+PHASE_STYLES = {
+    "ingest": "bright_black",
+    "analyze": "yellow",
+    "prioritize": "magenta",
+    "implement": "cyan",
+    "validate": "green",
+    "finalize": "bright_white",
+}
+
+MASCOT_CLASSIC_FACES = (
+    "○ ◡ ○",
+    "- ﹏ -",
+    "> ◡ <",
+    "◕ ◡ ◕",
+    "○ ◠ ○",
+    "- ︶ -",
+    "> ◠ <",
+    "◕ ◠ ◕",
+)
+
+MASCOT_FACES = {
+    "idle": MASCOT_CLASSIC_FACES,
+    "thinking": (
+        "◔ ◡ ◔",
+        "◔ ◠ ◔",
+        "◕ ﹏ ◕",
+        "○ ◠ ○",
+        "- ﹏ -",
+        "> ◡ <",
+        "◕ ◡ ◕",
+        "○ ◡ ○",
+    ),
+    "running": (
+        "◉ ◡ ◉",
+        "◉ ◠ ◉",
+        "> ◡ <",
+        "> ◠ <",
+        "◕ ◡ ◕",
+        "○ ◡ ○",
+        "- ︶ -",
+        "◕ ◠ ◕",
+    ),
+    "success": (
+        "● ◡ ●",
+        "● ◠ ●",
+        "^ ◡ ^",
+        "^ ◠ ^",
+        "○ ◡ ○",
+        "> ◡ <",
+        "◕ ◡ ◕",
+        "- ︶ -",
+    ),
+    "error": (
+        "× _ ×",
+        "× ︵ ×",
+        "x _ x",
+        "x ︵ x",
+        "- ﹏ -",
+        "○ ◠ ○",
+    ),
+}
+
+MLE_TUI_PROFILE_OPTIONS = ("glm-5", "gpt-5.4", "gemini-3-flash")
+MLE_TUI_INPUT_MODES = ("competition_name", "local_zip", "data_dir")
+MLE_TUI_PULL_POLICIES = ("profile-default", "if-missing", "always", "never")
+
+
+@dataclass
+class MLELaunchState:
+    input_mode: str = "competition_name"
+    competition_name: str = "detecting-insults-in-social-commentary"
+    competition_zip_path: str = ""
+    data_dir: str = ""
+    mlebench_data_dir: str = ""
+    description_path: str = ""
+    sample_submission_path: str = ""
+    llm_profile: str = ""
+    gpu_ids_raw: str = "0"
+    gpus_raw: str = "0"
+    time_limit: str = "24h"
+    image: str = ""
+    pull_policy: str = "profile-default"
+    run_final_validation: bool = True
+
+
+@dataclass(frozen=True)
+class GpuStat:
+    index: str
+    uuid: str
+    name: str
+    utilization: int | None
+    memory_used: int | None
+    memory_total: int | None
+    temperature: int | None
+
+
+@dataclass(frozen=True)
+class GpuProcess:
+    gpu_uuid: str
+    pid: int
+    process_name: str
+    used_gpu_memory: int | None
+
+
+@dataclass(frozen=True)
+class GpuHistoryPoint:
+    utilization: int | None
+    memory_percent: int | None
+    temperature: int | None
+
+
+@dataclass(frozen=True)
+class JobRow:
+    job: JobRecord
+    display_phase: str
+    latest_event: str
+    validation_status: str | None
+    self_check_status: str | None
+    gpu_binding: str
+
+
+@dataclass(frozen=True)
+class JobDetail:
+    row: JobRow
+    main_step: int | None
+    recent_events: list[dict[str, Any]]
+    session_state: dict[str, Any]
+    validation: dict[str, Any]
+    self_check: dict[str, Any]
+    sandbox: dict[str, Any]
+    log_previews: dict[str, str]
+    artifact_lines: list[str]
+    artifact_tree: str
+    conversation_view: str
+    gpu_stats: list[GpuStat]
+    gpu_processes: list[GpuProcess]
+    gpu_history: dict[str, list[GpuHistoryPoint]]
+    gpu_error: str | None
+    gpu_process_error: str | None
+    subagent_counts: list[tuple[str, int]]
+
+
+@dataclass(frozen=True)
+class DashboardSnapshot:
+    jobs: list[JobRow]
+    selected_index: int
+    detail: JobDetail | None
+    collected_at: float
+
+    @property
+    def selected(self) -> JobRow | None:
+        if not self.jobs:
+            return None
+        return self.jobs[self.selected_index]
+
+
+@dataclass(frozen=True)
+class TUIRunResult:
+    job_id: str | None
+    completed: bool
+    detached: bool
+
+
+def run_mle_launcher(
+    *,
+    store: JobStore | None = None,
+    console: Console | None = None,
+) -> TUIRunResult | None:
+    app = _MLELauncherApp(
+        store=store or JobStore(),
+        console=console or Console(),
+    )
+    return app.run()
+
+
+@dataclass(frozen=True)
+class _MLELauncherField:
+    key: str
+    label: str
+    value: str
+    hint: str = ""
+    editor: str = "text"
+
+
+class _MLELauncherApp:
+    def __init__(
+        self,
+        *,
+        store: JobStore,
+        console: Console,
+    ) -> None:
+        self.console = console
+        self.service = JobService(store=store)
+        self.state = MLELaunchState()
+        self.state.llm_profile = default_mle_llm_profile_name()
+        self.message = "Configure the launch, then press s to start."
+        self.preflight = MLELaunchPreflight(ready=True)
+        self.preflight_ran = False
+
+    def run(self) -> TUIRunResult | None:
+        if not sys.stdin.isatty() or not sys.stdout.isatty():
+            raise RuntimeError("MLE launcher requires an interactive terminal.")
+        while True:
+            self.console.clear()
+            self.console.print(self._render())
+            command = self.console.input(
+                "[bold cyan]Action[/] [dim](number edit, s start, p preflight, q quit)[/]: "
+            ).strip()
+            if not command:
+                self.message = "Enter a field number, s, p, or q."
+                continue
+            lowered = command.lower()
+            if lowered == "q":
+                return None
+            if lowered == "s":
+                result = self._start_job()
+                if result is not None:
+                    return result
+                continue
+            if lowered == "p":
+                self._refresh_preflight()
+                continue
+            if command.isdigit():
+                self._edit_field(int(command))
+                continue
+            self.message = f"Unknown action: {command!r}"
+
+    def _render(self) -> RenderableType:
+        layout = Layout()
+        layout.split_column(
+            Layout(self._render_header(), name="header", size=4),
+            Layout(name="body"),
+            Layout(self._render_footer(), name="footer", size=3),
+        )
+        body = Layout()
+        body.split_row(
+            Layout(self._render_form(), name="form", ratio=2),
+            Layout(self._render_sidebar(), name="sidebar", ratio=3),
+        )
+        layout["body"].update(body)
+        return layout
+
+    def _render_header(self) -> RenderableType:
+        title = Text("AiScientist MLE Launcher", style="bold bright_white")
+        subtitle = Text()
+        subtitle.append("Host-side MLE engine", style="cyan")
+        subtitle.append("  ")
+        subtitle.append("Docker sandbox", style="yellow")
+        subtitle.append("  ")
+        subtitle.append(self.message, style="white" if self.preflight.ready else "yellow")
+        return Panel(Group(title, subtitle), box=box.ROUNDED, border_style="cyan")
+
+    def _render_form(self) -> RenderableType:
+        table = Table(
+            box=box.SIMPLE_HEAVY,
+            expand=True,
+            header_style="bold bright_white",
+            show_lines=False,
+            row_styles=["", "dim"],
+        )
+        table.add_column("#", width=3, justify="right")
+        table.add_column("Field", style="cyan", width=26)
+        table.add_column("Value", overflow="fold")
+        table.add_column("Hint", style="dim", overflow="fold")
+        for index, field in enumerate(self._fields(), start=1):
+            table.add_row(str(index), field.label, field.value, field.hint)
+        return Panel(table, title="Launch Settings", box=box.ROUNDED, border_style="cyan")
+
+    def _render_sidebar(self) -> RenderableType:
+        preview = Panel(
+            Text(self._command_preview(), style="white"),
+            title="Command Preview",
+            box=box.ROUNDED,
+            border_style="green",
+        )
+        notes = self._preflight_text()
+        details = Panel(
+            notes,
+            title="Preflight",
+            box=box.ROUNDED,
+            border_style="yellow" if self.preflight.ready else "red",
+        )
+        tips = Panel(
+            Text(
+                "This launcher exposes the common MLE fields.\n"
+                "For advanced flags such as validation_command or custom grading config,\n"
+                "use `aisci mle run ...` directly.",
+                style="dim",
+            ),
+            title="Notes",
+            box=box.ROUNDED,
+            border_style="bright_black",
+        )
+        return Group(preview, details, tips)
+
+    def _render_footer(self) -> RenderableType:
+        return Panel(
+            Text(
+                "number edit  s start+attach dashboard  p run launch preflight  q quit",
+                style="dim",
+            ),
+            box=box.SQUARE,
+            border_style="bright_black",
+        )
+
+    def _fields(self) -> list[_MLELauncherField]:
+        fields = [
+            _MLELauncherField(
+                key="input_mode",
+                label="Input Mode",
+                value=self._display_input_mode(),
+                hint="cycle competition name / local zip / prepared data dir",
+                editor="choice",
+            ),
+        ]
+        if self.state.input_mode == "competition_name":
+            fields.extend(
+                [
+                    _MLELauncherField(
+                        key="competition_name",
+                        label="Competition Name",
+                        value=_display_launcher_value(self.state.competition_name),
+                        hint="required",
+                    ),
+                    _MLELauncherField(
+                        key="mlebench_data_dir",
+                        label="MLE Cache Root",
+                        value=_display_launcher_value(self.state.mlebench_data_dir),
+                        hint="blank = ~/.cache/mle-bench/data",
+                    ),
+                ]
+            )
+        elif self.state.input_mode == "local_zip":
+            fields.extend(
+                [
+                    _MLELauncherField(
+                        key="competition_name",
+                        label="Competition Name",
+                        value=_display_launcher_value(self.state.competition_name),
+                        hint="optional but recommended for clearer metadata/grading",
+                    ),
+                    _MLELauncherField(
+                        key="competition_zip_path",
+                        label="Competition Zip",
+                        value=_display_launcher_value(self.state.competition_zip_path),
+                        hint="path to local zip file",
+                    ),
+                ]
+            )
+        else:
+            fields.append(
+                _MLELauncherField(
+                    key="data_dir",
+                    label="Prepared Data Dir",
+                    value=_display_launcher_value(self.state.data_dir),
+                    hint="path containing public MLE data",
+                )
+            )
+        fields.extend(
+            [
+                _MLELauncherField(
+                    key="description_path",
+                    label="Description Override",
+                    value=_display_launcher_value(self.state.description_path),
+                    hint="optional",
+                ),
+                _MLELauncherField(
+                    key="sample_submission_path",
+                    label="Sample Submission Override",
+                    value=_display_launcher_value(self.state.sample_submission_path),
+                    hint="optional",
+                ),
+                _MLELauncherField(
+                    key="llm_profile",
+                    label="LLM Profile",
+                    value=_display_launcher_value(self.state.llm_profile),
+                    hint="cycle glm-5 / gpt-5.4 / gemini-3-flash",
+                    editor="choice",
+                ),
+                _MLELauncherField(
+                    key="gpu_ids_raw",
+                    label="GPU IDs",
+                    value=_display_launcher_value(self.state.gpu_ids_raw),
+                    hint="comma-separated; clear this if you use GPU count",
+                ),
+                _MLELauncherField(
+                    key="gpus_raw",
+                    label="GPU Count",
+                    value=_display_launcher_value(self.state.gpus_raw),
+                    hint="leave 0 when GPU IDs are set",
+                ),
+                _MLELauncherField(
+                    key="time_limit",
+                    label="Time Limit",
+                    value=_display_launcher_value(self.state.time_limit),
+                    hint="examples: 9h, 24h, 90m",
+                ),
+                _MLELauncherField(
+                    key="image",
+                    label="Docker Image",
+                    value=_display_launcher_value(self.state.image),
+                    hint="blank = use shared image profile",
+                ),
+                _MLELauncherField(
+                    key="pull_policy",
+                    label="Pull Policy",
+                    value=_display_launcher_value(self.state.pull_policy),
+                    hint="cycle profile-default / if-missing / always / never",
+                    editor="choice",
+                ),
+                _MLELauncherField(
+                    key="run_final_validation",
+                    label="Final Validation",
+                    value="on" if self.state.run_final_validation else "off",
+                    hint="run final grading / validation after solve",
+                    editor="bool",
+                ),
+            ]
+        )
+        return fields
+
+    def _edit_field(self, index: int) -> None:
+        fields = self._fields()
+        if index < 1 or index > len(fields):
+            self.message = f"Field {index} is out of range."
+            return
+        field = fields[index - 1]
+        if field.editor == "choice":
+            self._cycle_field(field.key)
+            self.message = f"Updated {field.label}."
+            return
+        if field.editor == "bool":
+            current = bool(getattr(self.state, field.key))
+            setattr(self.state, field.key, not current)
+            self.message = f"Updated {field.label}."
+            return
+        prompt = (
+            f"[bold cyan]{field.label}[/]\n"
+            f"[dim]Current: {field.value}. Submit an empty value to clear.[/]\n> "
+        )
+        new_value = self.console.input(prompt)
+        setattr(self.state, field.key, new_value.strip())
+        self.message = f"Updated {field.label}."
+
+    def _cycle_field(self, key: str) -> None:
+        if key == "input_mode":
+            current = self.state.input_mode
+            options = list(MLE_TUI_INPUT_MODES)
+            next_index = (options.index(current) + 1) % len(options)
+            self.state.input_mode = options[next_index]
+            return
+        if key == "llm_profile":
+            current = self.state.llm_profile
+            options = list(MLE_TUI_PROFILE_OPTIONS)
+            next_index = (options.index(current) + 1) % len(options) if current in options else 0
+            self.state.llm_profile = options[next_index]
+            return
+        if key == "pull_policy":
+            current = self.state.pull_policy
+            options = list(MLE_TUI_PULL_POLICIES)
+            next_index = (options.index(current) + 1) % len(options) if current in options else 0
+            self.state.pull_policy = options[next_index]
+            return
+
+    def _refresh_preflight(self) -> None:
+        self.preflight_ran = True
+        try:
+            spec = self._build_spec()
+        except Exception as exc:  # noqa: BLE001
+            self.preflight = MLELaunchPreflight(ready=False, errors=(str(exc),))
+            self.message = str(exc)
+            return
+        self.preflight = evaluate_mle_launch_preflight(spec)
+        self.message = self.preflight.summary()
+
+    def _start_job(self) -> TUIRunResult | None:
+        self._refresh_preflight()
+        if not self.preflight.ready:
+            return None
+        spec = self._build_spec()
+        job = self.service.create_job(spec)
+        self.service.spawn_worker(job.id, wait=False)
+        self.console.clear()
+        self.console.print(
+            Panel(
+                Text(f"Started MLE job {job.id}. Attaching dashboard...", style="green"),
+                box=box.ROUNDED,
+                border_style="green",
+            )
+        )
+        return run_tui_dashboard(
+            job_id=job.id,
+            refresh_seconds=DEFAULT_REFRESH_SECONDS,
+            once=False,
+            exit_when_job_done=True,
+            store=self.service.store,
+            console=self.console,
+        )
+
+    def _build_spec(self):
+        gpu_ids = _parse_launcher_gpu_ids(self.state.gpu_ids_raw)
+        gpus = _parse_launcher_gpu_count(self.state.gpus_raw)
+        if gpu_ids and gpus > 0:
+            raise ValueError("Use either GPU IDs or GPU count, not both.")
+        competition_name = self.state.competition_name.strip() or None
+        competition_zip_path = None
+        data_dir = None
+        if self.state.input_mode == "competition_name":
+            if not competition_name:
+                raise ValueError("Competition name is required in competition-name mode.")
+        elif self.state.input_mode == "local_zip":
+            competition_zip_path = self.state.competition_zip_path.strip() or None
+            if not competition_zip_path:
+                raise ValueError("Competition zip path is required in local-zip mode.")
+        else:
+            competition_name = None
+            data_dir = self.state.data_dir.strip() or None
+            if not data_dir:
+                raise ValueError("Prepared data dir is required in data-dir mode.")
+        pull_policy = _launcher_pull_policy(self.state.pull_policy)
+        return build_mle_job_spec(
+            competition_name=competition_name,
+            competition_zip_path=competition_zip_path,
+            mlebench_data_dir=self.state.mlebench_data_dir.strip() or None,
+            workspace_zip=None,
+            competition_bundle_zip=None,
+            data_dir=data_dir,
+            code_repo_zip=None,
+            description_path=self.state.description_path.strip() or None,
+            sample_submission_path=self.state.sample_submission_path.strip() or None,
+            validation_command=None,
+            grading_config_path=None,
+            metric_direction=None,
+            llm_profile=self.state.llm_profile.strip() or default_mle_llm_profile_name(),
+            gpus=gpus,
+            gpu_ids=gpu_ids,
+            time_limit=self.state.time_limit.strip() or "24h",
+            image=self.state.image.strip() or None,
+            pull_policy=pull_policy,
+            run_final_validation=self.state.run_final_validation,
+        )
+
+    def _display_input_mode(self) -> str:
+        return {
+            "competition_name": "competition name",
+            "local_zip": "local zip",
+            "data_dir": "prepared data dir",
+        }.get(self.state.input_mode, self.state.input_mode)
+
+    def _command_preview(self) -> str:
+        command = ["aisci", "mle", "run"]
+        if self.state.input_mode == "competition_name":
+            if self.state.competition_name.strip():
+                command.extend(["--name", self.state.competition_name.strip()])
+            if self.state.mlebench_data_dir.strip():
+                command.extend(["--mlebench-data-dir", self.state.mlebench_data_dir.strip()])
+        elif self.state.input_mode == "local_zip":
+            if self.state.competition_name.strip():
+                command.extend(["--name", self.state.competition_name.strip()])
+            if self.state.competition_zip_path.strip():
+                command.extend(["--zip", self.state.competition_zip_path.strip()])
+        else:
+            if self.state.data_dir.strip():
+                command.extend(["--data-dir", self.state.data_dir.strip()])
+        if self.state.description_path.strip():
+            command.extend(["--description-path", self.state.description_path.strip()])
+        if self.state.sample_submission_path.strip():
+            command.extend(["--sample-submission-path", self.state.sample_submission_path.strip()])
+        if self.state.llm_profile.strip():
+            command.extend(["--llm-profile", self.state.llm_profile.strip()])
+        if self.state.gpu_ids_raw.strip():
+            command.extend(["--gpu-ids", self.state.gpu_ids_raw.strip()])
+        elif self.state.gpus_raw.strip() and self.state.gpus_raw.strip() != "0":
+            command.extend(["--gpus", self.state.gpus_raw.strip()])
+        if self.state.time_limit.strip():
+            command.extend(["--time-limit", self.state.time_limit.strip()])
+        if self.state.image.strip():
+            command.extend(["--image", self.state.image.strip()])
+        if self.state.pull_policy != "profile-default":
+            command.extend(["--pull-policy", self.state.pull_policy])
+        command.append("--run-final-validation" if self.state.run_final_validation else "--skip-final-validation")
+        command.extend(["--wait", "--tui"])
+        return " \\\n  ".join(shlex.quote(item) for item in command)
+
+    def _preflight_text(self) -> Text:
+        lines: list[tuple[str, str]] = []
+        if self.preflight.errors:
+            for item in self.preflight.errors:
+                lines.append(("bold red", f"error: {item}"))
+        if self.preflight.warnings:
+            for item in self.preflight.warnings:
+                lines.append(("yellow", f"warn: {item}"))
+        if not lines and self.preflight_ran:
+            lines.append(("green", "Preflight passed. No blocking errors or warnings."))
+        if not lines:
+            lines.append(("dim", "No preflight run yet. Press p to check launch readiness now."))
+        text = Text()
+        for index, (style, line) in enumerate(lines):
+            if index:
+                text.append("\n")
+            text.append(line, style=style)
+        return text
+
+
+def parse_nvidia_smi_csv(text: str) -> list[GpuStat]:
+    rows = []
+    for raw_row in csv.reader(line for line in text.splitlines() if line.strip()):
+        if len(raw_row) < 7:
+            continue
+        index, uuid, name, util, mem_used, mem_total, temperature = [item.strip() for item in raw_row[:7]]
+        rows.append(
+            GpuStat(
+                index=index,
+                uuid=uuid,
+                name=name,
+                utilization=_parse_int(util),
+                memory_used=_parse_int(mem_used),
+                memory_total=_parse_int(mem_total),
+                temperature=_parse_int(temperature),
+            )
+        )
+    return rows
+
+
+def parse_nvidia_smi_process_csv(text: str) -> list[GpuProcess]:
+    rows = []
+    for raw_row in csv.reader(line for line in text.splitlines() if line.strip()):
+        if len(raw_row) < 4:
+            continue
+        gpu_uuid, pid, process_name, used_gpu_memory = [item.strip() for item in raw_row[:4]]
+        parsed_pid = _parse_int(pid)
+        if parsed_pid is None:
+            continue
+        rows.append(
+            GpuProcess(
+                gpu_uuid=gpu_uuid,
+                pid=parsed_pid,
+                process_name=process_name or "-",
+                used_gpu_memory=_parse_int(used_gpu_memory),
+            )
+        )
+    return rows
+
+
+def query_nvidia_smi(command: list[str] | None = None) -> tuple[list[GpuStat], str | None]:
+    try:
+        completed = subprocess.run(
+            command or GPU_QUERY,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=3,
+        )
+    except FileNotFoundError:
+        return [], "nvidia-smi not found"
+    except Exception as exc:  # noqa: BLE001
+        return [], str(exc)
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "nvidia-smi failed").strip()
+        return [], detail
+    return parse_nvidia_smi_csv(completed.stdout), None
+
+
+def query_nvidia_smi_processes(command: list[str] | None = None) -> tuple[list[GpuProcess], str | None]:
+    try:
+        completed = subprocess.run(
+            command or GPU_PROCESS_QUERY,
+            capture_output=True,
+            text=True,
+            check=False,
+            timeout=3,
+        )
+    except FileNotFoundError:
+        return [], "nvidia-smi not found"
+    except Exception as exc:  # noqa: BLE001
+        return [], str(exc)
+    if completed.returncode != 0:
+        detail = (completed.stderr or completed.stdout or "nvidia-smi compute-apps failed").strip()
+        return [], detail
+    return parse_nvidia_smi_process_csv(completed.stdout), None
+
+
+def run_tui_dashboard(
+    *,
+    job_id: str | None = None,
+    refresh_seconds: float = DEFAULT_REFRESH_SECONDS,
+    once: bool = False,
+    exit_when_job_done: bool = False,
+    store: JobStore | None = None,
+    console: Console | None = None,
+) -> TUIRunResult:
+    app = _DashboardApp(
+        store=store or JobStore(),
+        console=console or Console(),
+        refresh_seconds=refresh_seconds,
+        once=once,
+        initial_job_id=job_id,
+        exit_when_job_done=exit_when_job_done,
+    )
+    return app.run()
+
+
+class _DashboardApp:
+    def __init__(
+        self,
+        *,
+        store: JobStore,
+        console: Console,
+        refresh_seconds: float,
+        once: bool,
+        initial_job_id: str | None,
+        exit_when_job_done: bool,
+    ) -> None:
+        self.store = store
+        self.console = console
+        self.refresh_seconds = max(refresh_seconds, 0.2)
+        self.once = once
+        self.initial_job_id = initial_job_id
+        self.exit_when_job_done = exit_when_job_done
+        self.page = "detail" if initial_job_id else "jobs"
+        self.detail_tab = "overview"
+        self.message = ""
+        self._last_gpu_poll = 0.0
+        self._gpu_stats: list[GpuStat] = []
+        self._gpu_processes: list[GpuProcess] = []
+        self._gpu_history: dict[str, list[GpuHistoryPoint]] = {}
+        self._gpu_error: str | None = None
+        self._gpu_process_error: str | None = None
+        self._selected_index = 0
+        self._job_ids: list[str] = []
+        self._focus_job_id = initial_job_id
+        self._subagent_count_cache: dict[str, dict[str, Any]] = {}
+
+    def run(self) -> TUIRunResult:
+        snapshot = self._build_snapshot()
+        if self.once:
+            self.console.print(self._render_static(snapshot))
+            return self._result_from_snapshot(snapshot, detached=False)
+
+        if not self.console.is_terminal or not sys.stdin.isatty():
+            raise RuntimeError("Interactive TUI requires a TTY. Use --once for non-interactive rendering.")
+
+        detached = False
+        finished = False
+        with _TerminalKeys() as keys, Live(
+            self._render(snapshot),
+            console=self.console,
+            screen=True,
+            auto_refresh=False,
+            transient=False,
+            redirect_stdout=False,
+            redirect_stderr=False,
+        ) as live:
+            next_refresh = 0.0
+            while True:
+                now = time.monotonic()
+                if now >= next_refresh:
+                    snapshot = self._build_snapshot()
+                    live.update(self._render(snapshot), refresh=True)
+                    next_refresh = now + self.refresh_seconds
+                    if self.exit_when_job_done and self._attached_job_finished(snapshot):
+                        finished = True
+                        self.message = f"Job {self.initial_job_id} finished with status={snapshot.selected.job.status.value}."
+                        live.update(self._render(snapshot), refresh=True)
+                        time.sleep(0.6)
+                        break
+
+                key = keys.read_key(timeout=0.1)
+                if key is None:
+                    continue
+                if key == "q":
+                    detached = bool(self.initial_job_id and not self._attached_job_finished(snapshot))
+                    break
+                if self._handle_key(key, snapshot):
+                    snapshot = self._build_snapshot()
+                    live.update(self._render(snapshot), refresh=True)
+                    next_refresh = time.monotonic() + self.refresh_seconds
+
+        return self._result_from_snapshot(snapshot, detached=detached and not finished)
+
+    def _build_snapshot(self) -> DashboardSnapshot:
+        jobs = [self._build_row(job) for job in self.store.list_jobs()]
+        self._job_ids = [row.job.id for row in jobs]
+        if self._focus_job_id and self._focus_job_id in self._job_ids:
+            self._selected_index = self._job_ids.index(self._focus_job_id)
+        elif self._selected_index >= len(self._job_ids):
+            self._selected_index = max(len(self._job_ids) - 1, 0)
+        elif jobs:
+            self._focus_job_id = jobs[self._selected_index].job.id
+
+        stats, processes, error, process_error = self._current_gpu_metrics()
+        detail = None
+        if jobs:
+            selected = jobs[self._selected_index]
+            detail = self._build_detail(selected, stats, processes, error, process_error)
+        return DashboardSnapshot(
+            jobs=jobs,
+            selected_index=self._selected_index,
+            detail=detail,
+            collected_at=time.time(),
+        )
+
+    def _build_row(self, job: JobRecord) -> JobRow:
+        paths = resolve_job_paths(job.id)
+        validation = _read_json(paths.artifacts_dir / "validation_report.json")
+        self_check = _read_json(paths.workspace_dir / "agent" / "final_self_check.json")
+        latest_event = _latest_event_summary(job)
+        display_phase = _latest_phase(paths.logs_dir / "conversation.jsonl", fallback=job.phase.value)
+        if not latest_event and job.error:
+            latest_event = _compact_text(job.error)
+        return JobRow(
+            job=job,
+            display_phase=display_phase,
+            latest_event=latest_event or "-",
+            validation_status=_string_value(validation.get("status")),
+            self_check_status=_string_value(self_check.get("status")),
+            gpu_binding=_gpu_binding(job),
+        )
+
+    def _build_detail(
+        self,
+        row: JobRow,
+        gpu_stats: list[GpuStat],
+        gpu_processes: list[GpuProcess],
+        gpu_error: str | None,
+        gpu_process_error: str | None,
+    ) -> JobDetail:
+        job = row.job
+        paths = ensure_job_dirs(resolve_job_paths(job.id))
+        session_state = _read_json(paths.logs_dir / "paper_session_state.json")
+        validation = _read_json(paths.artifacts_dir / "validation_report.json")
+        self_check = _read_json(paths.workspace_dir / "agent" / "final_self_check.json")
+        sandbox = _read_json(paths.state_dir / "sandbox_session.json")
+        artifact_lines = []
+        for hint in paper_artifact_hints(job):
+            if hint.exists:
+                artifact_lines.append(f"{hint.label}: {Path(hint.path).name}")
+        artifact_lines = artifact_lines[:8]
+        selected_gpu_ids = list(job.runtime_profile.gpu_ids)
+        stats_by_index = {stat.index: stat for stat in gpu_stats}
+        selected_gpu_stats = [stats_by_index[gpu_id] for gpu_id in selected_gpu_ids if gpu_id in stats_by_index]
+        selected_gpu_uuids = {stat.uuid for stat in selected_gpu_stats}
+        selected_gpu_processes = [process for process in gpu_processes if process.gpu_uuid in selected_gpu_uuids]
+        selected_gpu_history = {stat.index: list(self._gpu_history.get(stat.index, [])) for stat in selected_gpu_stats}
+        return JobDetail(
+            row=row,
+            main_step=_latest_step(paths.logs_dir / "conversation.jsonl"),
+            recent_events=_recent_events(job),
+            session_state=session_state,
+            validation=validation,
+            self_check=self_check,
+            sandbox=sandbox,
+            log_previews={
+                "job.log": _tail_text(paths.logs_dir / "job.log", PREVIEW_LINES),
+                "agent.log": _tail_text(paths.logs_dir / "agent.log", PREVIEW_LINES),
+            },
+            artifact_lines=artifact_lines,
+            artifact_tree=_workspace_tree_text(paths.workspace_dir, depth=4),
+            conversation_view=_conversation_view_text(paths.logs_dir / "conversation.jsonl", limit=24),
+            gpu_stats=selected_gpu_stats,
+            gpu_processes=selected_gpu_processes,
+            gpu_history=selected_gpu_history,
+            gpu_error=gpu_error,
+            gpu_process_error=gpu_process_error,
+            subagent_counts=_collect_subagent_counts(
+                paths.logs_dir / "conversation.jsonl",
+                cache_store=self._subagent_count_cache,
+            ),
+        )
+
+    def _current_gpu_metrics(self) -> tuple[list[GpuStat], list[GpuProcess], str | None, str | None]:
+        now = time.monotonic()
+        if now - self._last_gpu_poll < GPU_REFRESH_SECONDS:
+            return self._gpu_stats, self._gpu_processes, self._gpu_error, self._gpu_process_error
+        self._gpu_stats, self._gpu_error = query_nvidia_smi()
+        if not self._gpu_error:
+            self._remember_gpu_history(self._gpu_stats)
+        self._gpu_processes, self._gpu_process_error = query_nvidia_smi_processes()
+        self._last_gpu_poll = now
+        return self._gpu_stats, self._gpu_processes, self._gpu_error, self._gpu_process_error
+
+    def _remember_gpu_history(self, stats: list[GpuStat]) -> None:
+        seen = set()
+        for stat in stats:
+            seen.add(stat.index)
+            history = list(self._gpu_history.get(stat.index, []))
+            history.append(
+                GpuHistoryPoint(
+                    utilization=stat.utilization,
+                    memory_percent=_memory_percent(stat),
+                    temperature=stat.temperature,
+                )
+            )
+            self._gpu_history[stat.index] = history[-GPU_HISTORY_LENGTH:]
+        for index in list(self._gpu_history.keys()):
+            if index not in seen:
+                self._gpu_history[index] = self._gpu_history[index][-GPU_HISTORY_LENGTH:]
+
+    def _attached_job_finished(self, snapshot: DashboardSnapshot) -> bool:
+        selected = snapshot.selected
+        if selected is None or self.initial_job_id is None:
+            return False
+        if selected.job.id != self.initial_job_id:
+            return False
+        return selected.job.status not in {JobStatus.PENDING, JobStatus.RUNNING}
+
+    def _result_from_snapshot(self, snapshot: DashboardSnapshot, *, detached: bool) -> TUIRunResult:
+        selected = snapshot.selected
+        completed = bool(selected and selected.job.status not in {JobStatus.PENDING, JobStatus.RUNNING})
+        return TUIRunResult(
+            job_id=selected.job.id if selected else self.initial_job_id,
+            completed=completed,
+            detached=detached,
+        )
+
+    def _handle_key(self, key: str, snapshot: DashboardSnapshot) -> bool:
+        jobs = snapshot.jobs
+        if key in {"j", "down"} and jobs:
+            self._selected_index = min(self._selected_index + 1, len(jobs) - 1)
+            self._focus_job_id = jobs[self._selected_index].job.id
+            return True
+        if key in {"k", "up"} and jobs:
+            self._selected_index = max(self._selected_index - 1, 0)
+            self._focus_job_id = jobs[self._selected_index].job.id
+            return True
+        if key == "enter" and jobs:
+            self.page = "detail"
+            return True
+        if key == "b":
+            if self.page == "gpu":
+                self.page = "detail" if self._focus_job_id else "jobs"
+            elif self.page == "detail" and not self.initial_job_id:
+                self.page = "jobs"
+            return True
+        if key in {"1", "2", "3", "4"} and self.page in {"detail", "gpu"}:
+            self.detail_tab = DETAIL_TABS[int(key) - 1]
+            if self.page == "gpu":
+                self.page = "detail"
+            return True
+        if key == "g":
+            self.page = "gpu"
+            return True
+        if key == "r":
+            self._last_gpu_poll = 0.0
+            self.message = "Refreshed."
+            return True
+        return False
+
+    def _render(self, snapshot: DashboardSnapshot) -> RenderableType:
+        layout = Layout()
+        layout.split_column(
+            Layout(self._render_header(snapshot), name="header", size=5),
+            Layout(name="body"),
+            Layout(self._render_footer(snapshot), name="footer", size=2),
+        )
+        if self.page == "gpu":
+            layout["body"].update(self._render_gpu_page(snapshot))
+        elif self.page == "detail":
+            layout["body"].update(self._render_detail_page(snapshot))
+        else:
+            layout["body"].update(self._render_jobs_page(snapshot))
+        return layout
+
+    def _render_static(self, snapshot: DashboardSnapshot) -> RenderableType:
+        if self.page == "gpu":
+            body = self._render_gpu_page(snapshot)
+        elif self.page == "detail":
+            body = self._render_detail_page(snapshot)
+        else:
+            body = self._render_jobs_page(snapshot)
+        return Group(
+            self._render_header(snapshot),
+            body,
+            self._render_footer(snapshot),
+        )
+
+    def _render_header(self, snapshot: DashboardSnapshot) -> RenderableType:
+        selected = snapshot.selected
+        title = Text("AiScientist", style="bold bright_white")
+        title.append("  ")
+        title.append(self._render_mascot(selected.job if selected else None, phase_override=selected.display_phase if selected else None))
+
+        subtitle = Text()
+        subtitle.append(f"jobs={len(snapshot.jobs)}", style="white")
+        if selected:
+            subtitle.append("  ")
+            subtitle.append(f"job={_short_job_id(selected.job.id, width=20)}", style="cyan")
+            subtitle.append("  ")
+            subtitle.append_text(_status_badge(selected.job.status))
+            subtitle.append("  ")
+            subtitle.append(_labelize_phase(selected.display_phase), style=PHASE_STYLES.get(selected.display_phase, "white"))
+        if self.message:
+            subtitle.append("  ")
+            subtitle.append(self.message, style="yellow")
+        return Panel(Group(title, subtitle), box=box.ROUNDED, border_style="cyan")
+
+    def _render_footer(self, snapshot: DashboardSnapshot) -> RenderableType:
+        hints = "j/k move  enter details  b back  1-4 tabs  g gpu  r refresh  q quit"
+        if self.page == "gpu":
+            hints = "b back  r refresh  q quit"
+        if not snapshot.jobs:
+            hints = "q quit"
+        return Panel(Text(hints, style="dim"), box=box.SQUARE, border_style="bright_black")
+
+    def _render_jobs_page(self, snapshot: DashboardSnapshot) -> RenderableType:
+        if not snapshot.jobs:
+            return Panel("No jobs found. Start one with `aisci paper run --wait --tui`.", box=box.ROUNDED, border_style="bright_black")
+
+        table = Table(box=box.SIMPLE_HEAVY, expand=True, show_lines=False, header_style="bold bright_white", row_styles=["", "dim"])
+        table.add_column("", width=2)
+        table.add_column("Job", style="cyan", no_wrap=True)
+        table.add_column("Type", width=6)
+        table.add_column("Status", width=12, no_wrap=True)
+        table.add_column("Phase", width=11)
+        table.add_column("Age", width=10)
+        table.add_column("GPU", width=12)
+        table.add_column("Checks", width=24)
+        table.add_column("Latest Event", overflow="fold")
+        for index, row in enumerate(snapshot.jobs):
+            selected = index == snapshot.selected_index
+            checks = _checks_status(row.validation_status, row.self_check_status)
+            table.add_row(
+                Text(">" if selected else " ", style="bold cyan" if selected else "dim"),
+                row.job.id,
+                row.job.job_type.value,
+                _status_badge(row.job.status),
+                Text(_labelize_phase(row.display_phase), style=PHASE_STYLES.get(row.display_phase, "white")),
+                Text(_human_duration(row.job.duration_seconds), style="white"),
+                row.gpu_binding,
+                checks,
+                Text(_crop(row.latest_event, 80), style="white"),
+                style="bold" if selected else "",
+            )
+
+        right = []
+        if snapshot.detail is not None:
+            right.append(self._render_selected_summary(snapshot.detail))
+
+        if self.console.size.width >= 120 and right:
+            return Columns(
+                [
+                    Panel(table, title="Jobs", box=box.ROUNDED, border_style="cyan"),
+                    Group(*right),
+                ],
+                expand=True,
+                equal=False,
+            )
+        return Group(Panel(table, title="Jobs", box=box.ROUNDED, border_style="cyan"), *right)
+
+    def _render_selected_summary(self, detail: JobDetail) -> RenderableType:
+        job = detail.row.job
+        summary = Table.grid(expand=True)
+        summary.add_column(style="cyan", ratio=1)
+        summary.add_column(ratio=2)
+        summary.add_row("objective", _crop(job.objective, 120))
+        summary.add_row("status", _status_badge(job.status))
+        summary.add_row("phase", Text(_labelize_phase(detail.row.display_phase), style=PHASE_STYLES.get(detail.row.display_phase, "white")))
+        summary.add_row("checks", _checks_status(detail.row.validation_status, detail.row.self_check_status))
+        summary.add_row("latest", _crop(detail.row.latest_event, 180))
+        summary.add_row("mode", _job_mode(job))
+        if detail.main_step is not None:
+            summary.add_row("orchestrator step", str(detail.main_step))
+        if job.runtime_profile.gpu_ids:
+            summary.add_row("gpu_ids", ", ".join(job.runtime_profile.gpu_ids))
+        elif job.runtime_profile.gpu_count > 0:
+            summary.add_row("gpu_count", str(job.runtime_profile.gpu_count))
+        return Panel(summary, title="Selected Job", box=box.ROUNDED, border_style=_status_style(job.status.value))
+
+    def _render_detail_page(self, snapshot: DashboardSnapshot) -> RenderableType:
+        detail = snapshot.detail
+        if detail is None:
+            return Panel("Job not found.", box=box.ROUNDED, border_style="red")
+
+        main = self._render_detail_main(detail)
+        sidebar = self._render_detail_sidebar(detail)
+        if sidebar is None:
+            return main
+        if self.console.size.width >= 140:
+            grid = Table.grid(expand=True)
+            grid.add_column(ratio=2)
+            grid.add_column(ratio=1)
+            grid.add_row(main, sidebar)
+            return grid
+        return Group(main, sidebar)
+
+    def _render_detail_main(self, detail: JobDetail) -> RenderableType:
+        tabs = []
+        for tab in DETAIL_TABS:
+            style = "bold cyan" if tab == self.detail_tab else "dim"
+            tabs.append(Text(f"[{DETAIL_TABS.index(tab) + 1}] {tab}", style=style))
+        tab_line = Text.assemble(*sum(([item, Text("  ")] for item in tabs), [])[:-1])
+        body: RenderableType
+        if self.detail_tab == "overview":
+            body = self._render_overview(detail)
+        elif self.detail_tab == "events":
+            body = self._render_events(detail)
+        elif self.detail_tab == "logs":
+            body = self._render_logs(detail)
+        else:
+            body = self._render_conversation(detail)
+        return Group(
+            Panel(tab_line, title=f"Job {detail.row.job.id}", box=box.ROUNDED, border_style="cyan"),
+            body,
+        )
+
+    def _detail_fill_height(self) -> int:
+        return max(self.console.size.height - 10, 8)
+
+    def _render_detail_sidebar(self, detail: JobDetail) -> RenderableType | None:
+        _ = detail
+        if self.detail_tab == "overview":
+            return self._render_gpu_summary(detail)
+        return None
+
+    def _render_overview(self, detail: JobDetail) -> RenderableType:
+        job = detail.row.job
+        overview = Table.grid(expand=True)
+        overview.add_column(style="cyan", ratio=1)
+        overview.add_column(ratio=2)
+        overview.add_row("status", _status_badge(job.status))
+        overview.add_row("phase", Text(_labelize_phase(detail.row.display_phase), style=PHASE_STYLES.get(detail.row.display_phase, "white")))
+        overview.add_row("llm", job.llm_profile)
+        overview.add_row("gpu", detail.row.gpu_binding)
+        overview.add_row("mode", _job_mode(job))
+        overview.add_row("duration", Text(_human_duration(job.duration_seconds), style="white"))
+        overview.add_row("orchestrator step", str(detail.main_step or "-"))
+        overview.add_row("latest activity", _crop(detail.row.latest_event, 120))
+        subagents = Table.grid(expand=True)
+        subagents.add_column(style="cyan", ratio=2)
+        subagents.add_column(justify="right")
+        if detail.subagent_counts:
+            for name, count in detail.subagent_counts:
+                subagents.add_row(_labelize_subagent(name), str(count))
+        else:
+            subagents.add_row("activity", "no subagent runs yet")
+        runtime = Table.grid(expand=True)
+        runtime.add_column(style="cyan", ratio=1)
+        runtime.add_column(ratio=2)
+        runtime.add_row("image", _string_value(detail.sandbox.get("image_ref")) or _string_value(job.runtime_profile.image) or "-")
+        runtime.add_row("container", _string_value(detail.sandbox.get("container_name")) or "-")
+        return Group(
+            Panel(overview, title="Overview", box=box.ROUNDED, border_style="cyan"),
+            Panel(subagents, title="Subagent Calls", box=box.ROUNDED, border_style="magenta"),
+            Panel(runtime, title="Runtime", box=box.ROUNDED, border_style="yellow"),
+        )
+
+    def _render_events(self, detail: JobDetail) -> RenderableType:
+        total_height = self._detail_fill_height()
+        if self.console.size.width >= 140:
+            artifact_height = total_height
+            events_height = total_height
+        else:
+            artifact_height, events_height = _split_weighted_heights(total_height, ratios=[3, 2], min_height=6)
+
+        artifact_lines = max(artifact_height - 2, 3)
+        event_lines = max(events_height - 2, 3)
+        records = _recent_events(detail.row.job, limit=max(event_lines * 2, EVENT_LIMIT))
+        body = _render_recent_events(
+            records,
+            max_lines=event_lines,
+            width=_events_panel_content_width(self.console.size.width),
+        )
+        artifacts_panel = Panel(
+            Text(_truncate_block_lines(detail.artifact_tree, max_lines=artifact_lines), style="bright_black"),
+            title="Artifacts",
+            box=box.ROUNDED,
+            border_style="yellow",
+            height=artifact_height,
+        )
+        events_panel = Panel(body, title="Recent Events", box=box.ROUNDED, border_style="cyan", height=events_height)
+        if self.console.size.width >= 140:
+            grid = Table.grid(expand=True)
+            grid.add_column(ratio=1)
+            grid.add_column(ratio=2)
+            grid.add_row(artifacts_panel, events_panel)
+            return grid
+        return Group(artifacts_panel, events_panel)
+
+    def _render_logs(self, detail: JobDetail) -> RenderableType:
+        paths = resolve_job_paths(detail.row.job.id)
+        names = list(detail.log_previews)
+        panel_layout = _log_panel_layout(self._detail_fill_height(), names=names)
+        panels = []
+        for name, _preview in detail.log_previews.items():
+            height, lines = panel_layout.get(name, (8, 3))
+            preview = _tail_text(paths.logs_dir / name, lines)
+            panels.append(_render_log_panel(name, preview, height=height, line_count=lines))
+        return Group(*panels)
+
+    def _render_conversation(self, detail: JobDetail) -> RenderableType:
+        height = self._detail_fill_height()
+        limit = max((height - 4) * 2, 24)
+        path = resolve_job_paths(detail.row.job.id).logs_dir / "conversation.jsonl"
+        body = _conversation_view_text(path, limit=limit)
+        return Panel(body, title="Conversation", box=box.ROUNDED, border_style="cyan", height=height)
+
+    def _render_gpu_summary(self, detail: JobDetail) -> RenderableType:
+        job = detail.row.job
+        if not job.runtime_profile.gpu_ids:
+            if job.runtime_profile.gpu_count > 0:
+                text = f"Requested {job.runtime_profile.gpu_count} GPU(s).\nUse --gpu-ids for per-device telemetry."
+            else:
+                text = "No GPU binding recorded for this job."
+            return Panel(text, title="GPU", box=box.ROUNDED, border_style="blue")
+
+        if detail.gpu_error:
+            text = f"gpu_ids: {', '.join(job.runtime_profile.gpu_ids)}\ntelemetry unavailable: {detail.gpu_error}"
+            return Panel(text, title="GPU", box=box.ROUNDED, border_style="red")
+
+        if not detail.gpu_stats:
+            text = f"gpu_ids: {', '.join(job.runtime_profile.gpu_ids)}\nwaiting for GPU telemetry."
+            return Panel(text, title="GPU", box=box.ROUNDED, border_style="blue")
+
+        uuid_to_processes: dict[str, list[GpuProcess]] = {}
+        for process in detail.gpu_processes:
+            uuid_to_processes.setdefault(process.gpu_uuid, []).append(process)
+
+        sections: list[RenderableType] = []
+        for index, stat in enumerate(detail.gpu_stats):
+            history = detail.gpu_history.get(stat.index, [])
+            processes = sorted(
+                uuid_to_processes.get(stat.uuid, []),
+                key=lambda item: (item.used_gpu_memory or 0, item.pid),
+                reverse=True,
+            )
+            sections.append(_render_gpu_section(stat, history, processes, process_error=detail.gpu_process_error))
+            if index < len(detail.gpu_stats) - 1:
+                sections.append(Text())
+
+        return Panel(Group(*sections), title="GPU", box=box.ROUNDED, border_style="blue")
+
+    def _render_gpu_page(self, snapshot: DashboardSnapshot) -> RenderableType:
+        detail = snapshot.detail
+        if detail is None:
+            return Panel("Job not found.", box=box.ROUNDED, border_style="red")
+        return Group(
+            Panel(
+                f"job: {detail.row.job.id}\nstatus: {detail.row.job.status.value}\ngpu: {detail.row.gpu_binding}",
+                title="GPU Scope",
+                box=box.ROUNDED,
+                border_style="cyan",
+            ),
+            self._render_gpu_summary(detail),
+        )
+
+    def _render_mascot(self, job: JobRecord | None, *, phase_override: str | None = None) -> Text:
+        phase = _mascot_phase(job, phase_override=phase_override)
+        faces = MASCOT_FACES.get(phase, MASCOT_FACES["idle"])
+        frame_index = int(time.monotonic() / MASCOT_FRAME_SECONDS) % len(faces)
+        style = {
+            "idle": "bright_white",
+            "thinking": "yellow",
+            "running": "cyan",
+            "success": "green",
+            "error": "bold red",
+        }.get(phase, "bright_white")
+        return Text(faces[frame_index], style=style)
+
+
+class _TerminalKeys:
+    def __enter__(self) -> "_TerminalKeys":
+        self.fd = sys.stdin.fileno()
+        self.previous = termios.tcgetattr(self.fd)
+        tty.setcbreak(self.fd)
+        return self
+
+    def __exit__(self, exc_type, exc, tb) -> None:  # noqa: ANN001
+        termios.tcsetattr(self.fd, termios.TCSADRAIN, self.previous)
+
+    def read_key(self, timeout: float) -> str | None:
+        readable, _, _ = select.select([sys.stdin], [], [], timeout)
+        if not readable:
+            return None
+        char = sys.stdin.read(1)
+        if char in {"\r", "\n"}:
+            return "enter"
+        if char == "\x1b":
+            sequence = self._read_escape_sequence()
+            return {
+                "\x1b[A": "up",
+                "\x1b[B": "down",
+            }.get(sequence)
+            return None
+        return char
+
+    def _read_escape_sequence(self) -> str:
+        sequence = "\x1b"
+        for _ in range(16):
+            ready, _, _ = select.select([sys.stdin], [], [], 0.01)
+            if not ready:
+                break
+            char = sys.stdin.read(1)
+            sequence += char
+            if char.isalpha() or char == "~":
+                break
+        return sequence
+
+
+def _parse_int(value: str | None) -> int | None:
+    if value is None:
+        return None
+    value = value.strip()
+    if not value or value == "[N/A]":
+        return None
+    try:
+        return int(float(value))
+    except ValueError:
+        return None
+
+
+def _parse_launcher_gpu_ids(raw: str | None) -> list[str]:
+    if raw is None:
+        return []
+    return [item.strip() for item in raw.split(",") if item.strip()]
+
+
+def _parse_launcher_gpu_count(raw: str | None) -> int:
+    if raw is None or not raw.strip():
+        return 0
+    try:
+        value = int(raw.strip())
+    except ValueError as exc:
+        raise ValueError("GPU count must be an integer.") from exc
+    if value < 0:
+        raise ValueError("GPU count must be >= 0.")
+    return value
+
+
+def _launcher_pull_policy(value: str) -> PullPolicy | None:
+    normalized = value.strip().lower()
+    if not normalized or normalized == "profile-default":
+        return None
+    return PullPolicy(normalized)
+
+
+def _display_launcher_value(value: str | None) -> str:
+    return value if value else "[auto]"
+
+
+def _read_json(path: Path) -> dict[str, Any]:
+    if not path.exists() or not path.is_file():
+        return {}
+    try:
+        return json.loads(path.read_text(encoding="utf-8", errors="replace"))
+    except Exception:  # noqa: BLE001
+        return {}
+
+
+def _load_recent_jsonl(path: Path, *, limit: int = EVENT_LIMIT) -> list[dict[str, Any]]:
+    if not path.exists() or not path.is_file():
+        return []
+    raw = _tail_bytes(path)
+    records: list[dict[str, Any]] = []
+    for line in raw.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            payload = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(payload, dict):
+            records.append(payload)
+    return records[-limit:]
+
+
+def _tail_text(path: Path, lines: int) -> str:
+    if not path.exists():
+        return "[missing]"
+    raw = _tail_bytes(path)
+    text = raw.decode("utf-8", errors="replace")
+    return "\n".join(text.splitlines()[-lines:])
+
+
+def _tail_bytes(path: Path, max_bytes: int = 65536) -> bytes:
+    with path.open("rb") as handle:
+        handle.seek(0, 2)
+        size = handle.tell()
+        start = max(size - max_bytes, 0)
+        handle.seek(start)
+        data = handle.read()
+    if start > 0:
+        _, _, data = data.partition(b"\n")
+    return data
+
+
+def _latest_event_summary(job: JobRecord) -> str:
+    paths = resolve_job_paths(job.id)
+    records = _load_recent_jsonl(paths.logs_dir / "conversation.jsonl", limit=4)
+    for record in reversed(records):
+        summary = _summarize_record(record)
+        if summary:
+            return summary
+    if job.error:
+        return _compact_text(job.error)
+    return ""
+
+
+def _recent_events(job: JobRecord, *, limit: int = EVENT_LIMIT) -> list[dict[str, Any]]:
+    paths = resolve_job_paths(job.id)
+    records = _load_recent_jsonl(paths.logs_dir / "conversation.jsonl", limit=limit)
+    events = _select_recent_feed_records(records, limit=limit)
+    if events:
+        return events[-limit:]
+    store = JobStore()
+    fallback: list[dict[str, Any]] = []
+    for event in store.list_events(job.id)[-limit:]:
+        fallback.append(
+            {
+                "event_type": "store_event",
+                "phase": event.phase.value,
+                "message": event.message,
+            }
+        )
+    return fallback
+
+
+def _select_recent_feed_records(records: list[dict[str, Any]], *, limit: int) -> list[dict[str, Any]]:
+    feed = [record for record in records if _event_belongs_in_recent_feed(record)]
+    if feed:
+        return feed[-limit:]
+    return [record for record in records if _format_event(record)][-limit:]
+
+
+def _event_belongs_in_recent_feed(record: dict[str, Any]) -> bool:
+    event_kind = _string_value(record.get("event_type")) or _string_value(record.get("event")) or ""
+    if event_kind in {
+        "tool_result",
+        "subagent_start",
+        "subagent_finish",
+        "status",
+        "validation",
+        "artifact",
+        "error",
+        "store_event",
+    }:
+        return True
+    if event_kind == "model_response":
+        tool_calls = record.get("tool_calls")
+        return isinstance(tool_calls, list) and bool(tool_calls)
+    message = _string_value(record.get("message")) or ""
+    lowered = message.lower()
+    return any(token in lowered for token in ("started", "finished", "completed", "failed", "timeout"))
+
+
+def _latest_step(path: Path) -> int | None:
+    records = _load_recent_jsonl(path, limit=20)
+    steps = [record.get("step") for record in records if isinstance(record.get("step"), int)]
+    return max(steps) if steps else None
+
+
+def _latest_phase(path: Path, *, fallback: str) -> str:
+    records = _load_recent_jsonl(path, limit=48)
+    for record in reversed(records):
+        phase = _phase_from_record(record)
+        if phase:
+            return phase
+    return fallback
+
+
+def _events_panel_content_width(console_width: int) -> int:
+    if console_width >= 140:
+        return max((console_width * 2) // 3 - 8, 32)
+    return max(console_width - 6, 24)
+
+
+def _summarize_record(record: dict[str, Any]) -> str:
+    message = _string_value(record.get("message"))
+    if message:
+        return _crop(_compact_text(message), 180)
+    event_kind = _string_value(record.get("event_type")) or _string_value(record.get("event")) or "event"
+    if event_kind == "model_response":
+        text = _string_value(record.get("text"))
+        if text:
+            return _crop(_compact_text(text), 180)
+        tool_calls = record.get("tool_calls")
+        if isinstance(tool_calls, list) and tool_calls:
+            names = []
+            for item in tool_calls:
+                if isinstance(item, dict):
+                    name = _string_value(item.get("name"))
+                    if name:
+                        names.append(name)
+            if names:
+                return f"Requested tools: {', '.join(names)}"
+    if event_kind == "tool_result":
+        tool = _string_value(record.get("tool")) or "tool"
+        preview = _string_value(record.get("result_preview"))
+        return _summarize_tool_result(tool, preview)
+    return _crop(event_kind, 180)
+
+
+def _summarize_tool_result(tool: str, preview: str | None) -> str:
+    if not preview:
+        return f"{tool}: completed"
+    if tool == "read_file_chunk":
+        return f"{tool}: {_summarize_read_file_chunk_preview(preview)}"
+    if tool == "prioritize_tasks":
+        return f"{tool}: {_summarize_prioritize_preview(preview)}"
+    if tool == "read_paper":
+        return f"{tool}: {_summarize_read_paper_preview(preview)}"
+    return f"{tool}: {_crop(_first_preview_excerpt(preview), 120)}"
+
+
+def _summarize_read_file_chunk_preview(preview: str) -> str:
+    compact = _compact_text(preview)
+    if compact.startswith("File not found: "):
+        path_text = compact.removeprefix("File not found: ")
+        raw_path, marker, remainder = path_text.partition(". It may")
+        if marker:
+            return f"File not found: {Path(raw_path).name}. It may{remainder}"
+        return f"File not found: {Path(path_text).name}"
+    return _crop(_first_preview_excerpt(preview), 96)
+
+
+def _summarize_prioritize_preview(preview: str) -> str:
+    pieces: list[str] = []
+    saved_match = re.search(r"saved to\*\*:\s*`([^`]+)`", preview, flags=re.IGNORECASE)
+    if not saved_match:
+        saved_match = re.search(r"saved to\s*`([^`]+)`", preview, flags=re.IGNORECASE)
+    if saved_match:
+        pieces.append(f"saved {Path(saved_match.group(1)).name}")
+    counts = []
+    for label in ("P0", "P1", "P2"):
+        match = re.search(rf"(\d+)\s+{label}\s+tasks", preview)
+        if match:
+            counts.append(f"{match.group(1)} {label}")
+    if counts:
+        pieces.append(" / ".join(counts))
+    if pieces:
+        return "; ".join(pieces)
+    return _crop(_first_preview_excerpt(preview), 96)
+
+
+def _summarize_read_paper_preview(preview: str) -> str:
+    pieces: list[str] = ["paper analysis ready"]
+    saved_match = re.search(r"Summary saved to\s+([^\s`]+)", preview)
+    if saved_match:
+        pieces.append(f"saved {Path(saved_match.group(1)).name}")
+    runtime_match = re.search(r"\*\*Total Runtime\*\*:\s*([^\n*]+)", preview)
+    if runtime_match:
+        pieces.append(runtime_match.group(1).strip())
+    return "; ".join(pieces)
+
+
+def _first_preview_excerpt(preview: str) -> str:
+    for raw_line in preview.splitlines():
+        line = _compact_text(re.sub(r"^\s*\d+\s*\|\s*", "", raw_line))
+        if line:
+            return line
+    return _compact_text(preview) or "completed"
+
+
+def _format_event(record: dict[str, Any]) -> str:
+    phase = _phase_from_record(record)
+    step = record.get("step")
+    prefix = []
+    if phase:
+        prefix.append(f"[{phase}]")
+    if isinstance(step, int):
+        prefix.append(f"step {step}")
+    summary = _summarize_record(record)
+    if not summary:
+        return ""
+    if prefix:
+        return f"{' '.join(prefix)} {summary}"
+    return summary
+
+
+def _render_recent_events(
+    records: list[dict[str, Any]],
+    *,
+    max_items: int | None = None,
+    max_lines: int | None = None,
+    width: int = 120,
+) -> RenderableType:
+    if not records:
+        return Text("No events recorded yet.", style="dim")
+    lines = [_format_recent_event_text(record, width=width) for record in records]
+    lines = [line for line in lines if line.plain.strip()]
+    if not lines:
+        return Text("No events recorded yet.", style="dim")
+    if max_lines is not None:
+        if len(lines) > max_lines:
+            if max_lines <= 1:
+                return Text("...", style="dim")
+            lines = [Text("...", style="dim"), *lines[-(max_lines - 1) :]]
+    elif max_items is not None and len(lines) > max_items:
+        if max_items <= 1:
+            return Text("...", style="dim")
+        lines = [Text("...", style="dim"), *lines[-(max_items - 1) :]]
+    return Group(*lines)
+
+
+def _format_recent_event_text(record: dict[str, Any], *, width: int | None = None) -> Text:
+    summary = _summarize_record(record)
+    if not summary:
+        return Text()
+
+    line = Text()
+    step = record.get("step")
+    phase = _phase_from_record(record)
+    if isinstance(step, int):
+        line.append(f"step {step}", style="bold cyan")
+        line.append("  ")
+    if phase:
+        line.append(f"[{phase}]", style="magenta")
+        line.append("  ")
+
+    summary_style = _recent_event_style(record, summary)
+    summary_width = 180
+    if width is not None:
+        summary_width = max(width - cell_len(line.plain), 8)
+    line.append(_crop(summary, summary_width), style=summary_style)
+    if width is not None and cell_len(line.plain) > width:
+        return Text(_crop(line.plain, width), style=summary_style)
+    return line
+
+
+def _recent_event_style(record: dict[str, Any], summary: str) -> str:
+    event_kind = _string_value(record.get("event_type")) or _string_value(record.get("event")) or "event"
+    if event_kind == "model_response":
+        return "bright_white"
+    if event_kind == "tool_result":
+        return "green"
+    if event_kind in {"subagent_start", "subagent_finish", "store_event"}:
+        return "yellow"
+
+    lowered = summary.lower()
+    if any(token in lowered for token in ("started", "finished", "completed", "failed", "timeout")):
+        return "yellow"
+    return "white"
+
+
+def _human_duration(seconds: float | None) -> str:
+    if seconds is None:
+        return "-"
+    total = int(max(seconds, 0))
+    hours, remainder = divmod(total, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours > 0:
+        return f"{hours}h{minutes:02d}m"
+    if minutes > 0:
+        return f"{minutes}m{secs:02d}s"
+    return f"{secs}s"
+
+
+def _gpu_binding(job: JobRecord) -> str:
+    if job.runtime_profile.gpu_ids:
+        return ",".join(job.runtime_profile.gpu_ids)
+    if job.runtime_profile.gpu_count > 0:
+        return f"count:{job.runtime_profile.gpu_count}"
+    return "-"
+
+
+def _checks_status(validation_status: str | None, self_check_status: str | None) -> Text:
+    text = Text()
+    text.append(f"repro:{validation_status or '-'}", style=_status_text_style(validation_status))
+    text.append(" / ")
+    text.append(f"review:{self_check_status or '-'}", style=_status_text_style(self_check_status))
+    return text
+
+
+def _status_text_style(status: str | None) -> str:
+    return _status_style(status)
+
+
+def _group_or_columns(
+    renderables: list[RenderableType],
+    *,
+    width: int,
+    threshold: int,
+    equal: bool = False,
+) -> RenderableType:
+    if width >= threshold:
+        return Columns(renderables, expand=True, equal=equal)
+    return Group(*renderables)
+
+
+def _compact_text(text: str | None) -> str:
+    if not text:
+        return ""
+    return " ".join(text.split())
+
+
+def _crop(text: str, width: int) -> str:
+    if len(text) <= width:
+        return text
+    if width <= 3:
+        return text[:width]
+    return text[: width - 3] + "..."
+
+
+def _truncate_block_lines(text: str, *, max_lines: int) -> str:
+    if max_lines <= 0:
+        return "..."
+    lines = text.splitlines()
+    if len(lines) <= max_lines:
+        return text
+    if max_lines == 1:
+        return "..."
+    if max_lines == 2:
+        return "\n".join(["...", lines[-1]])
+    visible = max_lines - 1
+    head_count = max(1, round(visible * 0.2))
+    head_count = min(head_count, visible - 1)
+    tail_count = visible - head_count
+    return "\n".join([*lines[:head_count], "...", *lines[-tail_count:]])
+
+
+def _split_heights(total: int, *, parts: int, min_height: int) -> list[int]:
+    if parts <= 0:
+        return []
+    total = max(total, parts * min_height)
+    base = total // parts
+    remainder = total % parts
+    heights = [base] * parts
+    for index in range(remainder):
+        heights[-(index + 1)] += 1
+    return [max(height, min_height) for height in heights]
+
+
+def _split_weighted_heights(total: int, *, ratios: list[int], min_height: int) -> list[int]:
+    if not ratios:
+        return []
+    ratios = [max(value, 1) for value in ratios]
+    count = len(ratios)
+    total = max(total, count * min_height)
+    remaining = total - count * min_height
+    ratio_sum = sum(ratios)
+    heights = [min_height] * count
+    if ratio_sum <= 0 or remaining <= 0:
+        return heights
+    extras = [(remaining * ratio) // ratio_sum for ratio in ratios]
+    assigned = sum(extras)
+    for index, extra in enumerate(extras):
+        heights[index] += extra
+    for index in range(remaining - assigned):
+        heights[index % count] += 1
+    return heights
+
+
+def _log_panel_layout(total_height: int, *, names: list[str]) -> dict[str, tuple[int, int]]:
+    if not names:
+        return {}
+
+    if "job.log" in names and len(names) > 1:
+        job_height = 9
+        other_names = [name for name in names if name != "job.log"]
+        min_total = job_height + len(other_names) * 6
+        if total_height >= min_total:
+            remaining = total_height - job_height
+            other_heights = _split_heights(remaining, parts=len(other_names), min_height=6)
+            layout = {"job.log": (job_height, 4)}
+            for name, height in zip(other_names, other_heights):
+                layout[name] = (height, max(height - 5, 3))
+            return layout
+
+    heights = _split_heights(total_height, parts=len(names), min_height=6)
+    return {name: (height, max(height - 5, 3)) for name, height in zip(names, heights)}
+
+
+def _string_value(value: Any) -> str | None:
+    return value if isinstance(value, str) and value.strip() else None
+
+
+def _bar(percent: int | None, *, width: int = 12) -> str:
+    if percent is None:
+        return "-" * width
+    percent = max(0, min(percent, 100))
+    filled = round(width * percent / 100)
+    return "#" * filled + "." * (width - filled)
+
+
+def _bar_text(percent: int | None, *, width: int = 12, color: str = "cyan") -> Text:
+    if percent is None:
+        return Text("░" * width, style="bright_black")
+    percent = max(0, min(percent, 100))
+    filled = round(width * percent / 100)
+    text = Text()
+    text.append("█" * filled, style=color)
+    text.append("░" * (width - filled), style="bright_black")
+    return text
+
+
+def _render_log_panel(name: str, preview: str, *, height: int | None = None, line_count: int = PREVIEW_LINES) -> Panel:
+    border_style = "cyan" if name == "job.log" else "magenta"
+    body = _render_log_preview_body(preview)
+    subtitle = Text(f"tail {line_count} lines", style="dim")
+    return Panel(Group(subtitle, Text(), body), title=name, box=box.ROUNDED, border_style=border_style, height=height)
+
+
+def _render_log_preview_body(preview: str) -> RenderableType:
+    if not preview:
+        return Text("(empty)", style="dim")
+    lines = preview.splitlines()
+    if not lines:
+        return Text("(empty)", style="dim")
+    render = Text()
+    width = max(len(str(len(lines))), 2)
+    for index, line in enumerate(lines, start=1):
+        render.append(str(index).rjust(width), style="bright_black")
+        render.append(" │ ", style="bright_black")
+        style = "bright_white"
+        lowered = line.lower()
+        if "error" in lowered or "traceback" in lowered or "failed" in lowered:
+            style = "red"
+        elif "warning" in lowered or "warn" in lowered:
+            style = "yellow"
+        elif "success" in lowered or "passed" in lowered or "completed" in lowered:
+            style = "green"
+        render.append(line or " ", style=style)
+        if index < len(lines):
+            render.append("\n")
+    return render
+
+
+def _render_gpu_section(
+    stat: GpuStat,
+    history: list[GpuHistoryPoint],
+    processes: list[GpuProcess],
+    *,
+    process_error: str | None,
+) -> RenderableType:
+    del history
+    mem_percent = _memory_percent(stat)
+    temp_percent = _temperature_percent(stat.temperature)
+
+    header = Table.grid(expand=True)
+    header.add_column(ratio=1)
+    header.add_column(justify="right", ratio=2)
+    header.add_row(
+        Text(f"GPU {stat.index}", style="bold cyan"),
+        Text(stat.name, style="bold bright_white"),
+    )
+
+    metrics = Group(
+        _render_gpu_metric_row("util", stat.utilization, color="cyan", warn=70, critical=90),
+        _render_gpu_metric_row("mem", mem_percent, color="bright_blue", warn=75, critical=90, detail=_memory_compact_text(stat)),
+        _render_gpu_metric_row("temp", temp_percent, color="yellow", warn=70, critical=85, detail=_temperature_text(stat.temperature)),
+    )
+
+    process_body = _render_gpu_processes(processes, process_error=process_error)
+    return Group(header, Text(), metrics, Text(), process_body)
+
+
+def _render_gpu_metric_row(
+    label: str,
+    percent: int | None,
+    *,
+    color: str,
+    warn: int,
+    critical: int,
+    detail: str | None = None,
+) -> RenderableType:
+    level_style = _gpu_metric_style(percent, warn=warn, critical=critical)
+    accent = _gpu_bar_color(color, percent, warn=warn, critical=critical)
+
+    row = Table.grid(expand=True, padding=(0, 1))
+    row.add_column(width=4)
+    row.add_column(justify="right", width=5)
+    row.add_column(width=10)
+    row.add_column(justify="right", ratio=1)
+    row.add_row(
+        Text(label, style=f"bold {color}"),
+        _gpu_percent_text(percent, style=level_style),
+        _bar_text(percent, width=10, color=accent),
+        Text(detail or "", style="dim"),
+    )
+    return row
+
+
+def _render_gpu_processes(processes: list[GpuProcess], *, process_error: str | None) -> RenderableType:
+    if process_error:
+        return Text(f"proc unavailable: {process_error}", style="dim")
+    if not processes:
+        return Text("proc no active compute processes on selected GPU", style="dim")
+
+    grid = Table.grid(expand=True, padding=(0, 1))
+    grid.add_column(style="bright_black", width=5)
+    grid.add_column(style="white", ratio=1)
+    grid.add_column(justify="right", style="magenta", width=9)
+    limit = 3
+    for index, process in enumerate(processes[:limit]):
+        grid.add_row(
+            "proc" if index == 0 else "",
+            f"{_crop(Path(process.process_name).name or process.process_name, 18)} [{process.pid}]",
+            "-" if process.used_gpu_memory is None else f"{process.used_gpu_memory}M",
+        )
+    if len(processes) > limit:
+        grid.add_row("", f"+{len(processes) - limit} more", "")
+    return grid
+
+
+def _gpu_metric_style(value: int | None, *, warn: int, critical: int) -> str:
+    if value is None:
+        return "dim"
+    if value >= critical:
+        return "bold red"
+    if value >= warn:
+        return "yellow"
+    return "green"
+
+
+def _gpu_bar_color(base: str, value: int | None, *, warn: int, critical: int) -> str:
+    if value is None:
+        return "bright_black"
+    if value >= critical:
+        return "red"
+    if value >= warn:
+        return "yellow"
+    return base
+
+
+def _gpu_percent_text(value: int | None, *, style: str) -> Text:
+    if value is None:
+        return Text(" - ", style="dim")
+    return Text(f"{value:>3}%", style=style)
+
+
+
+
+def _memory_percent(stat: GpuStat) -> int | None:
+    if stat.memory_used is None or stat.memory_total in {None, 0}:
+        return None
+    return round(stat.memory_used / stat.memory_total * 100)
+
+
+def _memory_text(stat: GpuStat) -> str:
+    if stat.memory_used is None or stat.memory_total is None:
+        return "-"
+    return f"{stat.memory_used}/{stat.memory_total} MiB"
+
+
+def _memory_compact_text(stat: GpuStat) -> str:
+    if stat.memory_used is None or stat.memory_total is None:
+        return "-"
+    return f"{stat.memory_used / 1024:.1f}/{stat.memory_total / 1024:.1f}G"
+
+
+def _temperature_percent(value: int | None) -> int | None:
+    if value is None:
+        return None
+    return round(max(0, min(value, GPU_TEMP_MAX)) / GPU_TEMP_MAX * 100)
+
+
+def _temperature_text(value: int | None) -> str:
+    if value is None:
+        return "-"
+    return f"{value}C"
+
+
+def _workspace_tree_text(path: Path, *, depth: int) -> str:
+    if not path.exists():
+        return "/home\n└── [missing]"
+
+    ignored = {".git", "venv", ".venv", "__pycache__", ".pytest_cache", ".mypy_cache"}
+    root_ignored = {"logs"}
+    lines = ["/home"]
+
+    def walk(current: Path, prefix: str, level: int) -> None:
+        if level >= depth:
+            return
+        try:
+            visible_children = [
+                child
+                for child in current.iterdir()
+                if child.name not in ignored and not (current == path and child.name in root_ignored)
+            ]
+        except PermissionError:
+            lines.append(f"{prefix}└── [permission denied]")
+            return
+        children = sorted(
+            visible_children,
+            key=lambda child: (_safe_is_file(child), child.name.lower()),
+        )
+        for index, child in enumerate(children):
+            connector = "└──" if index == len(children) - 1 else "├──"
+            try:
+                is_dir = child.is_dir()
+            except PermissionError:
+                lines.append(f"{prefix}{connector} {child.name} [permission denied]")
+                continue
+            label = f"{child.name}/" if is_dir else child.name
+            lines.append(f"{prefix}{connector} {label}")
+            if is_dir:
+                extension = "    " if index == len(children) - 1 else "│   "
+                walk(child, prefix + extension, level + 1)
+
+    walk(path, "", 0)
+    return "\n".join(lines)
+
+
+def _safe_is_file(path: Path) -> bool:
+    try:
+        return path.is_file()
+    except PermissionError:
+        return False
+
+
+def _conversation_view_text(path: Path, *, limit: int) -> str:
+    records = _load_recent_jsonl(path, limit=limit)
+    lines = [_format_conversation_record(record) for record in records]
+    lines = [line for line in lines if line]
+    return "\n".join(lines) if lines else "No conversation events recorded yet."
+
+
+def _format_conversation_record(record: dict[str, Any]) -> str:
+    summary = _conversation_record_summary(record)
+    if not summary:
+        return ""
+    parts = []
+    step = record.get("step")
+    phase = _phase_from_record(record)
+    if isinstance(step, int):
+        parts.append(f"step {step}")
+    if phase:
+        parts.append(f"[{phase}]")
+    prefix = " ".join(parts)
+    return f"{prefix} {summary}".strip()
+
+
+def _conversation_record_summary(record: dict[str, Any]) -> str:
+    event_kind = _string_value(record.get("event_type")) or _string_value(record.get("event")) or "event"
+    if event_kind == "model_response":
+        text = _string_value(record.get("text")) or _string_value(record.get("message"))
+        if text:
+            return f"agent: {_crop(_compact_text(text), 180)}"
+        tool_calls = record.get("tool_calls")
+        if isinstance(tool_calls, list) and tool_calls:
+            names = []
+            for item in tool_calls:
+                if isinstance(item, dict):
+                    name = _string_value(item.get("name"))
+                    if name:
+                        names.append(name)
+            if names:
+                return f"agent requested: {', '.join(names)}"
+        return "agent responded."
+
+    if event_kind == "tool_result":
+        tool = _string_value(record.get("tool")) or "tool"
+        preview = _string_value(record.get("result_preview"))
+        if preview:
+            return f"{tool}: {_crop(_compact_text(preview), 180)}"
+        return f"{tool}: completed"
+
+    message = _string_value(record.get("message"))
+    if message:
+        return _crop(_compact_text(message), 180)
+    return _crop(event_kind, 180)
+
+
+def _phase_from_record(record: dict[str, Any]) -> str | None:
+    phase = _string_value(record.get("phase"))
+    if phase:
+        return phase
+    tool = _string_value(record.get("tool"))
+    if tool:
+        return _phase_from_tool_name(tool)
+    tool_calls = record.get("tool_calls")
+    if isinstance(tool_calls, list):
+        for item in tool_calls:
+            if not isinstance(item, dict):
+                continue
+            name = _string_value(item.get("name"))
+            inferred = _phase_from_tool_name(name)
+            if inferred:
+                return inferred
+    return None
+
+
+def _phase_from_tool_name(tool_name: str | None) -> str | None:
+    if tool_name in {"read_paper", "read_paper_md"}:
+        return "analyze"
+    if tool_name == "prioritize_tasks":
+        return "prioritize"
+    if tool_name == "implement":
+        return "implement"
+    if tool_name in {"clean_reproduce_validation", "validate"}:
+        return "validate"
+    if tool_name == "submit":
+        return "finalize"
+    return None
+
+
+def _collect_subagent_counts(
+    path: Path,
+    *,
+    cache_store: dict[str, dict[str, Any]] | None = None,
+) -> list[tuple[str, int]]:
+    resolved = str(path.resolve())
+    store = cache_store if cache_store is not None else {}
+    if not path.exists() or not path.is_file():
+        store.pop(resolved, None)
+        return []
+
+    size = path.stat().st_size
+    entry = store.get(resolved)
+    if not _subagent_count_cache_valid(entry, resolved, size):
+        entry = {
+            "path": resolved,
+            "offset": 0,
+            "size": 0,
+            "buffer": "",
+            "counts": {},
+            "order": [],
+        }
+        store[resolved] = entry
+    if size == int(entry["size"]):
+        return _subagent_count_items(entry)
+
+    with path.open("rb") as handle:
+        handle.seek(int(entry["offset"]))
+        chunk = handle.read()
+        entry["offset"] = handle.tell()
+    entry["size"] = size
+    payload = f'{entry["buffer"]}{chunk.decode("utf-8", errors="replace")}'
+    entry["buffer"] = ""
+    for raw_line in payload.splitlines(keepends=True):
+        if raw_line and not raw_line.endswith(("\n", "\r")):
+            entry["buffer"] = raw_line
+            continue
+        line = raw_line.strip()
+        if not line:
+            continue
+        try:
+            record = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(record, dict):
+            continue
+        event_type = _string_value(record.get("event_type")) or _string_value(record.get("event"))
+        if event_type != "subagent_start":
+            continue
+        kind = _subagent_kind(record)
+        if not kind:
+            continue
+        counts = entry["counts"]
+        order = entry["order"]
+        if kind not in counts:
+            counts[kind] = 0
+            order.append(kind)
+        counts[kind] += 1
+    return _subagent_count_items(entry)
+
+
+def _subagent_count_cache_valid(entry: dict[str, Any] | None, path: str, size: int) -> bool:
+    if not entry:
+        return False
+    if entry.get("path") != path:
+        return False
+    if int(entry.get("offset", 0)) > size:
+        return False
+    if int(entry.get("size", 0)) > size:
+        return False
+    if not isinstance(entry.get("counts"), dict):
+        return False
+    if not isinstance(entry.get("order"), list):
+        return False
+    return True
+
+
+def _subagent_count_items(entry: dict[str, Any]) -> list[tuple[str, int]]:
+    counts = entry.get("counts", {})
+    order = entry.get("order", [])
+    items: list[tuple[str, int]] = []
+    for name in order:
+        value = counts.get(name)
+        if isinstance(name, str) and isinstance(value, int) and value > 0:
+            items.append((name, value))
+    return items
+
+
+def _subagent_kind(record: dict[str, Any]) -> str | None:
+    payload = record.get("payload")
+    if isinstance(payload, dict):
+        session_dir = _string_value(payload.get("session_dir"))
+        if session_dir:
+            return _subagent_kind_from_session_dir(Path(session_dir).name)
+    message = _string_value(record.get("message"))
+    if not message:
+        return None
+    match = re.match(r"([a-z0-9_]+) subagent started\.", message)
+    if match:
+        return match.group(1)
+    return None
+
+
+def _subagent_kind_from_session_dir(name: str) -> str:
+    match = re.match(r"(.+)_\d{3}_\d{8}_\d{6}$", name)
+    if match:
+        return match.group(1)
+    return name
+
+
+def _labelize_subagent(name: str) -> str:
+    aliases = {
+        "env_setup": "environment setup",
+        "impl": "implementation",
+    }
+    if name in aliases:
+        return aliases[name]
+    return name.replace("_", " ")
+
+
+def _labelize_phase(name: str | None) -> str:
+    if not name:
+        return "-"
+    return PHASE_LABELS.get(name, name)
+
+
+def _job_mode(job: JobRecord) -> str:
+    if job.runtime_profile.workspace_layout:
+        return job.runtime_profile.workspace_layout.value
+    return job.job_type.value
+
+
+def _mascot_phase(job: JobRecord | None, *, phase_override: str | None = None) -> str:
+    if job is None:
+        return "idle"
+    if job.status == JobStatus.FAILED:
+        return "error"
+    if job.status == JobStatus.SUCCEEDED:
+        return "success"
+    phase = phase_override or job.phase.value
+    if phase in {"analyze", "prioritize"}:
+        return "thinking"
+    if phase in {"implement", "validate", "finalize"}:
+        return "running"
+    return "idle"
+
+
+def _compact_face(frame_index: int) -> str:
+    _ = frame_index
+    return "○ ◡ ○"
+
+
+def _short_job_id(job_id: str, *, width: int = 22) -> str:
+    if len(job_id) <= width:
+        return job_id
+    edge = max((width - 3) // 2, 6)
+    return f"{job_id[:edge]}...{job_id[-edge:]}"
+
+
+def _status_style(status: str | None) -> str:
+    normalized = (status or "").strip().lower()
+    if normalized in {"passed", "succeeded", JobStatus.SUCCEEDED.value, "ok", "available", "enabled"}:
+        return "green"
+    if normalized in {"failed", "fail", JobStatus.FAILED.value}:
+        return "bold red"
+    if normalized in {"pending", JobStatus.PENDING.value}:
+        return "yellow"
+    if normalized in {"running", JobStatus.RUNNING.value}:
+        return "cyan"
+    if normalized in {"cancelled", JobStatus.CANCELLED.value}:
+        return "magenta"
+    if normalized in {"skipped", "warn", "warning"}:
+        return "yellow"
+    return "white"
+
+
+def _status_badge(status: JobStatus | str | None) -> Text:
+    label = status.value if isinstance(status, JobStatus) else (status or "-")
+    normalized = label.strip().lower()
+    icon = {
+        "passed": "●",
+        "succeeded": "●",
+        JobStatus.SUCCEEDED.value: "●",
+        "failed": "✕",
+        "fail": "✕",
+        JobStatus.FAILED.value: "✕",
+        "running": "◉",
+        JobStatus.RUNNING.value: "◉",
+        "pending": "◌",
+        JobStatus.PENDING.value: "◌",
+        "cancelled": "◌",
+        JobStatus.CANCELLED.value: "◌",
+        "skipped": "△",
+    }.get(normalized, "•")
+    return Text(f"{icon} {label}", style=_status_style(label))

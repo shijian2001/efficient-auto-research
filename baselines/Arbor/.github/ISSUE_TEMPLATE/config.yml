@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: 💬 Questions & ideas / 提问与许愿
+    url: https://github.com/RUC-NLPIR/Arbor/discussions
+    about: Ask anything, share results, or propose a feature — open discussion lives here. Already have a concrete, actionable proposal? The Feature request form works too. / 提问、晒成果、许愿新功能都欢迎来讨论区畅聊；已想清楚的具体提案也可直接用“功能请求”表单。
+  - name: 📖 Documentation / 文档
+    url: https://RUC-NLPIR.github.io/Arbor/
+    about: Setup, configuration, and usage guides — please check here first. / 安装、配置与使用文档，提问前请先查阅。
+  - name: ⚙️ Configuration guide / 配置指南
+    url: https://RUC-NLPIR.github.io/Arbor/docs/configuration/
+    about: Providers, models, endpoints, and keys (most setup issues are answered here). / provider、模型、端点与密钥的配置说明（大多数配置问题这里都有答案）。

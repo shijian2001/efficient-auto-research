@@ -1,0 +1,24 @@
+{
+  "current_blockers": [],
+  "generated_at": "2026-08-05T13:15:18.232771+00:00",
+  "lite_data": {
+    "complete": true,
+    "directory_count": 22,
+    "missing_directories": [],
+    "missing_or_empty_prepared": [],
+    "missing_required_dataset_files": {},
+    "prepared_nonempty_count": 22,
+    "required_files_complete_count": 22,
+    "task_count": 22
+  },
+  "mlebench_version": "1.0.0",
+  "python_version": "Python 3.11.15",
+  "siim_prepare": {
+    "competition": "siim-isic-melanoma-classification",
+    "exit_code": "0",
+    "status": "completed",
+    "updated_at": "2026-08-01T14:22:33+08:00"
+  },
+  "source_commit": "507f92e1138bb6e40dac5c6ee7a6758e6424bf97",
+  "tensorflow_version": "2.21.0"
+}

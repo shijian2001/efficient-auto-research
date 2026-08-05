@@ -1,0 +1,44 @@
+version = 1
+
+[benchmarks."mle-bench-lite"]
+project = "mle-bench-lite"
+python = "3.11"
+
+[benchmarks."terminal-bench-2"]
+project = "terminal-bench-2"
+python = "3.12"
+
+[agents.ear]
+kind = "uv_project"
+project = "mle-bench-agents/efficient-auto-research"
+python = "3.11"
+
+[agents.mlevolve]
+kind = "pinned_requirements"
+python = "3.11"
+requirements_in = "BenchmarkAdapters/environments/requirements/mlevolve.in"
+lock = "BenchmarkAdapters/environments/requirements/mlevolve.lock"
+venv = "BenchmarkAdapters/environments/.venvs/mlevolve"
+
+[agents.arbor]
+kind = "uv_project"
+project = "baselines/Arbor"
+python = "3.11"
+
+[agents.codex]
+kind = "cli"
+command = ["codex", "--version"]
+
+[agents.claude-code]
+kind = "cli"
+command = ["claude", "--version"]
+
+[agents.ml-master-2]
+kind = "uv_project"
+project = "baselines/EvoMaster"
+python = "3.11"
+
+[agents.ai-scientist]
+kind = "uv_project"
+project = "baselines/AiScientist"
+python = "3.12"

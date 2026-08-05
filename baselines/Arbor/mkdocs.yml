@@ -1,0 +1,138 @@
+site_name: Arbor
+site_description: Toward Generalist Autonomous Research via Hypothesis-Tree Refinement
+site_url: https://RUC-NLPIR.github.io/Arbor/docs/
+repo_url: https://github.com/RUC-NLPIR/Arbor
+repo_name: RUC-NLPIR/Arbor
+edit_uri: edit/main/docs/
+copyright: Renmin University of China · Microsoft Research
+
+theme:
+  name: material
+  favicon: assets/logo_black.png
+  icon:
+    repo: fontawesome/brands/github
+  palette:
+    - media: "(prefers-color-scheme: light)"
+      scheme: default
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/weather-night
+        name: Switch to dark mode
+    - media: "(prefers-color-scheme: dark)"
+      scheme: slate
+      primary: teal
+      accent: teal
+      toggle:
+        icon: material/weather-sunny
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.top
+    - navigation.tracking
+    - navigation.indexes
+    - toc.follow
+    - content.code.copy
+    - content.code.annotate
+    - content.tabs.link
+    - search.suggest
+    - search.highlight
+
+# Internal dev/design notes live under docs/dev/ but are not part of the
+# published site (they cross-link each other and would trip strict link checks).
+exclude_docs: |
+  dev/
+
+nav:
+  - Home: index.md
+  - Getting Started:
+      - Installation: installation.md
+      - Quickstart: quickstart.md
+      - Preparing a Benchmark: preparing-a-benchmark.md
+  - Concepts:
+      - How It Works: how-it-works.md
+  - Guides:
+      - Configuration: configuration.md
+      - Search & External Knowledge: search.md
+      - Interaction Modes: interaction-modes.md
+      - Web UI & Monitoring: web-ui.md
+      - Plugins: plugins.md
+      - Benchmark Zoo:
+          - Overview: zoo-overview.md
+          - Format & verifier: zoo.md
+      - Skills: skills.md
+      - Self-Evolution: self-evolution.md
+      - Outputs & Resume: outputs-and-resume.md
+  - Reference:
+      - CLI: cli.md
+  - Roadmap: roadmap.md
+  - Contributing: contributing.md
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - md_in_html
+  - def_list
+  - tables
+  - footnotes
+  - toc:
+      permalink: true
+  - pymdownx.highlight:
+      anchor_linenums: true
+      line_spans: __span
+      pygments_lang_class: true
+  - pymdownx.inlinehilite
+  - pymdownx.snippets
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
+  - pymdownx.tabbed:
+      alternate_style: true
+  - pymdownx.details
+  - pymdownx.emoji:
+      emoji_index: !!python/name:material.extensions.emoji.twemoji
+      emoji_generator: !!python/name:material.extensions.emoji.to_svg
+
+plugins:
+  - search
+  - i18n:
+      docs_structure: suffix
+      languages:
+        - locale: en
+          default: true
+          name: English
+          build: true
+        - locale: zh
+          name: 简体中文
+          build: true
+          nav_translations:
+            Home: 首页
+            Getting Started: 快速开始
+            Installation: 安装
+            Quickstart: 快速上手
+            Preparing a Benchmark: 准备基准
+            Concepts: 概念
+            How It Works: 工作原理
+            Guides: 指南
+            Configuration: 配置
+            Search & External Knowledge: 检索与外部知识
+            Interaction Modes: 交互模式
+            Web UI & Monitoring: Web UI 与监控
+            Plugins: 插件
+            Benchmark Zoo: 基准库
+            Overview: 概览
+            Format & verifier: 格式与校验器
+            Skills: 技能
+            Self-Evolution: 自我进化
+            Outputs & Resume: 输出与续跑
+            Reference: 参考
+            Contributing: 贡献
+            Roadmap: 路线图
+
+extra:
+  social:
+    - icon: fontawesome/brands/github
+      link: https://github.com/RUC-NLPIR/Arbor

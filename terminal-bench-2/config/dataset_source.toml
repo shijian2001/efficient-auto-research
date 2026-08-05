@@ -1,0 +1,8 @@
+name = "Terminal-Bench 2.0"
+harbor_identifier = "terminal-bench@2.0"
+task_count = 89
+download_date = "2026-08-01"
+download_command = "harbor download terminal-bench@2.0 --output-dir datasets --export"
+new_registry_identifier = "terminal-bench/terminal-bench-2"
+new_registry_status = "failed with HTTP/2 protocol error after six task exports"
+canonical_local_path = "datasets/terminal-bench-2"

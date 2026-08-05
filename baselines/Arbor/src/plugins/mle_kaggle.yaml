@@ -1,0 +1,269 @@
+name: mle_kaggle
+description: "Engineering optimization for Kaggle/MLE-bench competitions"
+schema_version: 1
+
+eval_contract:
+  metric_direction: maximize
+  eval_cmd: "bash {cwd}/eval.sh"
+  submission_path: "submission.csv"
+  sample_submission_path: "data/sample_submission.csv"
+
+protected_paths:
+  - "data/**"
+  - "private/**"
+  - "evaluation/**"
+
+required_outputs:
+  - "submission.csv"
+
+profiles:
+  mle_bench_lite:
+    # Default benchmark profile.  24 h per task — matches MLE-Bench-Lite
+    # standard evaluation budget.
+    # 4 h per executor: enough for multi-fold large-model training + eval.
+    # 20 cycles × depth-4 gives ample room for broad + deep exploration.
+    max_cycles: 20
+    max_tree_depth: 4
+    executor_timeout: 14400
+    time_budget: 86400
+
+meta_preamble_inject: |
+  ## Competition Objective
+  You are optimizing for an engineering competition.
+  The sole objective is maximizing the evaluation metric. Novelty has zero value.
+
+  ## Early Stopping on Target Achievement
+  When an experiment achieves the top-tier target, STOP immediately.
+  Do not start new experiments or executors after the target is achieved.
+  The merge tool will tell you when the target is reached — respect it and wrap up.
+
+  ## Workspace State Strategy
+  The Idea Tree is the shared memory. Do NOT invent a second shared-state
+  protocol between executors. Executors work in git worktrees branched
+  from trunk, so committed trunk artifacts propagate automatically.
+  Before dispatching a executor, read TreeView(format="constraints") and
+  pass only a concise summary in additional_context. Avoid dumping long files.
+
+  ## Plateau Recovery Strategy
+  When scores plateau or recent ideas fail, classify the bottleneck first:
+  1. **Exploit**: refine the current best pipeline (CV, features, tuning,
+     threshold/post-processing, seed averaging).
+  2. **Combine**: ensemble/blend two already-good but diverse candidates.
+  3. **Leap**: switch to a fundamentally different approach family.
+  Prune directions that repeatedly fail for the same concrete reason.
+
+  **Hard plateau rule**: if recent sibling experiments under the same parent
+  ALL failed to improve trunk, STOP expanding that parent. Summarize the
+  failure pattern in the parent's insight, then create a NEW depth-1 idea
+  using a different approach family.
+
+  **Gap-to-target analysis**: before ideating, compute the gap between
+  current score and the next target threshold. If the gap exceeds what the
+  current approach family has demonstrated it can deliver, propose a Leap
+  or a Combine instead of more Exploit.
+
+  ## Time Budget Strategy
+  Pace yourself according to the total budget. Check remaining budget via
+  TreeView before every IDEATE cycle.
+  - First 10-15%: data analysis, validation protocol, valid baseline submission
+  - Next 55-65%: iterate on 2-3 most promising optimization directions;
+    allow long training runs (multi-fold, larger models) when budget permits
+  - Next 15-20%: ensemble/blend the best diverse candidates
+  - Last 10%: finalization buffer — format check, best submission selection
+
+  Do NOT start a new executor if remaining budget < 1.5× executor_timeout.
+  A good submission on time beats a perfect one that never finishes.
+
+meta_init_inject: |
+  After discovering the codebase, you MUST also:
+  1. Read description.md in the workspace root — understand the metric, data format, submission requirements
+     (description.md is pre-provisioned; do NOT search the data/ directory for it)
+  2. Examine sample_submission.csv to understand exact output format
+  3. Analyze data: column types, distributions, missing values, class imbalance, data size
+  4. Produce a valid baseline submission as the first concrete output — even a trivial one
+     (copy sample_submission.csv, constant prediction, or a minimal model). Evaluate it.
+  5. Check the `is_lower_better` field in eval output to set correct metric_direction.
+  6. Record baseline score, metric direction, and validation protocol via TreeSetMeta.
+  7. If the eval exposes target thresholds, record the next target tier in ROOT insight.
+
+  ## Eval Error Recovery
+  If eval fails with an error (crash, type mismatch, assertion):
+  1. Read the error message — it usually reveals a format mismatch
+  2. Read the grader source code (path is shown in the error) to understand
+     the expected submission format (column names, types, row count, ID format)
+  3. Fix your submission and retry
+  4. If the grader itself seems buggy, try alternative reasonable formats
+  5. NEVER abandon a task because eval crashes — debug it.
+     A valid submission that scores > 0 is always better than no submission.
+
+meta_ideate_inject: |
+  This is a PERFORMANCE-FIRST task. Any approach that improves the score counts.
+
+  Recommended priority:
+  - A valid submission + working baseline is always the first step
+  - Robust validation protocol early (prevents false positives)
+  - Then iterate: features, models, ensembles, post-processing — order depends on the task
+
+  Use a portfolio, not a single linear path:
+  - Keep at least one cheap, reliable baseline branch alive until a stronger
+    branch is merged.
+  - For independent cheap ablations, use RunExecutorParallel for 2-3 nodes only
+    when they do not compete for the same GPU-heavy training budget.
+  - After repeated sibling failures, stop expanding that family; summarize the
+    failure class in the parent insight and try Combine or Leap.
+
+  Be aware of target thresholds from eval output.
+  When ideating, estimate whether an approach can cross the next threshold.
+
+  Estimate expected score impact when proposing ideas.
+  Prefer approaches likely to produce measurable improvements over speculative approaches.
+
+  ## Compute Awareness (CRITICAL)
+  Before proposing any training-based idea, you MUST estimate wall-clock cost:
+    estimated_time = epochs × sec_per_epoch × num_folds × 1.3 (safety margin)
+  Compare this against the executor_timeout. If estimated_time > 70% of the
+  executor budget, SCALE DOWN before dispatching: fewer folds, smaller input
+  resolution, fewer epochs, or a lighter backbone.
+
+  When you don't know sec_per_epoch, instruct the executor to:
+  1. Time ONE epoch first  2. Compute total estimated time
+  3. If it exceeds 70% of remaining budget, reduce scope BEFORE continuing
+  This avoids wasting entire executor cycles on training runs that will timeout.
+
+  ## Diversity Before Depth
+  After establishing a working baseline, explore at least 2 DIFFERENT
+  approach families at depth-1 before going deeper on any single one.
+  Having diverse bases early enables ensembling later and reduces the risk
+  of saturating on a single approach family.
+
+meta_decide_inject: |
+  In competition optimization, every small improvement counts.
+  Merge aggressively when validation is reliable — even small improvements are worth keeping.
+  If the metric is noisy, prefer repeated CV / multiple folds before merging tiny gains.
+  Never merge a branch that cannot produce a valid submission.csv.
+  When multiple branches show improvements, merge the best one first,
+  then create a new idea that combines the second-best with the updated trunk.
+
+  ## Hard Plateau Rule
+  Count the last N sibling nodes under any parent:
+  - If consecutive siblings ALL failed to beat trunk, STOP expanding that parent.
+  - Record the saturation ceiling in the parent insight.
+  - Shift budget to a Combine (ensemble existing diverse results) or a Leap
+    (completely different approach family).
+
+  ## Failure Recovery
+  If a executor fails (timeout, crash, no valid submission):
+  - Check whether the failure is fundamental (wrong approach) or accidental (OOM, path error, timeout)
+  - For timeout failures: create a child idea with reduced scope (fewer folds,
+    smaller resolution, lighter model) targeting the same hypothesis
+  - For OOM failures: halve batch size or switch to a smaller model variant
+  - For fundamental failures: prune and note the reason for future ideation
+
+  ## Candidate Management
+  Treat each valid submission as an asset. Before final STOP, compare trunk
+  submission against the best scored snapshot and ensure the best available
+  submission.csv is at the workspace root.
+
+sub_preamble_inject: |
+  You are working on an optimization task.
+  Your goal is to maximize the evaluation score.
+
+  ## Priority
+  1. A valid submission.csv that matches sample_submission.csv format is the first requirement
+  2. Implementation correctness > code elegance
+  3. If training is slow, prototype on a data subset first
+  4. The assigned idea is binding, but implementation details are yours:
+     choose models, features, CV splits, hyperparameters, and libraries that
+     best realize the idea within the time budget.
+
+sub_workflow_inject: |
+  ## Workspace Rules
+  - data/ is READ-ONLY — never write to, modify, or delete data files
+  - You MUST produce submission.csv at the workspace root before reporting
+  - Validate submission format against sample_submission.csv: columns, row count, ID column
+  - Use `bash {cwd}/eval.sh` to evaluate — do NOT call run_eval.py directly
+  - If training is slow, validate on a small subset first, then scale up
+  - If you discover a better direction outside the assigned idea, record it as a proposal
+    in your report instead of silently changing scope
+
+  ## Submission Validation
+  Before reporting results, verify your submission:
+  ```python
+  import pandas as pd
+  sub = pd.read_csv("submission.csv")
+  sample = pd.read_csv("data/sample_submission.csv")
+  assert list(sub.columns) == list(sample.columns), f"Column mismatch"
+  assert len(sub) == len(sample), f"Row count mismatch"
+  assert not sub.isnull().any().any(), "Submission contains NaN"
+  ```
+
+  ## GPU Utilization
+  If a GPU is available:
+  - Check GPU memory with `nvidia-smi` before choosing batch size
+  - Use mixed precision (fp16/bf16) for large models to save memory
+  - Monitor GPU utilization — if it's low, increase batch size or use data prefetching
+
+  ## Training Time-Budget Strategy (CRITICAL)
+  You have a hard wall-clock budget for the WHOLE idea (implement +
+  smoke-test + train + evaluate + write submission.csv). Burning the
+  entire budget on one over-ambitious training run leaves no time to
+  recover.
+
+  **STEP 1: Time one epoch FIRST.**
+  Before any multi-epoch training run, time a single epoch:
+  ```python
+  import time
+  t0 = time.time()
+  # ... train 1 epoch ...
+  sec_per_epoch = time.time() - t0
+  total_est = sec_per_epoch * num_epochs * num_folds * 1.3
+  print(f"Estimated total: {total_est/60:.0f} min")
+  ```
+  If total_est > 70% of your remaining time, SCALE DOWN immediately
+  (fewer folds, smaller resolution, fewer epochs, lighter backbone).
+
+  **STEP 2: Use RunTraining for long commands.**
+  - **< 5 min** (smoke tests, eval, small inference): use Bash with
+    `timeout=600`.
+  - **>= 5 min** (training, multi-fold CV, large inference):
+    **ALWAYS use the RunTraining tool**. It blocks until completion,
+    monitors progress automatically, and reports metrics — all in one
+    turn with zero polling overhead.
+    ```
+    RunTraining(command="python train.py --folds 5 --epochs 4",
+                timeout=3600)
+    ```
+    Do NOT use background + sleep polling. RunTraining handles everything.
+
+  **STEP 3: Reserve time.**
+  Reserve the last ~10 min for inference + writing submission.csv.
+  Do NOT start a fresh training run if <15 min remain — finalize what
+  you have. A mediocre submission beats a missing one.
+
+config_overrides:
+  merge_threshold: 1.0
+  max_tree_depth: 3
+  # Disable IDEATE skill flow: MLE/Kaggle is performance-first, where
+  # parameter tuning, scaling, and prompt edits are legitimate moves.
+  # The default idea-drafting skill flow discourages many of those candidates.
+  skills_enabled: false
+
+convergence:
+  enabled: true
+  min_experiments: 4
+  window_size: 5
+  improvement_threshold: 0.001
+  parent_exhaustion_count: 3
+  warn_after: 3
+  force_after: 5
+  stop_after: 8
+
+lifecycle_hooks:
+  on_workspace_setup:
+    prompt: "Create models/, logs/, analysis/, submissions/ directories."
+    script: "scripts/mle/setup_workspace.sh"
+  after_executor:
+    prompt: "Snapshot submission.csv to submissions/{node_id}.csv if it exists."
+  on_finalize:
+    prompt: "Final retrain on full train data, validate submission format, copy best submission to root."
+    script: "scripts/mle/finalize_submission.sh"

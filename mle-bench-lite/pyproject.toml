@@ -1,0 +1,11 @@
+[project]
+name = "mle-bench-lite-local"
+version = "0.1.0"
+requires-python = ">=3.11,<3.12"
+dependencies = ["mlebench"]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+mlebench = { path = "source", editable = true }
