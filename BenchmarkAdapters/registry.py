@@ -17,6 +17,8 @@ class AgentSpec:
     version_command: tuple[str, ...]
     mle_mode: str
     terminal_mode: str
+    terminal_implementation: str
+    native_upstream_terminal_backend: bool
 
 
 AGENTS = {
@@ -26,7 +28,9 @@ AGENTS = {
         ROOT / "mle-bench-agents/efficient-auto-research",
         ("git", "rev-parse", "HEAD"),
         "native-docker",
-        "blocked-native-backend",
+        "shared-repository-agent",
+        "shared-openai-repository-profile",
+        False,
     ),
     "mlevolve": AgentSpec(
         "mlevolve",
@@ -34,7 +38,9 @@ AGENTS = {
         ROOT / "baselines/MLEvolve",
         ("git", "rev-parse", "HEAD"),
         "native-docker",
-        "blocked-native-backend",
+        "shared-repository-agent",
+        "shared-openai-repository-profile",
+        False,
     ),
     "arbor": AgentSpec(
         "arbor",
@@ -43,6 +49,8 @@ AGENTS = {
         (str(ROOT / "baselines/Arbor/.venv/bin/arbor"), "--version"),
         "native-docker",
         "native-repository-ao",
+        "upstream-native-repository-ao",
+        True,
     ),
     "codex": AgentSpec(
         "codex",
@@ -51,6 +59,8 @@ AGENTS = {
         ("codex", "--version"),
         "generic-mle-workspace",
         "native-repository-cli",
+        "upstream-native-repository-cli",
+        True,
     ),
     "claude-code": AgentSpec(
         "claude-code",
@@ -59,6 +69,8 @@ AGENTS = {
         ("claude", "--version"),
         "generic-mle-workspace",
         "native-repository-cli",
+        "upstream-native-repository-cli",
+        True,
     ),
     "ml-master-2": AgentSpec(
         "ml-master-2",
@@ -66,7 +78,9 @@ AGENTS = {
         ROOT / "baselines/EvoMaster",
         (str(ROOT / "baselines/EvoMaster/.venv/bin/python"), "--version"),
         "native-mle",
-        "evomaster-repository-playground",
+        "shared-repository-agent",
+        "shared-openai-repository-profile",
+        False,
     ),
     "ai-scientist": AgentSpec(
         "ai-scientist",
@@ -74,7 +88,9 @@ AGENTS = {
         ROOT / "baselines/AiScientist",
         (str(ROOT / "baselines/AiScientist/.venv/bin/aisci"), "--help"),
         "native-mle",
-        "blocked-native-backend",
+        "shared-repository-agent",
+        "shared-openai-repository-profile",
+        False,
     ),
 }
 

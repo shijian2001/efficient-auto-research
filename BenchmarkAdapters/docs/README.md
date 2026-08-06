@@ -7,6 +7,7 @@ adapters. Benchmark implementations are separated by benchmark:
 BenchmarkAdapters/
 ├── MLEBenchLite/adapter.py
 ├── TerminalBench/adapter.py
+├── RepositoryAgent/       # shared isolated AO runtime + thin profiles
 ├── contracts.py
 ├── process.py
 ├── registry.py
@@ -21,6 +22,17 @@ Use `BenchmarkAdapters.MLEBenchLite.adapter` for direct MLE-Bench Lite runs and
 `BenchmarkAdapters.TerminalBench.adapter` for the modified Terminal-Bench
 Harness-Engineering AO protocol. Shared process, relay, environment, and error
 handling stays in the root modules.
+
+Arbor, Codex, and Claude Code use repository-native launch commands. EAR,
+MLEvolve, ML-Master 2.0, and AiScientist use `RepositoryAgent/`, which provides
+one isolated workspace/evaluator/revision backend and four small strategy
+profiles. Results explicitly identify these as shared profiles rather than
+upstream-native Harbor implementations.
+
+Split evaluators run against disposable repository copies without network or
+credentials. The evaluator is trusted benchmark code; confidential held-out
+labels must remain in a separate trusted evaluator process rather than being
+passed directly into imported candidate code.
 
 ```bash
 python -m BenchmarkAdapters mle --agent arbor \

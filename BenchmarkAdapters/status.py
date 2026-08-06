@@ -49,6 +49,8 @@ def collect_status() -> list[dict[str, object]]:
                 "version": version,
                 "mle_mode": spec.mle_mode,
                 "terminal_mode": spec.terminal_mode,
+                "terminal_implementation": spec.terminal_implementation,
+                "native_upstream_terminal_backend": spec.native_upstream_terminal_backend,
                 "error": error,
             }
         )

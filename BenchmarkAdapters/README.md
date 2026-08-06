@@ -11,6 +11,7 @@ BenchmarkAdapters/
 ├── TerminalBench/
 │   ├── __init__.py
 │   └── adapter.py
+├── RepositoryAgent/    # shared Terminal AO backend + thin research profiles
 ├── contracts.py       # shared request/command contracts
 ├── process.py         # shared process and relay environment
 ├── registry.py        # baseline installation and capability registry
@@ -27,7 +28,9 @@ The benchmark-specific implementation is deliberately separated:
   native Docker launchers, generic CLI workspaces, and submission recovery.
 - `BenchmarkAdapters/TerminalBench/adapter.py` handles the modified
   Terminal-Bench Harness-Engineering AO protocol, including dev/test split
-  evaluation and fail-closed unsupported agents.
+  evaluation. Codex, Claude Code, and Arbor use their repository-native CLIs;
+  EAR, MLEvolve, ML-Master 2.0, and AiScientist use the shared isolated
+  repository backend with thin Agent-specific strategy profiles.
 
 Run either benchmark adapter through the canonical package:
 

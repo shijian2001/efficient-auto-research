@@ -243,6 +243,12 @@ Adapter 和可复现的 UV 配置放在同一个集成树中。Adapter 的唯一
 `MLEBenchLite/` 与 `TerminalBench/`，公共进程、Relay、Agent registry 和 CLI
 位于其根目录。
 
+修改版 Terminal-Bench 的 Harness-Engineering AO 已覆盖全部 7 个 Agent：Arbor、
+Codex、Claude Code 使用各自 repository CLI；EAR、MLEvolve、ML-Master 2.0 和
+AiScientist 使用 `BenchmarkAdapters/RepositoryAgent/` 的共享隔离 backend 与四个薄
+策略 profile。后四者会在结果中明确标注为 shared profile，不冒充上游原生 Harbor
+backend。
+
 每个 Agent 的差异说明位于对应目录的 `adapter_docs/`；环境安装清单与一键脚本位于
 [`BenchmarkAdapters/environments/`](BenchmarkAdapters/environments/)：
 

@@ -1,5 +1,12 @@
 # AiScientist — Modified Terminal-Bench AO
 
-The shared `BenchmarkAdapters.TerminalBench.adapter.TerminalAoAdapter` records AiScientist as blocked until its File-as-Bus MLE
-runtime gains a native repository-editing Harbor backend. A direct Harbor
-solver would not be a fair AiScientist AO result.
+AiScientist now uses the shared `BenchmarkAdapters.RepositoryAgent` runtime.
+Its thin launcher at
+`BenchmarkAdapters/RepositoryAgent/launchers/ai_scientist.py` selects a
+file-grounded analysis/implementation/validation profile. Repository tools,
+workspace isolation, dev evaluation, revision tracking, Relay configuration,
+timeouts, and best-diff application remain shared with the other research
+Agents.
+
+This is a repository-mode adaptation, not a claim that upstream AiScientist
+currently ships a native Harbor `BaseAgent`.

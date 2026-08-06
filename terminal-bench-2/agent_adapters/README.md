@@ -42,3 +42,12 @@ The shared AO implementation lives in
 `../../BenchmarkAdapters/TerminalBench/adapter.py`. Keep this package for direct Harbor
 `BaseAgent` integrations; use the shared adapter for the modified AO protocol
 so evaluator, proxy, output, and retry behavior remain common across Agents.
+
+EAR, MLEvolve, ML-Master 2.0, and AiScientist share the isolated runtime under
+`../../BenchmarkAdapters/RepositoryAgent/`; Arbor, Codex, and Claude Code keep
+their repository-native commands. Optimization uses dev only, and held-out test
+evaluation is a separate sandboxed operation.
+
+The evaluator remains part of the trusted benchmark boundary. If it imports the
+candidate Harness in-process, it must not hand raw held-out labels to candidate
+code; use a separate trusted scoring process for confidential labels.

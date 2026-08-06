@@ -66,8 +66,11 @@ def _terminal_parser(subparsers: argparse._SubParsersAction) -> None:
     parser.add_argument("--split", choices=("dev", "test"))
     parser.add_argument("--optimize", action="store_true")
     parser.add_argument("--concurrency", type=int, default=8)
-    parser.add_argument("--python-executable", default="python3")
+    parser.add_argument("--python-executable", default="auto")
     parser.add_argument("--instruction")
+    parser.add_argument("--candidates", type=int, default=3)
+    parser.add_argument("--max-turns", type=int, default=12)
+    parser.add_argument("--command-timeout", type=int, default=120)
     parser.add_argument("--dry-run", action="store_true")
     _add_common_endpoint_args(parser)
 
@@ -113,6 +116,9 @@ def main(argv: list[str] | None = None) -> int:
             timeout_seconds=args.timeout,
             python_executable=args.python_executable,
             instruction=args.instruction,
+            candidates=args.candidates,
+            max_turns=args.max_turns,
+            command_timeout_seconds=args.command_timeout,
         )
         adapter = get_agent_adapter(args.agent).terminal_ao
         if args.optimize:
