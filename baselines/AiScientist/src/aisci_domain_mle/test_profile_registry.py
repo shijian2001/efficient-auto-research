@@ -93,6 +93,8 @@ class ModelProfileRegistryTests(unittest.TestCase):
         self.assertEqual(gpt55.model, "gpt-5.5")
         self.assertEqual(gpt55.api_mode, "responses")
         self.assertTrue(gpt55.use_phase)
+        self.assertEqual(gpt55.reasoning_effort, "high")
+        self.assertEqual(gpt55.temperature, 1.0)
 
         glm = resolve_llm_profile("glm-5", profile_file=domain_llm_profile_file())
         self.assertEqual(glm.provider, "azure-openai")

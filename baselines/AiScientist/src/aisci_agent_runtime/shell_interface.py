@@ -16,7 +16,7 @@ import os
 import re
 import subprocess
 from dataclasses import dataclass
-from typing import Protocol, runtime_checkable
+from typing import Any, Protocol, runtime_checkable
 
 import structlog
 
@@ -53,6 +53,72 @@ class ComputerInterface(Protocol):
 
     def file_exists(self, path: str) -> bool:
         ...
+
+
+class HarborShellInterface:
+    """Synchronous shell facade over the shared Harbor bridge."""
+
+    def __init__(self, bridge: Any, working_dir: str | None = None):
+        self.bridge = bridge
+        self.working_dir = working_dir
+
+    def send_shell_command(self, cmd: str, timeout: int = 300) -> ShellResult:
+        operation = getattr(self.bridge, "run", None) or getattr(self.bridge, "shell", None)
+        if operation is None:
+            raise TypeError("Harbor shell bridge lacks 'run' or 'shell'")
+        result = operation(cmd, self.working_dir, timeout)
+        return _coerce_harbor_result(result)
+
+    def send_command(self, cmd: str, timeout: int = 300) -> ShellResult:
+        return self.send_shell_command(cmd, timeout=timeout)
+
+    def read_file(self, path: str) -> str:
+        operation = getattr(self.bridge, "read_file", None)
+        if operation is not None:
+            result = operation(path)
+            if isinstance(result, bytes):
+                return result.decode("utf-8", errors="replace")
+            return str(result)
+        result = self.send_shell_command(f"cat {_shell_quote(path)}")
+        if result.exit_code != 0:
+            raise FileNotFoundError(path)
+        return result.output
+
+    def download(self, path: str) -> bytes:
+        operation = getattr(self.bridge, "download", None)
+        if operation is not None:
+            result = operation(path)
+            return result if isinstance(result, bytes) else str(result).encode("utf-8")
+        return self.read_file(path).encode("utf-8")
+
+    def write_file(self, path: str, content: str) -> None:
+        operation = getattr(self.bridge, "write_file", None)
+        if operation is None:
+            raise TypeError("Harbor shell bridge lacks 'write_file'")
+        operation(path, content)
+
+    def upload(self, data: bytes, path: str) -> None:
+        operation = getattr(self.bridge, "upload", None)
+        if operation is not None:
+            operation(data, path)
+            return
+        self.write_file(path, data.decode("utf-8", errors="replace"))
+
+    def append_file(self, path: str, content: str) -> None:
+        operation = getattr(self.bridge, "append_file", None)
+        if operation is not None:
+            operation(path, content)
+            return
+        existing = self.read_file(path) if self.file_exists(path) else ""
+        self.write_file(path, existing + content)
+
+    def file_exists(self, path: str) -> bool:
+        operation = getattr(self.bridge, "file_exists", None) or getattr(
+            self.bridge, "exists", None
+        )
+        if operation is not None:
+            return bool(operation(path))
+        return self.send_shell_command(f"test -e {_shell_quote(path)}", timeout=10).exit_code == 0
 
 
 class ShellInterface:
@@ -156,6 +222,27 @@ class ShellInterface:
 def _shell_quote(s: str) -> str:
     """Single-quote a string for bash, escaping embedded single-quotes."""
     return "'" + s.replace("'", "'\\''") + "'"
+
+
+def _coerce_harbor_result(result: Any) -> ShellResult:
+    if isinstance(result, ShellResult):
+        return result
+    if isinstance(result, tuple) and len(result) >= 3:
+        stdout, stderr, exit_code = result[:3]
+    else:
+        stdout = getattr(result, "stdout", "")
+        stderr = getattr(result, "stderr", "")
+        exit_code = getattr(result, "return_code", getattr(result, "exit_code", 0))
+    output = _as_text(stdout) + _as_text(stderr)
+    return ShellResult(output=output, exit_code=int(exit_code))
+
+
+def _as_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
 
 
 # Commands like ``pkill -f python`` match the agent's own Python process and

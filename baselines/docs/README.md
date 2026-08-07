@@ -20,7 +20,7 @@ Each installed Agent also has:
 baselines/<AgentName>/
 └── adapter_docs/
     ├── mle-bench-lite.md
-    └── terminal-bench-ao.md
+    └── terminal-bench.md
 ```
 
 The shared implementation is in `BenchmarkAdapters/`; these per-Agent files

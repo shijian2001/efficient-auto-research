@@ -262,6 +262,7 @@ class LLMConfig(BaseModel):
     max_retries: int = Field(default=3, description="Maximum retry attempts")
     retry_delay: float = Field(default=1.0, description="Retry delay in seconds")
     use_completion_api: bool = Field(default=False, description="Use Completion API instead of Chat API")
+    reasoning_effort: str | None = Field(default=None, description="OpenAI reasoning effort")
 
 
 class LLMResponse(BaseModel):
@@ -609,6 +610,8 @@ class OpenAILLM(BaseLLM):
         if tools:
             request_params["tools"] = tools
             request_params["tool_choice"] = kwargs.get("tool_choice", "auto")
+        if self.config.reasoning_effort:
+            request_params["reasoning_effort"] = self.config.reasoning_effort
 
         # Call the API
         response = self.client.chat.completions.create(**request_params)

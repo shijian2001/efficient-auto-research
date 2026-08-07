@@ -1,0 +1,15 @@
+[project]
+name = "mle-bench-ear"
+version = "0.1.0"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "auto-research",
+  "mle-bench-lite-local",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+auto-research = { path = "../../../../mle-bench-agents/efficient-auto-research" }
+mle-bench-lite-local = { path = "../../../../mle-bench-lite" }

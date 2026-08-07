@@ -5,7 +5,7 @@ Agent 侧只需把 OPENAI_BASE_URL 指到本代理 (http://127.0.0.1:<port>/v1)�
 上游适配逻辑全部集中在这里，agent 代码保持纯上游原版：
 
   - 模型重写:      请求里的任何 model 统一改写为 LLM_FORCE_MODEL (默认 gpt-5.5)
-  - 思考强度:      注入 reasoning_effort=LLM_REASONING_EFFORT (默认 high)
+  - 推理参数:      注入 reasoning_effort=high、temperature=1.0（均可由环境配置）
   - 参数清洗:      剥掉 max_tokens / max_completion_tokens / web_search_options 等
                    relay 不支持或不应限制的参数 (LLM_STRIP_PARAMS 可配)
   - 超时:          上游请求默认不设超时 (LLM_UPSTREAM_TIMEOUT 可配秒数)
@@ -24,6 +24,7 @@ Agent 侧只需把 OPENAI_BASE_URL 指到本代理 (http://127.0.0.1:<port>/v1)�
   UPSTREAM_API_KEY      上游 API key (必填, 或复用 OPENAI_API_KEY)
   LLM_FORCE_MODEL       统一改写的模型名 (默认 gpt-5.5; 设为空串禁用重写)
   LLM_REASONING_EFFORT  注入的思考强度 (默认 high; 设为空串禁用注入)
+  LLM_TEMPERATURE       覆盖 chat/responses temperature (默认 1.0; 设为空串禁用)
   LLM_STRIP_PARAMS      逗号分隔的待剥参数 (默认 max_tokens,max_completion_tokens,web_search_options)
   LLM_UPSTREAM_TIMEOUT  上游超时秒数 (默认空 = 不限)
   LLM_UPSTREAM_PROXY    上游 HTTP(S) 代理 (默认空 = 直连)
@@ -44,6 +45,7 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+import socketserver
 
 import httpx
 
@@ -64,6 +66,7 @@ UPSTREAM_BASE_URL = (
 UPSTREAM_API_KEY = os.environ.get("UPSTREAM_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
 FORCE_MODEL = os.environ.get("LLM_FORCE_MODEL", "gpt-5.5")
 REASONING_EFFORT = os.environ.get("LLM_REASONING_EFFORT", "high")
+TEMPERATURE = os.environ.get("LLM_TEMPERATURE", "1.0").strip()
 STRIP_PARAMS = [
     p.strip()
     for p in os.environ.get(
@@ -76,6 +79,7 @@ UPSTREAM_TIMEOUT: float | None = float(_timeout_raw) if _timeout_raw else None
 UPSTREAM_PROXY = os.environ.get("LLM_UPSTREAM_PROXY", "").strip() or None
 MAX_RETRIES = int(os.environ.get("LLM_MAX_RETRIES", "20"))
 AGENT_NAME = os.environ.get("LLM_PROXY_AGENT_NAME", "unknown")
+INBOUND_API_KEY = os.environ.get("LLM_PROXY_API_KEY", "proxy")
 
 _token_log_lock = threading.Lock()
 
@@ -155,7 +159,7 @@ def _append_token_log(model: str, call_type: str, usage: dict | None, duration: 
 # ---------------------------------------------------------------------------
 
 def _rewrite_body(body: dict, path: str) -> dict:
-    """模型重写 + 思考强度注入 + 参数清洗 + 消息归一化。"""
+    """模型重写 + 推理参数注入 + 参数清洗 + 消息归一化。"""
     if FORCE_MODEL and "model" in body:
         body["model"] = FORCE_MODEL
 
@@ -185,6 +189,10 @@ def _rewrite_body(body: dict, path: str) -> dict:
             body["reasoning"] = reasoning
         else:
             body["reasoning_effort"] = REASONING_EFFORT
+    if TEMPERATURE and (
+        path.endswith("/chat/completions") or path.endswith("/responses")
+    ):
+        body["temperature"] = float(TEMPERATURE)
 
     return body
 
@@ -357,6 +365,28 @@ def _synthesize_sse(data: dict) -> bytes:
     return "".join(parts).encode("utf-8")
 
 
+def _synthesize_responses_sse(data: dict) -> bytes:
+    """Convert one complete Responses API object into Codex-compatible SSE."""
+
+    events = [
+        {
+            "type": "response.output_item.done",
+            "item": item,
+        }
+        for item in data.get("output", [])
+        if isinstance(item, dict)
+    ]
+    events.append({"type": "response.completed", "response": data})
+    return "".join(
+        f"event: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
+        for event in events
+    ).encode("utf-8")
+
+
+class ThreadingUnixHTTPServer(socketserver.ThreadingMixIn, socketserver.UnixStreamServer):
+    daemon_threads = True
+
+
 # ---------------------------------------------------------------------------
 # HTTP handler
 # ---------------------------------------------------------------------------
@@ -375,8 +405,17 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _authorized(self) -> bool:
+        expected = f"Bearer {INBOUND_API_KEY}"
+        if self.headers.get("Authorization") == expected:
+            return True
+        self._send_json(401, {"error": {"message": "invalid relay credential"}})
+        return False
+
     def do_GET(self):
         if self.path.rstrip("/").endswith("/models"):
+            if not self._authorized():
+                return
             model = FORCE_MODEL or "gpt-5.5"
             self._send_json(200, {
                 "object": "list",
@@ -389,6 +428,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self._send_json(404, {"error": {"message": f"not found: {self.path}"}})
 
     def do_POST(self):
+        if not self._authorized():
+            return
         try:
             length = int(self.headers.get("Content-Length") or 0)
             raw = self.rfile.read(length) if length else b"{}"
@@ -449,29 +490,54 @@ class ProxyHandler(BaseHTTPRequestHandler):
     # -- 其余路径（/responses, /embeddings, /completions...）通用转发 --
 
     def _handle_generic(self, path: str, body: dict) -> None:
+        client_wants_stream = bool(body.pop("stream", False))
+        body.pop("stream_options", None)
         body = _rewrite_body(body, path)
         model = body.get("model", "")
         data, duration, retries = _post_upstream(path, body, path.strip("/"))
-        _append_token_log(model, path.strip("/"), data.get("usage"), duration, retries)
-        self._send_json(200, data)
+        call_type = path.strip("/") + (".stream" if client_wants_stream else "")
+        _append_token_log(model, call_type, data.get("usage"), duration, retries)
+        if client_wants_stream and path == "/responses":
+            self._send_json(
+                200,
+                _synthesize_responses_sse(data),
+                content_type="text/event-stream",
+            )
+        elif client_wants_stream:
+            raise ValueError(f"streaming is not supported for generic endpoint: {path}")
+        else:
+            self._send_json(200, data)
 
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="LLM relay proxy")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=6200)
+    parser.add_argument("--unix-socket", type=Path)
     args = parser.parse_args()
 
     if not UPSTREAM_API_KEY:
         logger.warning("UPSTREAM_API_KEY / OPENAI_API_KEY 未设置，上游调用将失败")
 
-    server = ThreadingHTTPServer((args.host, args.port), ProxyHandler)
+    if args.unix_socket is None:
+        server = ThreadingHTTPServer((args.host, args.port), ProxyHandler)
+        listen_address = f"{args.host}:{args.port}"
+    else:
+        args.unix_socket.parent.mkdir(parents=True, exist_ok=True)
+        args.unix_socket.unlink(missing_ok=True)
+        server = ThreadingUnixHTTPServer(str(args.unix_socket), ProxyHandler)
+        listen_address = str(args.unix_socket)
     logger.info(
-        "listening on %s:%s → %s | model=%s effort=%s strip=%s timeout=%s retries=%s agent=%s",
-        args.host, args.port, UPSTREAM_BASE_URL, FORCE_MODEL or "(passthrough)",
+        "listening on %s → %s | model=%s effort=%s strip=%s timeout=%s retries=%s agent=%s",
+        listen_address, UPSTREAM_BASE_URL, FORCE_MODEL or "(passthrough)",
         REASONING_EFFORT or "(none)", ",".join(STRIP_PARAMS), UPSTREAM_TIMEOUT, MAX_RETRIES, AGENT_NAME,
     )
-    server.serve_forever()
+    try:
+        server.serve_forever()
+    finally:
+        server.server_close()
+        if args.unix_socket is not None:
+            args.unix_socket.unlink(missing_ok=True)
 
 
 if __name__ == "__main__":

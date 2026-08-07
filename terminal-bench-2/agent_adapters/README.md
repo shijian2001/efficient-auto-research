@@ -1,53 +1,55 @@
-# Custom Agent Adapters
+# Harbor Agent Adapters
 
-Harbor is the benchmark runner and isolation layer. The evaluated system remains
-your own Agent. Put its Harbor adapter in this Python package and launch it with
-the `module.path:ClassName` import path.
+This package contains Harbor `0.20.0` `BaseAgent` integrations for the local
+Terminal-Bench task dataset.
 
-## Interface
+## Shared Layer
 
-A custom adapter subclasses Harbor's `BaseAgent` and implements:
+`shared/harbor_shell.py` provides one synchronous facade over Harbor's
+asynchronous `BaseEnvironment` API. Native Agent loops reuse it for command
+execution and file transfer. It centralizes:
 
-- `name()`
-- `version()`
-- `setup(environment)`
-- `run(instruction, environment, context)`
+- Harbor event-loop bridging;
+- cancellation and deadline checks;
+- command output limits;
+- container WORKDIR discovery for relative files;
+- upload/download cleanup.
 
-If the Agent is installed and executed inside each task container, use Harbor's
-installed-agent patterns as a reference. If it controls the environment from the
-host, subclass `BaseAgent` directly.
+It does not contain an LLM loop or pretend to implement an Agent's search
+algorithm.
+
+## Registered Agents
+
+| Import path | Native loop | State |
+|---|---|---|
+| Harbor built-in `codex` | Codex CLI | ready |
+| Harbor built-in `claude-code` | Claude Code | ready |
+| `agent_adapters.arbor:ArborTerminalAgent` | `arbor.core.agent.Agent.run` | ready |
+| `agent_adapters.ai_scientist:AiScientistTerminalAgent` | AiScientist `Subagent.run` | ready |
+| `agent_adapters.ear:EARTerminalAgent` | EAR graph search | fail-closed |
+| `agent_adapters.mlevolve:MLEvolveTerminalAgent` | MLEvolve search | fail-closed |
+| `agent_adapters.ml_master_2:MLMaster2Agent` | ML-Master 2 workflow | fail-closed |
+
+The three search/workflow adapters remain blocked until their candidate or
+workspace semantics are correct. Importability is not treated as readiness.
 
 ## Launch
 
+Use the canonical command builder from the repository root:
+
 ```bash
-TB2_AGENT='agent_adapters.my_agent:MyAgent' \
-TB2_MODEL='provider/model-name' \
-TB2_INCLUDE_TASK='openssl-selfsigned-cert' \
-../scripts/run_custom_agent.sh
+python -m BenchmarkAdapters terminal --agent arbor \
+  --task fix-git --concurrency 1 --dry-run
 ```
 
-No production adapter is created here because the Agent's actual Python class,
-CLI entrypoint, authentication method, and trajectory format have not yet been
-specified. The launcher and import package are ready for that code.
+Or launch an import path directly with the generic script:
 
-## Modified Terminal-Bench AO
+```bash
+TB2_AGENT='agent_adapters.arbor:ArborTerminalAgent' \
+TB2_MODEL='gpt-5.5' \
+TB2_INCLUDE_TASK='fix-git' \
+./scripts/run_custom_agent.sh
+```
 
-The repository's modified Terminal-Bench protocol is the Arbor-style
-Harness-Engineering Autonomous Optimization task. Its outer Agent edits a
-`terminus-2` repository and the fixed Harbor evaluator scores the resulting
-harness. It is not the same contract as a direct Harbor `BaseAgent` that solves
-one task inside a container.
-
-The shared AO implementation lives in
-`../../BenchmarkAdapters/TerminalBench/adapter.py`. Keep this package for direct Harbor
-`BaseAgent` integrations; use the shared adapter for the modified AO protocol
-so evaluator, proxy, output, and retry behavior remain common across Agents.
-
-EAR, MLEvolve, ML-Master 2.0, and AiScientist share the isolated runtime under
-`../../BenchmarkAdapters/RepositoryAgent/`; Arbor, Codex, and Claude Code keep
-their repository-native commands. Optimization uses dev only, and held-out test
-evaluation is a separate sandboxed operation.
-
-The evaluator remains part of the trusted benchmark boundary. If it imports the
-candidate Harness in-process, it must not hand raw held-out labels to candidate
-code; use a separate trusted scoring process for confidential labels.
+Harbor runs the official verifier only after the Agent returns. The adapters do
+not access `/tests`, verifier source, or a project-owned scoring function.

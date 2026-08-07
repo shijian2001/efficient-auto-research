@@ -1,4 +1,4 @@
-from .cli import main
+from .cli import cli_entrypoint
 
 
-raise SystemExit(main())
+raise SystemExit(cli_entrypoint())

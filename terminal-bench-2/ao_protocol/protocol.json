@@ -1,0 +1,33 @@
+{
+  "baseline_manifest_path": "repo:terminal-bench-2/ao_protocol/baseline_manifest.json",
+  "baseline_manifest_digest": "926cac2cf4037f5e28398434789a3d9e622995a691f17b3146077144d88d3fc1",
+  "baseline_source": "repo:terminal-bench-2/.venv/lib/python3.12/site-packages/harbor/agents/terminus_2",
+  "dataset_digest": "5e4ec407bec1a8ec35ae57c52aaa9e57fbafc7d79155d09555e54aca941e6cdd",
+  "dataset_path": "repo:terminal-bench-2/datasets/terminal-bench-2",
+  "dev_concurrency": 8,
+  "editable_paths": [
+    "terminus_2.py",
+    "terminus_json_plain_parser.py",
+    "terminus_xml_plain_parser.py",
+    "tmux_session.py",
+    "templates"
+  ],
+  "evaluator_timeout_seconds": 86400,
+  "failure_policy": "missing-or-error-reward-is-zero",
+  "harbor_executable": "repo:terminal-bench-2/.venv/bin/harbor",
+  "harbor_lock_digest": "86343489f5ab2ef6a55f6cf40e36267be0041882cf75b81db00e8ff81f518dba",
+  "harbor_lock_path": "repo:terminal-bench-2/uv.lock",
+  "harbor_version": "0.20.0",
+  "inner_model": "gpt-5.5",
+  "outer_wall_clock_seconds": 172800,
+  "protocol_digest": "2469cdd2354c645f6befa75a7bbf369ef3f689149bfcecca5648bdfd3037dda8",
+  "protocol_id": "terminal-bench-ao-reconstruction-v1",
+  "retry_policy": "infrastructure-only-once",
+  "seeds": [
+    0,
+    1,
+    2
+  ],
+  "split_digest": "1a37db2d4a244cc8be356e3134620b2d0f396e8fdd9f6223ca84a12a3a6b54e4",
+  "split_path": "repo:terminal-bench-2/ao_protocol/split.json"
+}

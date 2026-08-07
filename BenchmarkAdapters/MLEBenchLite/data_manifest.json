@@ -1,0 +1,30 @@
+{
+  "manifest_digest": "c82bb608db6ba0e64421d9bc23ef11f22d669c87db8201e55f5f7a742f0e276d",
+  "mlebench_source_commit": "507f92e1138bb6e40dac5c6ee7a6758e6424bf97",
+  "schema_version": 1,
+  "split_digest": "55574dcb4ae7006c22cc621124fa5b2e6d506ab060b88f6cb176a3bd965e6779",
+  "tasks": [
+    {"archive_sha256": "b41166e9d3c282f7cb52a5c705bf6c35bf439f1eba99fc47a93d5e1ecc3330c4", "archive_size_bytes": 12543547, "task_id": "aerial-cactus-identification"},
+    {"archive_sha256": "18036845ab76b68d305d6e2dbbaaaf5cd23926be740e1297a8972ac1c6360976", "archive_size_bytes": 10215289875, "task_id": "aptos2019-blindness-detection"},
+    {"archive_sha256": "ab383ccadd9171e6591f8b8a95440c86bb8ebbbe24b83d0385cabda9f85d2375", "archive_size_bytes": 37460781, "task_id": "denoising-dirty-documents"},
+    {"archive_sha256": "18c08a39332016c40be436ed095c24978764997d9f5dcd177edbd4f780a84e28", "archive_size_bytes": 1264719, "task_id": "detecting-insults-in-social-commentary"},
+    {"archive_sha256": "4bd7d8a6384e231bfbcba2a98197bd95bf51a3d2c1403b4ba8060cb0bd330537", "archive_size_bytes": 724495926, "task_id": "dog-breed-identification"},
+    {"archive_sha256": "63fd2d79dd7eda419a216a353aa2eb28ec8367287345e77c4488c60be078a061", "archive_size_bytes": 853083403, "task_id": "dogs-vs-cats-redux-kernels-edition"},
+    {"archive_sha256": "41464cebe81a654db9078bab3655de9bce4e4a1c8b3f31c7729d2571607befbc", "archive_size_bytes": 6773228425, "task_id": "histopathologic-cancer-detection"},
+    {"archive_sha256": "85ca047827488005dc0aa7c8bb9204372d937118e7ef79fc828abae3f30599fd", "archive_size_bytes": 55201987, "task_id": "jigsaw-toxic-comment-classification-challenge"},
+    {"archive_sha256": "4d948755b53eb6537aca516c3d950e2808321ce55ccb5efc8cc357db62f29ac3", "archive_size_bytes": 35953027, "task_id": "leaf-classification"},
+    {"archive_sha256": "83c05aab4b21a2ec0e98856a32793c7b8a60c4a799d55cb7e44117966cfa2902", "archive_size_bytes": 584176314, "task_id": "mlsp-2013-birds"},
+    {"archive_sha256": "b708d8b9bb88902dbebfcce01adf76d29b72fc6530a710ac1ce69cb7942e8863", "archive_size_bytes": 1674619075, "task_id": "new-york-city-taxi-fare-prediction"},
+    {"archive_sha256": "f0707e29bee9f5c0f4079396926d27ceec69a3aaefd632bcf1c16a6d6014021f", "archive_size_bytes": 5504552, "task_id": "nomad2018-predict-transparent-conductors"},
+    {"archive_sha256": "46d65a53646c14ad7da7456f45e21ad6a9ecba261909bad570992bb1606247d9", "archive_size_bytes": 817072693, "task_id": "plant-pathology-2020-fgvc7"},
+    {"archive_sha256": "ecfd033542f820b4683c20b3fcc7f0e9aa4aa48f7b1035d9427b277ae5f152eb", "archive_size_bytes": 4973912, "task_id": "random-acts-of-pizza"},
+    {"archive_sha256": "f1e7a800d20358142484b428443b0fe969b2737f2b0558bd6549da412e396b13", "archive_size_bytes": 12561354247, "task_id": "ranzcr-clip-catheter-line-classification"},
+    {"archive_sha256": "7431fa670ea9a1a0591edd63b429feca36042c6975ce43e802fc5caa35c07e66", "archive_size_bytes": 113548961211, "task_id": "siim-isic-melanoma-classification"},
+    {"archive_sha256": "95a2f8a0c9b37a9cbe37a2847b0b353f5d722322958cf5d0a588951d463be88e", "archive_size_bytes": 1899580, "task_id": "spooky-author-identification"},
+    {"archive_sha256": "5280c3557e41b6d6a74e2db78963504a6cda33f2dd340483684a1063d205c394", "archive_size_bytes": 131823098, "task_id": "tabular-playground-series-dec-2021"},
+    {"archive_sha256": "f8498d012ae3b780ce1eaa41f44df0cb1e8bcd9e485cffece5f1521e132dac0e", "archive_size_bytes": 269866202, "task_id": "tabular-playground-series-may-2022"},
+    {"archive_sha256": "eec331afefea58af0d751844966dbfbf2f85d62d6fc19608b7d0626d6ebc5e45", "archive_size_bytes": 95347717, "task_id": "text-normalization-challenge-english-language"},
+    {"archive_sha256": "ddcf8ad75c28512b8afcddbd5c3e2c2ee99283b4d931c469f27838a40e40d500", "archive_size_bytes": 125552383, "task_id": "text-normalization-challenge-russian-language"},
+    {"archive_sha256": "5099d1395e57494b2e72f5e467a2480e128f8afa4d0704b02fb33490eef2f0b7", "archive_size_bytes": 282843501, "task_id": "the-icml-2013-whale-challenge-right-whale-redux"}
+  ]
+}

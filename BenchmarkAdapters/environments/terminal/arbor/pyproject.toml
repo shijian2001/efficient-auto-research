@@ -1,0 +1,19 @@
+[project]
+name = "terminal-bench-arbor"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "arbor-agent",
+  "harbor==0.20.0",
+]
+
+[dependency-groups]
+test = [
+  "pytest>=8.4,<9",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+arbor-agent = { path = "../../../../baselines/Arbor", editable = true }

@@ -1,5 +1,5 @@
-"""Modified Terminal-Bench adapters."""
+"""Harbor-backed Terminal-Bench adapters."""
 
-from .adapter import TerminalAoAdapter, TerminalAoRequest, parse_pass_rate
+from .adapter import HarborTerminalAdapter, HarborTerminalRequest
 
-__all__ = ["TerminalAoAdapter", "TerminalAoRequest", "parse_pass_rate"]
+__all__ = ["HarborTerminalAdapter", "HarborTerminalRequest"]

@@ -21,12 +21,17 @@ import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any
+from typing import Any, Callable
 
 import structlog
 
 from openai import BadRequestError
-from aisci_agent_runtime.llm_client import LLMClient, ContextLengthError, ContentPolicyError
+from aisci_agent_runtime.llm_client import (
+    LLMCancelledError,
+    LLMClient,
+    ContextLengthError,
+    ContentPolicyError,
+)
 from aisci_agent_runtime.shell_interface import ShellInterface
 from aisci_agent_runtime.summary_utils import SummaryConfig, summarize_messages
 from aisci_agent_runtime.tools.base import Tool, SubagentCompleteSignal, SubagentCompleteTool
@@ -50,6 +55,7 @@ class SubagentStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     TIMEOUT = "timeout"
+    CANCELLED = "cancelled"
 
 
 @dataclass
@@ -369,10 +375,12 @@ class Subagent(ABC):
         shell: ShellInterface,
         llm: LLMClient,
         config: SubagentConfig | None = None,
+        cancel_check: Callable[[], bool] | None = None,
     ):
         self.shell = shell
         self.llm = llm
         self.config = config or SubagentConfig()
+        self.cancel_check = cancel_check
 
     # ---- abstract interface ----
 
@@ -442,6 +450,16 @@ class Subagent(ABC):
         last_summary: str | None = None
 
         for step in range(1, self.config.max_steps + 1):
+            if self.cancel_check is not None and self.cancel_check():
+                return self._make_output(
+                    SubagentStatus.CANCELLED,
+                    "Execution cancelled by the Harbor task runner.",
+                    {},
+                    step - 1,
+                    time.time() - start,
+                    total_tokens,
+                    log_path,
+                )
             elapsed = time.time() - start
             if elapsed >= self.config.time_limit:
                 logger.info("subagent time limit reached", name=self.name, step=step)
@@ -464,6 +482,26 @@ class Subagent(ABC):
             # --- LLM call ---
             try:
                 resp = self.llm.chat(messages, tools=tool_schemas)
+                if self.cancel_check is not None and self.cancel_check():
+                    return self._make_output(
+                        SubagentStatus.CANCELLED,
+                        "Execution cancelled by the Harbor task runner.",
+                        {},
+                        step,
+                        time.time() - start,
+                        total_tokens,
+                        log_path,
+                    )
+            except LLMCancelledError:
+                return self._make_output(
+                    SubagentStatus.CANCELLED,
+                    "Execution cancelled by the Harbor task runner.",
+                    {},
+                    step,
+                    time.time() - start,
+                    total_tokens,
+                    log_path,
+                )
             except ContentPolicyError as e:
                 # o-series safety filter — fail immediately to preserve Azure
                 # account quota (5 cumulative violations → account lockout).
@@ -491,16 +529,46 @@ class Subagent(ABC):
                         name=self.name,
                         step=step,
                     )
-                    messages, last_summary, summarized = summarize_messages(
-                        llm=self.llm,
-                        messages=messages,
-                        config=self.config.summary_config,
-                        task_description=context,
-                        last_summary=last_summary,
-                        log_path=os.path.join(self.config.log_dir, "context_summary_requests.jsonl"),
-                        step=step,
-                        actor=self.name,
-                    )
+                    try:
+                        messages, last_summary, summarized = summarize_messages(
+                            llm=self.llm,
+                            messages=messages,
+                            config=self.config.summary_config,
+                            task_description=context,
+                            last_summary=last_summary,
+                            log_path=os.path.join(
+                                self.config.log_dir,
+                                "context_summary_requests.jsonl",
+                            ),
+                            step=step,
+                            actor=self.name,
+                        )
+                    except LLMCancelledError:
+                        return self._make_output(
+                            SubagentStatus.CANCELLED,
+                            "Execution cancelled by the Harbor task runner.",
+                            {},
+                            step,
+                            time.time() - start,
+                            total_tokens,
+                            log_path,
+                        )
+                    except Exception as e:
+                        logger.error(
+                            "context summary reduction failed",
+                            name=self.name,
+                            step=step,
+                            err=str(e),
+                        )
+                        return self._make_output(
+                            SubagentStatus.FAILED,
+                            f"Context summary reduction failed: {e}",
+                            {},
+                            step,
+                            time.time() - start,
+                            total_tokens,
+                            log_path,
+                        )
                     if not summarized:
                         messages = self._prune_after_context_error(messages, _ctx_err)
                 else:
@@ -515,6 +583,32 @@ class Subagent(ABC):
                     return self._make_output(
                         SubagentStatus.FAILED,
                         "Context length exceeded even after pruning.",
+                        {},
+                        step,
+                        time.time() - start,
+                        total_tokens,
+                        log_path,
+                    )
+                except LLMCancelledError:
+                    return self._make_output(
+                        SubagentStatus.CANCELLED,
+                        "Execution cancelled by the Harbor task runner.",
+                        {},
+                        step,
+                        time.time() - start,
+                        total_tokens,
+                        log_path,
+                    )
+                except Exception as e:
+                    logger.error(
+                        "LLM retry after context pruning failed",
+                        name=self.name,
+                        step=step,
+                        err=str(e),
+                    )
+                    return self._make_output(
+                        SubagentStatus.FAILED,
+                        f"LLM retry after context pruning failed: {e}",
                         {},
                         step,
                         time.time() - start,
@@ -599,6 +693,16 @@ class Subagent(ABC):
                 continue
 
             for tc in resp.tool_calls:
+                if self.cancel_check is not None and self.cancel_check():
+                    return self._make_output(
+                        SubagentStatus.CANCELLED,
+                        "Execution cancelled by the Harbor task runner.",
+                        {},
+                        step,
+                        time.time() - start,
+                        total_tokens,
+                        log_path,
+                    )
                 tool = tool_map.get(tc.name)
                 if not tool:
                     messages.append({
@@ -618,6 +722,16 @@ class Subagent(ABC):
                         )
                     else:
                         result = tool.execute(self.shell, **tc.arguments)
+                    if self.cancel_check is not None and self.cancel_check():
+                        return self._make_output(
+                            SubagentStatus.CANCELLED,
+                            "Execution cancelled by the Harbor task runner.",
+                            {},
+                            step,
+                            time.time() - start,
+                            total_tokens,
+                            log_path,
+                        )
                     messages.append({
                         "role": "tool",
                         "tool_call_id": tc.call_id,

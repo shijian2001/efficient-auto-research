@@ -14,11 +14,11 @@ project = "mle-bench-agents/efficient-auto-research"
 python = "3.11"
 
 [agents.mlevolve]
-kind = "pinned_requirements"
+kind = "uv_project"
+project = "BenchmarkAdapters/environments/agents/mlevolve"
 python = "3.11"
-requirements_in = "BenchmarkAdapters/environments/requirements/mlevolve.in"
-lock = "BenchmarkAdapters/environments/requirements/mlevolve.lock"
-venv = "BenchmarkAdapters/environments/.venvs/mlevolve"
+source_path = "baselines/MLEvolve"
+source_snapshot = true
 
 [agents.arbor]
 kind = "uv_project"
@@ -42,3 +42,23 @@ python = "3.11"
 kind = "uv_project"
 project = "baselines/AiScientist"
 python = "3.12"
+
+[profiles."terminal-bench-2.ai-scientist"]
+kind = "uv_project"
+project = "BenchmarkAdapters/environments/terminal/ai-scientist"
+python = "3.12"
+
+[profiles."terminal-bench-2.arbor"]
+kind = "uv_project"
+project = "BenchmarkAdapters/environments/terminal/arbor"
+python = "3.12"
+
+[profiles."mle-bench-lite.arbor"]
+kind = "uv_project"
+project = "BenchmarkAdapters/environments/mle/arbor"
+python = "3.11"
+
+[profiles."mle-bench-lite.ear"]
+kind = "uv_project"
+project = "BenchmarkAdapters/environments/mle/ear"
+python = "3.11"

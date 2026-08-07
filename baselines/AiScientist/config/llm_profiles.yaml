@@ -46,6 +46,10 @@ profiles:
   gpt-5.5:
     extends: gpt-5.4
     model: gpt-5.5
+    reasoning:
+      effort: high
+    sampling:
+      temperature: 1.0
 
   glm-5:
     backend: azure-openai

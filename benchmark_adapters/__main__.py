@@ -1,4 +1,4 @@
-from BenchmarkAdapters.cli import main
+from BenchmarkAdapters.cli import cli_entrypoint
 
 
-raise SystemExit(main())
+raise SystemExit(cli_entrypoint())

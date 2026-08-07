@@ -1,0 +1,15 @@
+[project]
+name = "mle-bench-arbor"
+version = "0.1.0"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "arbor-agent",
+  "mle-bench-lite-local",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+arbor-agent = { path = "../../../../baselines/Arbor", editable = true }
+mle-bench-lite-local = { path = "../../../../mle-bench-lite" }

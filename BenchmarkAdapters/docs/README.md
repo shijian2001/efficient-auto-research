@@ -1,64 +1,35 @@
 # Shared Baseline Adapters
 
-`BenchmarkAdapters/` is the canonical location for project-owned benchmark
-adapters. Benchmark implementations are separated by benchmark:
+The canonical implementation and capability matrix are documented in
+`BenchmarkAdapters/README.md`.
 
-```text
-BenchmarkAdapters/
-├── MLEBenchLite/adapter.py
-├── TerminalBench/adapter.py
-├── RepositoryAgent/       # shared isolated AO runtime + thin profiles
-├── contracts.py
-├── process.py
-├── registry.py
-├── agents.py
-├── cli.py
-├── api_smoke.py
-├── relay.py
-└── status.py
-```
+The implemented repair checklist, scoring protocol, remaining real-run gates,
+and evidence requirements for all seven Agents on MLE-Bench Lite and
+Terminal-Bench 36/53 AO are defined in
+`BenchmarkAdapters/docs/SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md`.
 
-Use `BenchmarkAdapters.MLEBenchLite.adapter` for direct MLE-Bench Lite runs and
-`BenchmarkAdapters.TerminalBench.adapter` for the modified Terminal-Bench
-Harness-Engineering AO protocol. Shared process, relay, environment, and error
-handling stays in the root modules.
+The important boundary is benchmark-specific:
 
-Arbor, Codex, and Claude Code use repository-native launch commands. EAR,
-MLEvolve, ML-Master 2.0, and AiScientist use `RepositoryAgent/`, which provides
-one isolated workspace/evaluator/revision backend and four small strategy
-profiles. Results explicitly identify these as shared profiles rather than
-upstream-native Harbor implementations.
+- `BenchmarkAdapters/MLEBenchLite/adapter.py` builds MLE-Bench Lite workspaces
+  and native launch commands.
+- `BenchmarkAdapters/TerminalAO/supervisor.py` owns 36-dev search, revision
+  selection, final freeze, and one-shot 53-test evaluation.
+- `BenchmarkAdapters/TerminalBench/adapter.py` is a direct-solving smoke path
+  and is not comparable with Terminal AO.
+- `terminal-bench-2/agent_adapters/shared/harbor_shell.py` is the common
+  synchronous Harbor environment bridge used by native host-side Agent loops.
 
-Split evaluators run against disposable repository copies without network or
-credentials. The evaluator is trusted benchmark code; confidential held-out
-labels must remain in a separate trusted evaluator process rather than being
-passed directly into imported candidate code.
+Terminal AO never imports an Agent-controlled evaluator. Harbor remains
+host-owned; outer Agent processes receive only an aggregate dev capability and
+cannot see the test split or test endpoint.
 
 ```bash
-python -m BenchmarkAdapters mle --agent arbor \
-  --competition-id spooky-author-identification \
-  --data-root /path/to/mle-bench-data \
-  --output-dir /path/to/run --dry-run
-
-python -m BenchmarkAdapters terminal --agent codex \
-  --harness-dir /path/to/terminus-2 \
-  --eval-script /path/to/run_eval.py \
-  --dev-data /path/to/data/dev.json \
-  --test-data /path/to/data/test.json \
-  --output-dir /path/to/ao-run --split dev --dry-run
+BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters status
+BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters preflight
+BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters terminal-ao \
+  --agent codex --protocol terminal-bench-2/ao_protocol/protocol.json \
+  --output-dir /runs/ao/codex/seed-0 --seed 0 --dry-run
 ```
 
-Defaults are model `gpt-5.5`, relay
-`https://relay.shuai-ederson-clow.xyz/v1`, and proxy
-`http://127.0.0.1:17892`. Credentials are process-only and are not written to
-manifests or documentation.
-
-The lowercase `benchmark_adapters` package remains as a compatibility wrapper
-for existing imports and commands.
-
-Agent-specific notes remain next to each installed Agent under `adapter_docs/`:
-
-```text
-baselines/<Agent>/adapter_docs/mle-bench-lite.md
-baselines/<Agent>/adapter_docs/terminal-bench-ao.md
-```
+Agent-specific implementation notes are stored beside each checkout in
+`adapter_docs/mle-bench-lite.md` and `adapter_docs/terminal-bench.md`.

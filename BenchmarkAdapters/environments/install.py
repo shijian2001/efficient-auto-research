@@ -1,14 +1,10 @@
-"""Install one benchmark/agent environment through UV.
-
-The installer intentionally reuses each upstream project's own ``pyproject``
-and lockfile. It only adds a generated UV requirements lock for MLEvolve,
-which currently ships pinned requirements files instead of a pyproject.
-"""
+"""Install one benchmark/Agent environment from tracked UV lockfiles."""
 
 from __future__ import annotations
 
 import argparse
 import os
+import stat
 import shutil
 import subprocess
 import sys
@@ -78,24 +74,8 @@ def install_uv_project(spec: dict, *, dry_run: bool) -> None:
     project = project_path(spec["project"])
     lock_path = project / "uv.lock"
     uv = uv_command()
-    if lock_path.is_file():
-        run(
-            [
-                uv,
-                "sync",
-                "--project",
-                str(project),
-                "--python",
-                str(spec["python"]),
-                "--frozen",
-            ],
-            dry_run=dry_run,
-        )
-        return
-    run(
-        [uv, "lock", "--project", str(project), "--python", str(spec["python"])],
-        dry_run=dry_run,
-    )
+    if not lock_path.is_file():
+        raise InstallError(f"tracked UV lock does not exist: {lock_path}")
     run(
         [
             uv,
@@ -104,39 +84,81 @@ def install_uv_project(spec: dict, *, dry_run: bool) -> None:
             str(project),
             "--python",
             str(spec["python"]),
-            "--frozen",
+            "--locked",
         ],
         dry_run=dry_run,
     )
-
-
-def venv_python(venv: Path) -> Path:
-    return venv / "bin" / "python"
-
-
-def install_requirements(spec: dict, *, dry_run: bool) -> None:
-    uv = uv_command()
-    requirements_in = (ROOT / spec["requirements_in"]).resolve()
-    lock_path = (ROOT / spec["lock"]).resolve()
-    venv = (ROOT / spec["venv"]).resolve()
-    if not requirements_in.is_file():
-        raise InstallError(f"requirements input does not exist: {requirements_in}")
-
-    compile_command = [
-        uv,
-        "pip",
-        "compile",
-        str(requirements_in),
-        "--python-version",
-        str(spec["python"]),
-        "--output-file",
-        str(lock_path),
-    ]
-    if not lock_path.is_file():
-        lock_path.parent.mkdir(parents=True, exist_ok=True)
-        run(compile_command, dry_run=dry_run)
-    run([uv, "venv", "--python", str(spec["python"]), str(venv)], dry_run=dry_run)
-    run([uv, "pip", "sync", "--python", str(venv_python(venv)), str(lock_path)], dry_run=dry_run)
+    source_path = spec.get("source_path")
+    if source_path:
+        source = project_path(source_path)
+        if spec.get("source_snapshot"):
+            snapshot = project / ".venv" / "agent-source"
+            if dry_run:
+                print(f"git archive tracked source to {snapshot}")
+            else:
+                staging = project / ".venv" / f".agent-source-{os.getpid()}"
+                previous = project / ".venv" / ".agent-source-previous"
+                shutil.rmtree(staging, ignore_errors=True)
+                shutil.rmtree(previous, ignore_errors=True)
+                staging.mkdir(parents=True)
+                git_root_result = subprocess.run(
+                    ["git", "-C", str(source), "rev-parse", "--show-toplevel"],
+                    capture_output=True,
+                    text=True,
+                    env=environment(),
+                    check=True,
+                )
+                git_root = Path(git_root_result.stdout.strip()).resolve()
+                source_relative = source.relative_to(git_root)
+                treeish = "HEAD" if source_relative == Path(".") else f"HEAD:{source_relative}"
+                archive = subprocess.Popen(
+                    ["git", "-C", str(git_root), "archive", treeish],
+                    stdout=subprocess.PIPE,
+                    env=environment(),
+                )
+                assert archive.stdout is not None
+                extract = subprocess.run(
+                    ["tar", "-x", "-C", str(staging)],
+                    stdin=archive.stdout,
+                    env=environment(),
+                    check=False,
+                )
+                archive.stdout.close()
+                archive_return_code = archive.wait()
+                if archive_return_code or extract.returncode:
+                    shutil.rmtree(staging, ignore_errors=True)
+                    raise InstallError("could not archive locked Agent source snapshot")
+                for path in sorted(staging.rglob("*"), reverse=True):
+                    if path.is_symlink():
+                        continue
+                    mode = path.stat().st_mode
+                    if path.is_dir():
+                        path.chmod((mode & 0o555) or 0o555)
+                    elif stat.S_ISREG(mode):
+                        path.chmod(mode & 0o555)
+                staging.chmod(0o555)
+                if snapshot.exists():
+                    snapshot.rename(previous)
+                staging.rename(snapshot)
+                if previous.exists():
+                    for path in previous.rglob("*"):
+                        if path.is_symlink():
+                            continue
+                        if path.is_dir():
+                            path.chmod(0o755)
+                        else:
+                            path.chmod(path.stat().st_mode | stat.S_IWUSR)
+                    previous.chmod(0o755)
+                    shutil.rmtree(previous)
+            source = snapshot
+        code = (
+            "import site; from pathlib import Path; "
+            f"Path(site.getsitepackages()[0], 'benchmark_agent_source.pth').write_text({str(source)!r} + '\\n')"
+        )
+        run(
+            [str(project / ".venv/bin/python"), "-c", code],
+            dry_run=dry_run,
+        )
 
 
 def install_cli(spec: dict) -> None:
@@ -154,8 +176,6 @@ def install_agent(spec: dict, *, dry_run: bool) -> None:
     kind = spec["kind"]
     if kind == "uv_project":
         install_uv_project(spec, dry_run=dry_run)
-    elif kind in {"requirements", "pinned_requirements"}:
-        install_requirements(spec, dry_run=dry_run)
     elif kind == "cli":
         if dry_run:
             print(command_text(spec["command"]))
@@ -174,6 +194,11 @@ def profile_names(manifest: dict) -> list[str]:
 
 
 def install_profile(manifest: dict, profile: str, *, dry_run: bool) -> None:
+    profile_override = manifest.get("profiles", {}).get(profile)
+    if profile_override is not None:
+        print(f"[{profile}] combined benchmark/agent environment")
+        install_agent(profile_override, dry_run=dry_run)
+        return
     try:
         benchmark_name, agent_name = profile.split(".", 1)
         benchmark = manifest["benchmarks"][benchmark_name]

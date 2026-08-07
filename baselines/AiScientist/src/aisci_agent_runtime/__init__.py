@@ -12,13 +12,14 @@ from aisci_agent_runtime.llm_profiles import (
     resolved_profile_path,
     resolve_llm_profile,
 )
-from aisci_agent_runtime.shell_interface import ShellInterface, ShellResult
+from aisci_agent_runtime.shell_interface import HarborShellInterface, ShellInterface, ShellResult
 from aisci_agent_runtime.trace import AgentTraceWriter, trace_paths
 
 __all__ = [
     "AgentTraceWriter",
     "BackendConfig",
     "BackendEnvVar",
+    "HarborShellInterface",
     "LLMProfile",
     "LLMRegistry",
     "backend_env_values",

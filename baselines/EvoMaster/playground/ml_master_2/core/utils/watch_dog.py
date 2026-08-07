@@ -1,8 +1,9 @@
 """Watchdog module for timeout control and forced interruption."""
 import ctypes
+import os
 import threading
 
-RUN_TIMEOUT_SECONDS = 86400
+RUN_TIMEOUT_SECONDS = int(os.environ.get("ML_MASTER_RUN_TIMEOUT_SECONDS", "86400"))
 
 
 # Must inherit from BaseException to prevent being caught by lower-level except Exception:

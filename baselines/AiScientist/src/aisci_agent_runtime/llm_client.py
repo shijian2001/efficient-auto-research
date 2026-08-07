@@ -30,15 +30,16 @@ import random
 import time
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
-import logid
 import structlog
 from openai import (
     OpenAI, AzureOpenAI, BadRequestError, PermissionDeniedError,
     RateLimitError, APIConnectionError, APITimeoutError, InternalServerError,
 )
 from openai.types.shared_params.reasoning import Reasoning
+
+from aisci_agent_runtime.logid import generate_v2
 
 logger = structlog.stdlib.get_logger(component=__name__)
 
@@ -85,6 +86,10 @@ class AccountBlockedError(Exception):
     reach the limit (5 times).  Further requests to o-series models are
     denied until manually unblocked.  Callers should fail immediately.
     """
+    pass
+
+
+class LLMCancelledError(RuntimeError):
     pass
 
 
@@ -170,6 +175,9 @@ class LLMConfig:
     # this; other models (GPT, Kimi, etc.) must not be affected.
     # Set via AISCI_CLEAR_THINKING env var ("false" | "true").
     clear_thinking: bool | None = None
+    request_timeout: float | None = None
+    retry_budget: float = _RETRY_STOP_AFTER
+    cancel_check: Callable[[], bool] | None = None
 
     @property
     def prune_context_window(self) -> int | None:
@@ -243,8 +251,10 @@ class LLMClient(ABC):
         attempt = 0
 
         while True:
+            self._check_cancelled()
             try:
                 response = call_fn()
+                self._check_cancelled()
                 self._total_retry_time += retry_time
                 return response, retry_time
 
@@ -336,13 +346,13 @@ class LLMClient(ABC):
                     raise
 
                 wait = self._next_wait(attempt)
-                if time.time() - retry_start + wait > _RETRY_STOP_AFTER:
+                if time.time() - retry_start + wait > self.config.retry_budget:
                     raise RuntimeError(
-                        f"LLM retry budget exhausted ({_RETRY_STOP_AFTER}s) on BadRequestError"
+                        f"LLM retry budget exhausted ({self.config.retry_budget}s) on BadRequestError"
                     ) from e
                 logger.warning("API error (transient BadRequest)", attempt=attempt + 1,
                                err=error_msg[:200], wait=wait)
-                time.sleep(wait)
+                self._wait_retry(wait)
                 retry_time += wait
                 attempt += 1
 
@@ -374,20 +384,33 @@ class LLMClient(ABC):
                     ) from e
 
                 wait = self._next_wait(attempt)
-                if time.time() - retry_start + wait > _RETRY_STOP_AFTER:
+                if time.time() - retry_start + wait > self.config.retry_budget:
                     raise RuntimeError(
-                        f"LLM retry budget exhausted ({_RETRY_STOP_AFTER}s)"
+                        f"LLM retry budget exhausted ({self.config.retry_budget}s)"
                     ) from e
                 logger.warning(
                     "API error", attempt=attempt + 1,
                     err=err_str[:200], wait=wait,
                 )
-                time.sleep(wait)
+                self._wait_retry(wait)
                 retry_time += wait
                 attempt += 1
 
             except Exception:
                 raise
+
+    def _check_cancelled(self) -> None:
+        if self.config.cancel_check is not None and self.config.cancel_check():
+            raise LLMCancelledError("LLM operation cancelled by task runner")
+
+    def _wait_retry(self, delay: float) -> None:
+        deadline = time.monotonic() + delay
+        while True:
+            self._check_cancelled()
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                return
+            time.sleep(min(0.1, remaining))
 
     @staticmethod
     def _next_wait(attempt: int) -> float:
@@ -518,6 +541,8 @@ class CompletionsLLMClient(LLMClient):
         # in extra_headers, matching PaperBench's AzureOpenAICompletionsTurnCompleter.
         if provider == "azure-openai":
             client_kwargs: dict[str, Any] = {"max_retries": 0}
+            if config.request_timeout is not None:
+                client_kwargs["timeout"] = config.request_timeout
             if config.api_key:
                 client_kwargs["api_key"] = config.api_key
             if config.azure_endpoint:
@@ -533,6 +558,8 @@ class CompletionsLLMClient(LLMClient):
             )
         elif provider == "openai":
             client_kwargs = {"max_retries": 0}
+            if config.request_timeout is not None:
+                client_kwargs["timeout"] = config.request_timeout
             if config.api_key:
                 client_kwargs["api_key"] = config.api_key
             if config.base_url:
@@ -565,7 +592,7 @@ class CompletionsLLMClient(LLMClient):
             # X-TT-LOGID: fresh logid per call so each request is individually
             # traceable in ByteDance gateway logs.
             # Mirrors PaperBench's AzureOpenAICompletionsTurnCompleter.
-            "extra_headers": {"X-TT-LOGID": logid.generate_v2()},
+            "extra_headers": {"X-TT-LOGID": generate_v2()},
         }
         # temperature: only send when explicitly set (PaperBench default: NOT_GIVEN).
         # GLM-5 reasoning models must not receive temperature.
@@ -708,6 +735,8 @@ class ResponsesLLMClient(LLMClient):
         # in extra_headers, matching PaperBench's AzureOpenAIResponsesTurnCompleter.
         if provider == "azure-openai":
             client_kwargs: dict[str, Any] = {"max_retries": 0}
+            if config.request_timeout is not None:
+                client_kwargs["timeout"] = config.request_timeout
             if config.api_key:
                 client_kwargs["api_key"] = config.api_key
             if config.azure_endpoint:
@@ -723,6 +752,8 @@ class ResponsesLLMClient(LLMClient):
             )
         elif provider == "openai":
             client_kwargs = {"max_retries": 0}
+            if config.request_timeout is not None:
+                client_kwargs["timeout"] = config.request_timeout
             if config.api_key:
                 client_kwargs["api_key"] = config.api_key
             if config.base_url:
@@ -763,7 +794,7 @@ class ResponsesLLMClient(LLMClient):
             # X-TT-LOGID: fresh logid per call so each request is individually
             # traceable in ByteDance gateway logs.
             # Mirrors PaperBench's OpenAIResponsesTurnCompleter.
-            "extra_headers": {"X-TT-LOGID": logid.generate_v2()},
+            "extra_headers": {"X-TT-LOGID": generate_v2()},
         }
         if responses_tools:
             kwargs["tools"] = responses_tools

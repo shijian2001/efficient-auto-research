@@ -1,4 +1,4 @@
-"""Backward-compatible imports for the modified Terminal-Bench adapter."""
+"""Backward-compatible imports for Terminal-Bench Harness Engineering AO."""
 
-from BenchmarkAdapters.TerminalBench.adapter import *
-from BenchmarkAdapters.TerminalBench.adapter import __all__
+from BenchmarkAdapters.TerminalAO import *
+from BenchmarkAdapters.TerminalAO import __all__

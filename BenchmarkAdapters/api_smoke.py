@@ -1,26 +1,26 @@
-"""Native-agent API smoke command."""
+"""Minimal endpoint smoke command using each Agent runtime."""
 
 from __future__ import annotations
 
 import argparse
 import json
 import os
-import shutil
 import subprocess
 import tempfile
 import time
 from pathlib import Path
 
+from .contracts import protect_generated_output
 from .registry import AGENTS, ROOT
 from .relay import RelayProcess
 
 
 PYTHON_CLIENTS = {
-    "ear": ROOT / "mle-bench-lite/.venv/bin/python",
-    "mlevolve": ROOT / "mle-bench-lite/.venv/bin/python",
-    "arbor": ROOT / "baselines/Arbor/.venv/bin/python",
+    "ear": ROOT / "mle-bench-agents/efficient-auto-research/.venv/bin/python",
+    "mlevolve": ROOT / "BenchmarkAdapters/environments/agents/mlevolve/.venv/bin/python",
+    "arbor": ROOT / "BenchmarkAdapters/environments/terminal/arbor/.venv/bin/python",
     "ml-master-2": ROOT / "baselines/EvoMaster/.venv/bin/python",
-    "ai-scientist": ROOT / "baselines/AiScientist/.venv/bin/python",
+    "ai-scientist": ROOT / "BenchmarkAdapters/environments/terminal/ai-scientist/.venv/bin/python",
 }
 
 OPENAI_SMOKE = """
@@ -38,6 +38,8 @@ print('API_READY' if 'API_READY' in text else text)
 
 def _python_smoke(agent: str, run_dir: Path) -> dict[str, object]:
     executable = PYTHON_CLIENTS[agent]
+    if not executable.is_file():
+        raise FileNotFoundError(f"Agent runtime is not installed: {executable}")
     with RelayProcess(
         agent=agent,
         log_path=run_dir / "relay.log",
@@ -163,6 +165,7 @@ def _claude_smoke(run_dir: Path) -> dict[str, object]:
 
 
 def run_smoke(agent: str, output_root: Path) -> dict[str, object]:
+    output_root = protect_generated_output(output_root, ROOT)
     run_dir = output_root / agent
     run_dir.mkdir(parents=True, exist_ok=True)
     started = time.time()
@@ -185,7 +188,7 @@ def run_smoke(agent: str, output_root: Path) -> dict[str, object]:
         "status": status,
         "duration_seconds": round(time.time() - started, 3),
         "model": "gpt-5.5",
-        "credential_persisted": False,
+        "smoke_kind": "endpoint-only",
         "details": details,
     }
     (run_dir / "result.json").write_text(

@@ -18,6 +18,7 @@ def relay_client_env(
     base_url: str = DEFAULT_RELAY_BASE_URL,
     proxy: str = DEFAULT_PROXY,
     model: str = "gpt-5.5",
+    include_credentials: bool = True,
 ) -> dict[str, str]:
     normalized_base_url = base_url.rstrip("/")
     anthropic_base_url = (
@@ -32,13 +33,18 @@ def relay_client_env(
         "ANTHROPIC_BASE_URL": anthropic_base_url,
         "GPT_CHAT_MODEL": model,
         "MODEL": model,
-        "HTTP_PROXY": proxy,
-        "HTTPS_PROXY": proxy,
-        "http_proxy": proxy,
-        "https_proxy": proxy,
     }
+    if proxy:
+        environment.update(
+            {
+                "HTTP_PROXY": proxy,
+                "HTTPS_PROXY": proxy,
+                "http_proxy": proxy,
+                "https_proxy": proxy,
+            }
+        )
     credential = os.environ.get("UPSTREAM_API_KEY") or os.environ.get("OPENAI_API_KEY")
-    if credential:
+    if include_credentials and credential:
         environment.update(
             {
                 "OPENAI_API_KEY": credential,

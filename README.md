@@ -3,10 +3,10 @@
 研究自研 **EAR（efficient-auto-research，Kernel Thompson Sampling）** agent，与开源 baseline
 （**MLEvolve**）在 **MLE-Bench** 6 题上对比**效率**与**效果**。
 
-一句话现状（2026-07-22）：当前代码代际是 **G5**。它在保留 G3 搜索行为的前提下完成了
-run/attempt 隔离、artifact 完整性和只读 telemetry 加固；**G5 尚未跑正式 benchmark，因此没有
-G5 官方性能结论**。历史 G0-G3 实验中，EAR 用约 4-12% 的 token，在 6 题上逐步逼近或反超
-同条件复现的 MLEvolve；这些结果只用于描述历史算法表现。
+一句话现状：当前正式 EAR 已明确回到 **G3**，主 checkout 为
+`mle-bench-agents/efficient-auto-research@ear/g3@7cd9ed5`。G4–G7 只保留为历史实验分支，
+不进入当前 Benchmark Adapter。历史 G0-G3 实验中，EAR 用约 4-12% 的 token，在 6 题上
+逐步逼近或反超同条件复现的 MLEvolve。
 
 - **LLM：** gpt-5.5（relay 端点，reasoning_effort=high），经本地转发代理统一接入
 - **硬件：** 256 vCPU / 251GB RAM / 8× RTX 4090
@@ -50,7 +50,7 @@ relay 上游 (gpt-5.5)
 
 | Agent | 分支 / 位置 | 说明 |
 |-------|------------|------|
-| **EAR** | **当前代际** `ear-worktrees/attempt-isolation-telemetry-v2`，分支 `ear/g5`，行为基线 `a6acc90` | G3 搜索行为 + run/attempt 隔离、artifact 完整性与只读 telemetry；G5 尚未跑正式 benchmark |
+| **EAR** | `mle-bench-agents/efficient-auto-research`，分支 `ear/g3`，commit `7cd9ed5` | 当前两个正式 Benchmark 统一使用纯 G3；G4–G7 不进入正式 Adapter |
 | MLEvolve | `baselines/MLEvolve` @ `main@fe92521` = 纯上游（`coldstart=False`） | 零 LLM 修改；历史侵入式改动存档在 `gpt55-local` 分支（勿用） |
 | Arbor | `baselines/Arbor` | 当前活跃开源 baseline |
 
@@ -243,11 +243,15 @@ Adapter 和可复现的 UV 配置放在同一个集成树中。Adapter 的唯一
 `MLEBenchLite/` 与 `TerminalBench/`，公共进程、Relay、Agent registry 和 CLI
 位于其根目录。
 
-修改版 Terminal-Bench 的 Harness-Engineering AO 已覆盖全部 7 个 Agent：Arbor、
-Codex、Claude Code 使用各自 repository CLI；EAR、MLEvolve、ML-Master 2.0 和
-AiScientist 使用 `BenchmarkAdapters/RepositoryAgent/` 的共享隔离 backend 与四个薄
-策略 profile。后四者会在结果中明确标注为 shared profile，不冒充上游原生 Harbor
-backend。
+Terminal-Bench 现在统一使用标准 Harbor `0.20.0` per-task 协议和本地 89 题数据集，
+不再使用项目自定义 AO evaluator。Codex、Claude Code 使用 Harbor 内置 Agent；Arbor
+复用原生 `arbor.core.agent.Agent.run`，AiScientist 复用原生 `Subagent.run`，两者只
+共享 Harbor 命令/文件桥。
+
+当前 Terminal-Bench 命令就绪的是 Codex、Claude Code、Arbor、AiScientist。EAR、
+MLEvolve、ML-Master 2.0 的注册层会 fail-closed：EAR/MLEvolve 尚缺干净 sibling
+candidate 与 best replay，ML-Master 2.0 尚未把全部阶段从宿主 MLE workspace 迁移到
+Harbor workspace。这里不会把“可以 import”描述成“已经完成适配”。
 
 每个 Agent 的差异说明位于对应目录的 `adapter_docs/`；环境安装清单与一键脚本位于
 [`BenchmarkAdapters/environments/`](BenchmarkAdapters/environments/)：

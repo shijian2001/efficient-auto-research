@@ -1,62 +1,69 @@
 # UV Environment Matrix
 
 The benchmark and Agent source trees do not all use the same Python runtime.
-This directory provides one UV-managed entry point for every benchmark/Agent
-pair without duplicating the large dependency graph fourteen times.
+This directory exposes one UV-managed command for every benchmark/Agent pair.
 
-## Existing manifests
+## Policy
 
-| Component | Current state | Installer behavior |
+- Existing upstream `pyproject.toml` and `uv.lock` files remain the source of
+  truth for standalone benchmark and Agent environments.
+- Terminal custom Agents that run in Harbor's Python process use a locked
+  combined profile under `terminal/<agent>/`.
+- Arbor's MLE adapter uses `mle/arbor/`, a locked combined Arbor + shared MLE
+  training environment used directly by the Docker launcher.
+- EAR's MLE adapter uses `mle/ear/`, a locked combined EAR + shared MLE
+  training environment used directly by the Docker launcher.
+- MLEvolve uses `agents/mlevolve/`, a locked control-plane environment for its
+  native search and LLM modules plus the shared CUDA 12-compatible MLE training
+  stack. Installation archives the tracked baseline commit into
+  `.venv/agent-source`; the runtime does not import a mutable checkout.
+- Codex and Claude Code remain host CLIs and receive version checks instead of
+  Python environments.
+- API keys are never needed for installation and are never written here.
+
+Current combined Terminal profiles:
+
+| Profile | Contents | Reason |
 |---|---|---|
-| `mle-bench-lite` | `pyproject.toml` + `uv.lock` | `uv sync --frozen` |
-| `terminal-bench-2` | `pyproject.toml` + `uv.lock` | `uv sync --frozen` |
-| Arbor | `pyproject.toml` + `uv.lock` | `uv sync --frozen` |
-| AiScientist | `pyproject.toml` + `uv.lock` | `uv sync --frozen` |
-| EAR | `pyproject.toml`, lock may be absent | generate `uv.lock`, then sync |
-| ML-Master 2.0 | `pyproject.toml`, lock may be absent | generate `uv.lock`, then sync |
-| MLEvolve | pinned `requirements_*.txt` | `uv pip sync` through tracked pinned includes |
-| Codex / Claude Code | host CLI, not Python packages | version check only |
+| `terminal/arbor` | Harbor `0.20.0` + editable Arbor | imports Arbor's native ReAct loop |
+| `terminal/ai-scientist` | Harbor `0.20.0` + editable AiScientist | imports AiScientist's native Subagent loop |
 
-The source of truth is `manifest.toml`. It defines two benchmark projects and
-seven Agent environment strategies. A profile installs the benchmark project
-and the Agent runtime; repeated profiles reuse the already-managed project
-environment rather than creating identical copies.
+Current combined MLE profile:
 
-The source-tree `uv.lock` files are used for MLE-Bench Lite, Terminal-Bench,
-Arbor, AiScientist, EAR, and ML-Master 2.0. MLEvolve keeps its upstream pinned
-requirements through `requirements/mlevolve.lock`, avoiding a fresh resolver
-run over its large ML stack.
+| Profile | Contents | Reason |
+|---|---|---|
+| `mle/arbor` | editable Arbor + shared MLE training stack | launcher and installation use the same Python runtime |
+| `mle/ear` | packaged EAR + shared MLE training stack | removes the launcher's legacy Conda dependency |
 
-## One-click commands
+EAR, MLEvolve, and ML-Master 2 still install their standalone Agent and common
+Terminal environments, but their Terminal commands remain fail-closed until
+the required candidate/workspace backends are complete.
 
-From the repository root:
+## One-Click Commands
 
 ```bash
-# Preview without changing environments.
-bash BenchmarkAdapters/environments/install.sh \
-  mle-bench-lite.arbor --dry-run
-
-# Install one pair.
-bash BenchmarkAdapters/environments/install.sh \
-  mle-bench-lite.arbor
-
-# Install a Terminal-Bench/Codex pair.
-bash BenchmarkAdapters/environments/install.sh \
-  terminal-bench-2.codex
-
-# List all fourteen benchmark/Agent profiles.
+# List all fourteen benchmark/Agent profile names.
 bash BenchmarkAdapters/environments/install.sh --list
 
-# Install all profiles.
+# Preview one profile.
+bash BenchmarkAdapters/environments/install.sh \
+  terminal-bench-2.arbor --dry-run
+
+# Install a combined custom-Agent profile.
+bash BenchmarkAdapters/environments/install.sh terminal-bench-2.arbor
+bash BenchmarkAdapters/environments/install.sh terminal-bench-2.ai-scientist
+bash BenchmarkAdapters/environments/install.sh mle-bench-lite.arbor
+
+# Install all profile dependencies.
 bash BenchmarkAdapters/environments/install.sh all
 ```
 
-The default UV bootstrap interpreter is Python 3.11. Override it with
-`UV_INSTALLER_PYTHON=3.12` if the local UV installation should use another
-interpreter for the installer itself. Benchmark and Agent project Python
-versions come from `manifest.toml`.
+The installer defaults dependency downloads to `http://127.0.0.1:17892` unless
+proxy variables are already set. Override it with
+`BENCHMARK_ADAPTERS_PROXY`. Project Python versions come from
+`manifest.toml`.
 
-The installer defaults package downloads to `http://127.0.0.1:17892` unless
-proxy variables are already set. Override it with `BENCHMARK_ADAPTERS_PROXY`.
-API keys are not needed for dependency installation and are never written by
-the installer.
+Locks are mandatory for reproducibility and every project runs
+`uv sync --locked`. The MLEvolve profile also writes a `.pth` file pointing to
+its source checkout so native modules import from any working directory. The
+upstream baseline checkouts remain unchanged.
