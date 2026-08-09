@@ -33,8 +33,10 @@ The important boundary is benchmark-specific:
   launchers; `BenchmarkAdapters/OptimizerDesign/` specializes that architecture
   with Benchmark-owned optimizer policy and scoring.
 - `BenchmarkAdapters/FMLBench/` is the first-class pinned-upstream FML formal
-  runner and task-record replay aggregate. `BenchmarkAdapters/FLM-bench/` is a
-  retained non-formal smoke compatibility path only.
+  shared benchmark layer plus seven concrete native Agent adapters.
+  `FML_SEVEN_AGENT_ADAPTER.md` documents protocol review, evidence replay,
+  readiness, and the remaining deployment gates. `BenchmarkAdapters/FLM-bench/`
+  is a retained non-formal smoke compatibility path only.
 - `terminal-bench-2/agent_adapters/shared/harbor_shell.py` is the common
   synchronous Harbor environment bridge used by native host-side Agent loops.
 

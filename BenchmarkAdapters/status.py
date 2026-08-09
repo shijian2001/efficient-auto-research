@@ -8,7 +8,11 @@ from .preflight import collect_preflight
 
 
 def collect_status() -> dict[str, object]:
-    return collect_preflight()
+    payload = collect_preflight()
+    from .FMLBench.readiness import collect_fml_readiness
+
+    payload["fml"] = collect_fml_readiness()
+    return payload
 
 
 def main() -> None:

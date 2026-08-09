@@ -32,7 +32,9 @@ from .freeze_maintenance import (
 )
 from .FMLBench.adapter import FMLBenchmarkAdapter, FMLRunRequest
 from .FMLBench.aggregate import aggregate_fml, fml_scorecard
+from .FMLBench.audit import audit_report, build_review_candidate
 from .FMLBench.protocol import FMLProtocol
+from .FMLBench.readiness import collect_fml_readiness
 from .FMLBench.runner import run_fml_task
 from .formal_contract import ModelTrackConfig
 from .formal_preflight import collect_formal_preflight
@@ -278,6 +280,19 @@ def _fml_parser(subparsers: argparse._SubParsersAction) -> None:
     mode.add_argument("--smoke", action="store_true")
     mode.add_argument("--dry-run", action="store_true")
     parser.add_argument("--gpu-id", action="append", default=[])
+    review = subparsers.add_parser(
+        "fml-review-protocol",
+        help="generate a non-promoting 18-task FML protocol review candidate",
+    )
+    review.add_argument("--upstream-root", type=Path, required=True)
+    review.add_argument("--output", type=Path, required=True)
+    readiness = subparsers.add_parser(
+        "fml-readiness",
+        help="report evidence-based readiness for all seven FML adapters",
+    )
+    readiness.add_argument("--protocol", type=Path)
+    readiness.add_argument("--formal-evidence-root", type=Path)
+    readiness.add_argument("--output", type=Path)
 
 
 def _autoresearch_model_environment(
@@ -1501,6 +1516,28 @@ def main(argv: list[str] | None = None) -> int:
         result = adapter.run(request)
         _print_or_write(result.to_dict())
         return 0 if result.score_valid else 1
+    if args.command == "fml-review-protocol":
+        protocol = build_review_candidate(upstream_root=args.upstream_root)
+        protocol.write(args.output)
+        _print_or_write(
+            {
+                "action": "generated-for-review",
+                "protocol_path": str(args.output.resolve()),
+                "protocol_digest": protocol.digest,
+                "automatic_promotion": False,
+                "audit": audit_report(protocol),
+            }
+        )
+        return 0
+    if args.command == "fml-readiness":
+        _print_or_write(
+            collect_fml_readiness(
+                protocol_path=args.protocol,
+                formal_evidence_root=args.formal_evidence_root,
+            ),
+            args.output,
+        )
+        return 0
     if args.command == "fml":
         formal = not args.smoke and not args.dry_run
         protocol = FMLProtocol.load(args.protocol, formal=formal)

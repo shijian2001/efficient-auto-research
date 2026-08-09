@@ -1,7 +1,8 @@
-"""Task-record replay aggregation for first-class FML-Bench campaigns."""
+"""Replay formal FML records and compute both upstream leaderboard metrics."""
 
 from __future__ import annotations
 
+import hashlib
 import json
 from pathlib import Path
 from typing import Any
@@ -13,93 +14,106 @@ from ..formal_contract import (
     validate_gpu_attestation,
     verify_hashed_json,
 )
-from ..protocol import sha256_file
-from ..protocol import canonical_json
+from ..protocol import canonical_json, sha256_file
 from ..registry import AGENTS
+from .evaluator import verify_evaluation_record
 from .protocol import FMLProtocol
+from .task import load_fml_task, normalized_improvement, task_win
 
 
-def _outer_score(
-    *,
-    protocol: FMLProtocol,
-    campaign_dir: Path,
-    agent: str,
-    outer_run_index: int,
-) -> tuple[float, list[dict[str, Any]], tuple[str, str, str], str]:
+def _manifest(path: Path) -> dict[str, Any]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError) as exc:
+        raise AdapterError(f"invalid FML immutable manifest: {path}") from exc
+    expected = payload.pop("manifest_digest", None)
+    if expected != hashlib.sha256(canonical_json(payload)).hexdigest():
+        raise AdapterError(f"FML immutable manifest digest mismatch: {path}")
+    payload["manifest_digest"] = expected
+    return payload
+
+
+def _verify_file(path_value: object, digest: object, description: str) -> Path:
+    path = Path(str(path_value))
+    if (
+        not path.is_file()
+        or path.is_symlink()
+        or not isinstance(digest, str)
+        or sha256_file(path) != digest
+    ):
+        raise AdapterError(f"FML {description} differs from its hash")
+    return path
+
+
+def _outer_metrics(
+    *, protocol: FMLProtocol, campaign_dir: Path, agent: str, outer_run_index: int
+) -> tuple[dict[str, float], list[dict[str, Any]], tuple[str, str, str], str]:
     records: list[dict[str, Any]] = []
     comparison_keys: set[tuple[str, str, str]] = set()
     agent_commits: set[str] = set()
+    improvements: list[float] = []
+    wins: list[float] = []
     for task_path in protocol.task_config_paths:
-        task_id = task_path.stem
-        record_path = (
+        task = load_fml_task(protocol, task_path)
+        run_dir = (
             campaign_dir.resolve()
             / agent
             / f"run-{outer_run_index}"
-            / task_id
-            / "task-record.json"
+            / task.task_id
         )
+        record_path = run_dir / "task-record.json"
         if not record_path.is_file() or record_path.is_symlink():
             raise AdapterError(
-                f"FML aggregate is missing task record for run {outer_run_index}: {task_id}"
+                f"FML aggregate is missing task record for run {outer_run_index}: {task.task_id}"
             )
-        payload = verify_hashed_json(record_path, digest_field="task_record_digest")
-        manifest_path = record_path.parent / "manifest.json"
-        manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-        manifest_digest = manifest.pop("manifest_digest", None)
-        if manifest_digest != __import__("hashlib").sha256(canonical_json(manifest)).hexdigest():
-            raise AdapterError(f"FML immutable manifest digest mismatch: {task_id}")
-        artifact = Path(str(payload.get("artifact_path", "")))
-        upstream_result = Path(str(payload.get("upstream_result_path", "")))
-        expected_artifact = (record_path.parent / protocol.artifact_relative_path).resolve()
-        expected_upstream_result = (
-            record_path.parent / protocol.upstream_result_relative_path
-        ).resolve()
-        upstream_payload = (
-            json.loads(upstream_result.read_text(encoding="utf-8"))
-            if upstream_result.is_file()
-            else {}
+        record = verify_hashed_json(record_path, digest_field="task_record_digest")
+        manifest = _manifest(run_dir / "manifest.json")
+        artifact = _verify_file(record.get("artifact_path"), record.get("artifact_sha256"), "artifact")
+        agent_result = _verify_file(
+            record.get("agent_result_path"), record.get("agent_result_sha256"), "Agent result"
         )
-        upstream_token_usage = upstream_payload.get("token_usage")
-        normalized_token_usage = (
-            {str(name): int(value) for name, value in upstream_token_usage.items()}
-            if isinstance(upstream_token_usage, dict)
-            else None
+        evaluation_path = _verify_file(
+            record.get("evaluation_record_path"),
+            record.get("evaluation_record_sha256"),
+            "evaluation record",
         )
-        upstream_request_count = upstream_payload.get("request_count")
-        upstream_cost = upstream_payload.get("cost")
+        evaluation = verify_evaluation_record(evaluation_path, task)
+        raw_metric = evaluation.get("raw_metric")
+        if not isinstance(raw_metric, (int, float)):
+            raise AdapterError(f"FML held-out evaluation omitted raw metric: {task.task_id}")
+        replayed_improvement = normalized_improvement(task, float(raw_metric))
+        replayed_win = task_win(task, float(raw_metric))
+        expected_assets = {
+            **protocol.protocol_asset_digests,
+            "canonical_task": task.digest,
+            "task_config": task.task_config_sha256,
+            "initial_workspace": record.get("initial_workspace_digest"),
+            "rendered_prompt": record.get("rendered_prompt_digest"),
+            "agent_identity": record.get("agent_identity_digest"),
+        }
         if not (
-            payload.get("schema_version") == 1
-            and payload.get("protocol_digest") == protocol.digest
-            and payload.get("upstream_commit") == protocol.upstream_commit
-            and payload.get("task_id") == task_id
-            and payload.get("outer_run_index") == outer_run_index
-            and payload.get("status") == "completed"
-            and payload.get("score_valid") is True
-            and isinstance(payload.get("raw_score"), (int, float))
-            and artifact.resolve() == expected_artifact
-            and artifact.is_file()
-            and not artifact.is_symlink()
-            and sha256_file(artifact) == payload.get("artifact_sha256")
-            and upstream_result.resolve() == expected_upstream_result
-            and upstream_result.is_file()
-            and not upstream_result.is_symlink()
-            and sha256_file(upstream_result) == payload.get("upstream_result_sha256")
-            and isinstance(upstream_payload.get(protocol.primary_metric_name), (int, float))
-            and float(upstream_payload[protocol.primary_metric_name])
-            == float(payload.get("raw_score"))
-            and payload.get("internal_rounds_completed")
-            == int(upstream_payload.get("internal_rounds_completed", 0))
-            and payload.get("internal_proposals_completed")
-            == int(upstream_payload.get("internal_proposals_completed", 0))
-            and payload.get("token_usage") == normalized_token_usage
-            and payload.get("request_count")
-            == (int(upstream_request_count) if upstream_request_count is not None else None)
-            and payload.get("cost")
-            == (float(upstream_cost) if upstream_cost is not None else None)
-            and payload.get("evaluator_digest") == protocol.evaluator_digest
-            and payload.get("manifest_digest") == manifest_digest
+            record.get("schema_version") == 2
+            and record.get("protocol_digest") == protocol.digest
+            and record.get("upstream_commit") == protocol.upstream_commit
+            and record.get("agent_id") == agent
+            and record.get("task_id") == task.task_id
+            and record.get("task_config_digest") == task.task_config_sha256
+            and record.get("canonical_task_digest") == task.digest
+            and record.get("outer_run_index") == outer_run_index
+            and record.get("status") == "completed"
+            and record.get("score_valid") is True
+            and float(record.get("raw_test_metric")) == float(raw_metric)
+            and float(record.get("normalized_improvement")) == replayed_improvement
+            and record.get("win") is replayed_win
+            and record.get("evaluator_digest") == task.evaluator_digest
+            and record.get("manifest_digest") == manifest.get("manifest_digest")
+            and evaluation.get("phase") == "heldout"
+            and float(evaluation.get("normalized_improvement")) == replayed_improvement
+            and evaluation.get("win") is replayed_win
             and manifest.get("schema_version") == 2
             and manifest.get("formal") is True
+            and manifest.get("non_formal") is False
+            and manifest.get("non_comparable") is False
             and manifest.get("source_dirty") is False
             and manifest.get("benchmark_id") == "fml-bench"
             and manifest.get("protocol_version") == protocol.protocol_version
@@ -112,36 +126,28 @@ def _outer_score(
             and len(manifest.get("agent_commit")) == 40
             and isinstance(manifest.get("adapter_commit"), str)
             and len(manifest.get("adapter_commit")) == 40
-            and manifest.get("asset_digests") == protocol.protocol_asset_digests
-            and manifest.get("task_id") == task_id
+            and manifest.get("asset_digests") == expected_assets
+            and manifest.get("task_id") == task.task_id
             and manifest.get("outer_repetitions") == protocol.outer_repetitions
             and manifest.get("outer_run_index") == outer_run_index
             and manifest.get("wall_clock_seconds") == protocol.wall_clock_seconds
-            and manifest.get("task_spec_sha256")
-            == protocol.protocol_asset_digests["task_spec"]
-            and manifest.get("allowed_write_paths") == list(protocol.allowed_write_paths)
-            and manifest.get("gpus_per_evaluation") == protocol.gpus_per_evaluation
-            and manifest.get("max_concurrent_evaluations")
-            == protocol.max_concurrent_evaluations
-            and manifest.get("gpu_type") == protocol.gpu_type
-            and isinstance(manifest.get("model_track_id"), str)
-            and bool(manifest.get("model_track_id"))
-            and isinstance(manifest.get("outer_model_id"), str)
-            and bool(manifest.get("outer_model_id"))
-            and isinstance(manifest.get("model_config_digest"), str)
-            and len(manifest.get("model_config_digest")) == 64
+            and manifest.get("allowed_write_paths") == list(task.editable_paths)
+            and manifest.get("model_config_digest")
+            == json.loads(agent_result.read_text(encoding="utf-8")).get("model_track_digest")
         ):
-            raise AdapterError(f"FML formal task record is invalid: {task_id}")
+            raise AdapterError(f"FML formal task record is invalid: {task.task_id}")
         hardware = manifest.get("hardware")
         if not isinstance(hardware, dict):
-            raise AdapterError(f"FML formal GPU attestation is missing: {task_id}")
+            raise AdapterError(f"FML formal GPU attestation is missing: {task.task_id}")
         validate_gpu_attestation(
             hardware,
             expected_type=protocol.gpu_type,
             gpus_per_evaluation=protocol.gpus_per_evaluation,
             max_concurrent_evaluations=protocol.max_concurrent_evaluations,
         )
-        records.append(payload)
+        improvements.append(replayed_improvement)
+        wins.append(1.0 if replayed_win else 0.0)
+        records.append(record)
         comparison_keys.add(
             (
                 str(manifest.get("model_config_digest", "")),
@@ -157,7 +163,10 @@ def _outer_score(
     if len(agent_commits) != 1:
         raise AdapterError("FML task cells mix Agent source commits")
     return (
-        sum(float(record["raw_score"]) for record in records) / len(records),
+        {
+            "normalized_improvement": sum(improvements) / len(improvements),
+            "win_rate": sum(wins) / len(wins),
+        },
         records,
         next(iter(comparison_keys)),
         next(iter(agent_commits)),
@@ -170,38 +179,44 @@ def aggregate_fml(
     protocol.validate(formal=True)
     if agent not in AGENTS:
         raise AdapterError(f"unknown FML Agent: {agent}")
-    outer_scores: list[float] = []
+    outer_values = {"average_improvement": [], "win_rate": []}
     task_records: dict[str, list[dict[str, Any]]] = {}
     comparison_keys: set[tuple[str, str, str]] = set()
     agent_commits: set[str] = set()
     for outer_run_index in range(protocol.outer_repetitions):
-        score, records, comparison_key, agent_commit = _outer_score(
+        metrics, records, comparison_key, agent_commit = _outer_metrics(
             protocol=protocol,
             campaign_dir=campaign_dir,
             agent=agent,
             outer_run_index=outer_run_index,
         )
-        outer_scores.append(score)
+        outer_values["average_improvement"].append(metrics["normalized_improvement"])
+        outer_values["win_rate"].append(metrics["win_rate"])
         task_records[str(outer_run_index)] = records
         comparison_keys.add(comparison_key)
         agent_commits.add(agent_commit)
-    if len(comparison_keys) != 1:
-        raise AdapterError("FML outer runs mix model, hardware, or adapter tracks")
-    if len(agent_commits) != 1:
-        raise AdapterError("FML outer runs mix Agent source commits")
-    summary = repetition_summary(outer_scores, outer_repetitions=protocol.outer_repetitions)
+    if len(comparison_keys) != 1 or len(agent_commits) != 1:
+        raise AdapterError("FML outer runs mix comparison tracks")
+    metric_summaries = {
+        name: repetition_summary(values, outer_repetitions=protocol.outer_repetitions)
+        for name, values in outer_values.items()
+    }
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "benchmark_id": protocol.benchmark_id,
         "protocol_version": protocol.protocol_version,
         "protocol_digest": protocol.digest,
         "agent": agent,
-        "metric_direction": protocol.metric_direction,
+        "primary_metric": protocol.primary_metric_name,
         "outer_repetitions": protocol.outer_repetitions,
-        "reporting_label": summary["reporting_label"],
+        "reporting_label": metric_summaries["average_improvement"]["reporting_label"],
         "formal_score_valid": True,
         "formal_avg_at_3_valid": protocol.outer_repetitions == 3,
-        "metrics": {"mean_task_score": summary},
+        "metrics": metric_summaries,
+        "metric_definition": {
+            "average_improvement": "mean upstream normalized improvement over the complete frozen task set",
+            "win_rate": "fraction of frozen tasks whose held-out metric strictly improves over baseline",
+        },
         "tasks_per_outer_run": len(protocol.task_config_paths),
         "task_records": task_records,
         "upstream_internal_rounds_are_outer_repetitions": False,
@@ -214,16 +229,23 @@ def fml_scorecard(*, protocol: FMLProtocol, campaign_dir: Path) -> dict[str, Any
     ranked: list[dict[str, Any]] = []
     for agent in AGENTS:
         try:
-            payload = aggregate_fml(protocol=protocol, campaign_dir=campaign_dir, agent=agent)
+            payload = aggregate_fml(
+                protocol=protocol, campaign_dir=campaign_dir, agent=agent
+            )
         except AdapterError as exc:
-            agents[agent] = {"formal_score_valid": False, "failure_reason": str(exc)}
+            agents[agent] = {
+                "formal_score_valid": False,
+                "failure_reason": str(exc),
+            }
             continue
         agents[agent] = payload
-        ranked.append({"agent": agent, "score": payload["metrics"]["mean_task_score"]["mean"]})
-    ranked.sort(
-        key=lambda item: float(item["score"]),
-        reverse=protocol.metric_direction == "maximize",
-    )
+        ranked.append(
+            {
+                "agent": agent,
+                "score": payload["metrics"][protocol.primary_metric_name]["mean"],
+            }
+        )
+    ranked.sort(key=lambda item: float(item["score"]), reverse=True)
     comparison_keys = {
         tuple(payload.get("comparison_key", ()))
         for payload in agents.values()
@@ -231,11 +253,14 @@ def fml_scorecard(*, protocol: FMLProtocol, campaign_dir: Path) -> dict[str, Any
     }
     complete = len(ranked) == len(AGENTS) and len(comparison_keys) == 1
     return {
-        "schema_version": 1,
+        "schema_version": 2,
         "benchmark_id": protocol.benchmark_id,
         "protocol_digest": protocol.digest,
+        "primary_metric": protocol.primary_metric_name,
         "outer_repetitions": protocol.outer_repetitions,
-        "reporting_label": "single_run" if protocol.outer_repetitions == 1 else "avg_at_3",
+        "reporting_label": (
+            "single_run" if protocol.outer_repetitions == 1 else "avg_at_3"
+        ),
         "agents": agents,
         "formal_ranking": ranked if complete else [],
         "complete_seven_agent_comparison_valid": complete,

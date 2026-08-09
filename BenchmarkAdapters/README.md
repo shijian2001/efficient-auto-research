@@ -20,9 +20,11 @@ re-export。
 - `optimizer-design`：冻结 modded-NanoGPT Track 3 commit、Benchmark 公共 Adapter、七个
   小 Agent Adapter、四 H100 资源锁、双 held-out step score 和 N=1/N=3 scorecard；当前因
   双 seed baseline 记录尚未晋级而 fail-closed，不发布正式排名。
-- `fml`：first-class pinned-upstream formal Adapter；正式 task/round/proposal 语义、任务集、
-  evaluator、七个 concrete launcher 和 wall-clock 均来自显式冻结协议。旧 `FLM-bench/`
-  路径只保留 `max_steps=1` 的 non-formal smoke 兼容层。
+- `fml`：first-class pinned-upstream formal Adapter；shared host evaluator、七个 concrete
+  Agent Adapter、formal evidence 和双指标 aggregate 已实现。当前 upstream dirty、主指标
+  未人工冻结，ML-Master 2 runtime 还有 `mcp` import blocker，因此 formal preflight 继续
+  fail-closed。旧 `FLM-bench/` 路径只保留 `max_steps=1` 的 non-formal smoke 兼容层。
+  详见 `BenchmarkAdapters/docs/FML_SEVEN_AGENT_ADAPTER.md`。
 
 ## 七 Agent
 

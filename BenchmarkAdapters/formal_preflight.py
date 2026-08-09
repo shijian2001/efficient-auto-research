@@ -144,6 +144,11 @@ def collect_formal_preflight(
             formal=formal,
             require_terminal_inner=benchmark_id == "terminal-bench-ao",
         )
+        if benchmark_id == "fml-bench" and formal:
+            if config.request_timeout_seconds is None:
+                raise AdapterError("formal FML requires an explicit model request timeout")
+            if not config.retry_policy:
+                raise AdapterError("formal FML requires an explicit model retry policy")
         state["model_config"] = config
         return config.digest
 
@@ -202,29 +207,15 @@ def collect_formal_preflight(
     def launcher() -> str:
         value = protocol_state()
         if benchmark_id == "fml-bench":
-            command = value.launcher_commands.get(agent_id)
-            if not command:
-                raise AdapterError(f"FML concrete launcher is missing: {agent_id}")
-            replacements = {
-                "agent_id": agent_id,
-                "agent_variant": agent_variant,
-                "model_id": model_state().outer_model_id,
-                "model_track_id": model_state().model_track_id,
-                "relay_base_url": model_state().relay_base_url,
-                "task_config": str(value.task_config_paths[0]),
-                "task_spec": str(ROOT / "BenchmarkAdapters/task_specs/fml-bench.md"),
-                "output_dir": "/formal-output",
-                "outer_run_index": "0",
-                "wall_clock_seconds": str(value.wall_clock_seconds),
-                "fml_root": str(value.upstream_root),
-            }
-            try:
-                executable = command[0].format(**replacements)
-            except KeyError as exc:
-                raise AdapterError(f"FML launcher contains an unknown placeholder: {exc}") from exc
-            if not Path(executable).is_absolute() and "/" in executable:
-                executable = str(value.upstream_root / executable)
-            return _require_executable(executable, f"FML {agent_id}")
+            from .FMLBench.agents import get_fml_agent_adapter
+
+            adapter = get_fml_agent_adapter(agent_id)
+            report = adapter.validate_installation()
+            if not report.ready:
+                raise AdapterError(report.failure_reason or f"FML {agent_id} runtime is unavailable")
+            if agent_id not in value.agent_adapter_ids:
+                raise AdapterError(f"FML protocol omitted concrete adapter: {agent_id}")
+            return f"{adapter.native_entrypoint}: {report.executable_path}"
         backend = {
             "mle-bench-lite": AGENTS[agent_id].mle_backend,
             "terminal-bench-ao": AGENTS[agent_id].terminal_ao_backend,
