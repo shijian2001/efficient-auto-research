@@ -1,0 +1,24 @@
+agent:
+  claudecode:
+    profile: smoke
+    command: claude
+    command_args:
+      - -p
+      - --output-format
+      - text
+      - --model
+      - "{model}"
+      - --permission-mode
+      - bypassPermissions
+    command_stdin: prompt
+    response_mode: workspace
+    require_auth: true
+    use_relay_env: true
+    proxy: ""
+    max_steps: 1
+    command_retry_attempts: 1
+    metric_tolerance: 1.0e-8
+    prompt_suffix: |
+      Claude Code-specific rules:
+      - Edit only target files.
+      - Leave benchmark validation to FML-bench.

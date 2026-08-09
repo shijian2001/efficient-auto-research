@@ -70,24 +70,32 @@ def project_path(relative: str) -> Path:
     return path
 
 
+def python_selector(spec: dict) -> str:
+    version = str(spec["python"])
+    suffix = "".join(character for character in version if character.isalnum()).upper()
+    return os.environ.get(f"BENCHMARK_ADAPTERS_PYTHON_{suffix}", version)
+
+
 def install_uv_project(spec: dict, *, dry_run: bool) -> None:
     project = project_path(spec["project"])
     lock_path = project / "uv.lock"
     uv = uv_command()
     if not lock_path.is_file():
         raise InstallError(f"tracked UV lock does not exist: {lock_path}")
-    run(
-        [
-            uv,
-            "sync",
-            "--project",
-            str(project),
-            "--python",
-            str(spec["python"]),
-            "--locked",
-        ],
-        dry_run=dry_run,
-    )
+    command = [
+        uv,
+        "sync",
+        "--project",
+        str(project),
+        "--python",
+        python_selector(spec),
+        "--locked",
+    ]
+    if spec.get("index"):
+        command.extend(("--default-index", str(spec["index"])))
+    if spec.get("managed_python"):
+        command.append("--managed-python")
+    run(command, dry_run=dry_run)
     source_path = spec.get("source_path")
     if source_path:
         source = project_path(source_path)
@@ -186,14 +194,28 @@ def install_agent(spec: dict, *, dry_run: bool) -> None:
 
 
 def profile_names(manifest: dict) -> list[str]:
-    return [
+    paired = [
         f"{benchmark}.{agent}"
         for benchmark in manifest["benchmarks"]
         for agent in manifest["agents"]
     ]
+    return list(
+        dict.fromkeys(
+            [
+                *paired,
+                *manifest.get("standalone", {}),
+                *manifest.get("profiles", {}),
+            ]
+        )
+    )
 
 
 def install_profile(manifest: dict, profile: str, *, dry_run: bool) -> None:
+    standalone = manifest.get("standalone", {}).get(profile)
+    if standalone is not None:
+        print(f"[{profile}] standalone benchmark environment")
+        install_agent(standalone, dry_run=dry_run)
+        return
     profile_override = manifest.get("profiles", {}).get(profile)
     if profile_override is not None:
         print(f"[{profile}] combined benchmark/agent environment")

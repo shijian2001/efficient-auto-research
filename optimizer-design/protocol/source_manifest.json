@@ -1,0 +1,14 @@
+{
+  "baseline_candidate_sha256": "d39470e5b0535baf9c6caf7dbcd15efa79d8eacc9badf6e7c45b536e8537deec",
+  "editable_path": "records/track_3_optimization/train_gpt_simple.py",
+  "files": {
+    "data/cached_fineweb10B.py": "adcc9f7d81ed1ac115a66d08d94d8d3e5c7425cabaf856da1f1fb106af87d09b",
+    "records/track_3_optimization/README.md": "03d496e8d3157df21d2f0174e8c259527abf17b482eeeb00137472be8c23ff93",
+    "records/track_3_optimization/train_gpt_simple.py": "d39470e5b0535baf9c6caf7dbcd15efa79d8eacc9badf6e7c45b536e8537deec"
+  },
+  "identity": "current-official-track-3-reconstruction",
+  "manifest_digest": "82f637a9ba1ae2af1ca55d138213a99d6c809583f53b04576da3ded93a5a49c5",
+  "repository": "https://github.com/KellerJordan/modded-nanogpt.git",
+  "source_commit": "bc1b58e83fa499c5df268bd6c8b98701273b96e7",
+  "track_tree": "05bdf00394b7dee564500e9a6fdb472ce67a1659"
+}

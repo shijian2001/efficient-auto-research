@@ -1,15 +1,15 @@
 #!/usr/bin/env python
-"""LLM 转发代理 —— 让所有 agent 以零侵入方式使用 relay/gpt-5.5。
+"""LLM 转发代理 —— 让所有 agent 使用显式注入的同一模型轨道。
 
 Agent 侧只需把 OPENAI_BASE_URL 指到本代理 (http://127.0.0.1:<port>/v1)，
 上游适配逻辑全部集中在这里，agent 代码保持纯上游原版：
 
-  - 模型重写:      请求里的任何 model 统一改写为 LLM_FORCE_MODEL (默认 gpt-5.5)
-  - 推理参数:      注入 reasoning_effort=high、temperature=1.0（均可由环境配置）
+  - 模型重写:      请求里的任何 model 统一改写为必填 LLM_FORCE_MODEL
+  - 推理参数:      仅注入 LLM_FORCE_PARAMETERS_JSON 中明确配置的参数
   - 参数清洗:      剥掉 max_tokens / max_completion_tokens / web_search_options 等
                    relay 不支持或不应限制的参数 (LLM_STRIP_PARAMS 可配)
   - 超时:          上游请求默认不设超时 (LLM_UPSTREAM_TIMEOUT 可配秒数)
-  - 重试:          连接错误 / 429 / 5xx / 空响应 自动重试 LLM_MAX_RETRIES 次 (默认 20)
+  - 重试:          连接错误 / 429 / 5xx / 空响应按显式 LLM_MAX_RETRIES 配置重试
   - 非流式化:      agent 请求 stream=True 时，上游走非流式，拿到完整结果后
                    以 SSE 格式一次性回给 agent (规避 relay 掉 chunk 问题)
   - tool 调用兜底: 请求带 tools 但上游没返回 tool_calls 时，自动改写为
@@ -20,15 +20,14 @@ Agent 侧只需把 OPENAI_BASE_URL 指到本代理 (http://127.0.0.1:<port>/v1)�
   python llm_relay_proxy.py --port 6200 [--host 127.0.0.1]
 
 环境变量:
-  UPSTREAM_BASE_URL     上游 API 地址 (默认 https://relay.shuai-ederson-clow.xyz/v1)
+  UPSTREAM_BASE_URL     上游 API 地址（必填）
   UPSTREAM_API_KEY      上游 API key (必填, 或复用 OPENAI_API_KEY)
-  LLM_FORCE_MODEL       统一改写的模型名 (默认 gpt-5.5; 设为空串禁用重写)
-  LLM_REASONING_EFFORT  注入的思考强度 (默认 high; 设为空串禁用注入)
-  LLM_TEMPERATURE       覆盖 chat/responses temperature (默认 1.0; 设为空串禁用)
+  LLM_FORCE_MODEL       统一改写的模型名（必填）
+  LLM_FORCE_PARAMETERS_JSON  统一模型参数 JSON 对象（必填且不可为空）
   LLM_STRIP_PARAMS      逗号分隔的待剥参数 (默认 max_tokens,max_completion_tokens,web_search_options)
   LLM_UPSTREAM_TIMEOUT  上游超时秒数 (默认空 = 不限)
   LLM_UPSTREAM_PROXY    上游 HTTP(S) 代理 (默认空 = 直连)
-  LLM_MAX_RETRIES       上游重试次数 (默认 20)
+  LLM_MAX_RETRIES       上游重试次数（必需由 launcher/model track 显式注入）
   LLM_TOKEN_LOG_PATH    token 用量 jsonl 路径 (默认 llm_token_usage.jsonl)
   LLM_PROXY_AGENT_NAME  写入 token 记录的 agent 名 (默认 unknown)
 """
@@ -59,14 +58,17 @@ logger = logging.getLogger("llm_relay_proxy")
 # 配置
 # ---------------------------------------------------------------------------
 
-UPSTREAM_BASE_URL = (
-    os.environ.get("UPSTREAM_BASE_URL")
-    or "https://relay.shuai-ederson-clow.xyz/v1"
-).rstrip("/")
+UPSTREAM_BASE_URL = os.environ.get("UPSTREAM_BASE_URL", "").rstrip("/")
 UPSTREAM_API_KEY = os.environ.get("UPSTREAM_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
-FORCE_MODEL = os.environ.get("LLM_FORCE_MODEL", "gpt-5.5")
-REASONING_EFFORT = os.environ.get("LLM_REASONING_EFFORT", "high")
-TEMPERATURE = os.environ.get("LLM_TEMPERATURE", "1.0").strip()
+FORCE_MODEL = os.environ.get("LLM_FORCE_MODEL", "").strip()
+try:
+    FORCE_PARAMETERS = json.loads(os.environ.get("LLM_FORCE_PARAMETERS_JSON", "{}"))
+except json.JSONDecodeError as exc:
+    raise RuntimeError("LLM_FORCE_PARAMETERS_JSON is invalid") from exc
+if not isinstance(FORCE_PARAMETERS, dict):
+    raise RuntimeError("LLM_FORCE_PARAMETERS_JSON must be an object")
+REASONING_EFFORT = str(FORCE_PARAMETERS.get("reasoning_effort", ""))
+TEMPERATURE = str(FORCE_PARAMETERS.get("temperature", "")).strip()
 STRIP_PARAMS = [
     p.strip()
     for p in os.environ.get(
@@ -77,7 +79,8 @@ STRIP_PARAMS = [
 _timeout_raw = os.environ.get("LLM_UPSTREAM_TIMEOUT", "").strip()
 UPSTREAM_TIMEOUT: float | None = float(_timeout_raw) if _timeout_raw else None
 UPSTREAM_PROXY = os.environ.get("LLM_UPSTREAM_PROXY", "").strip() or None
-MAX_RETRIES = int(os.environ.get("LLM_MAX_RETRIES", "20"))
+_max_retries_raw = os.environ.get("LLM_MAX_RETRIES")
+MAX_RETRIES = int(_max_retries_raw) + 1 if _max_retries_raw is not None else 0
 AGENT_NAME = os.environ.get("LLM_PROXY_AGENT_NAME", "unknown")
 INBOUND_API_KEY = os.environ.get("LLM_PROXY_API_KEY", "proxy")
 
@@ -107,15 +110,15 @@ def _token_log_path() -> Path:
     return Path(os.environ.get("LLM_TOKEN_LOG_PATH") or "llm_token_usage.jsonl")
 
 
-def _usage_get(usage: dict, *keys, default=0):
+def _usage_get(usage: dict, *keys, default=None):
     for key in keys:
-        value = usage.get(key)
-        if value:
-            return value
+        if key in usage and usage[key] is not None:
+            return usage[key]
     return default
 
 
 def _append_token_log(model: str, call_type: str, usage: dict | None, duration: float, retries: int) -> None:
+    usage_available = isinstance(usage, dict)
     usage = usage or {}
     prompt_details = usage.get("prompt_tokens_details") or {}
     completion_details = usage.get("completion_tokens_details") or {}
@@ -133,13 +136,25 @@ def _append_token_log(model: str, call_type: str, usage: dict | None, duration: 
         "output_tokens": _usage_get(usage, "completion_tokens", "output_tokens"),
         "cache_read_tokens": _usage_get(usage, "cache_read_input_tokens"),
         "cache_write_tokens": _usage_get(usage, "cache_creation_input_tokens"),
-        "cached_tokens": prompt_details.get("cached_tokens") or 0,
-        "reasoning_tokens": completion_details.get("reasoning_tokens") or 0,
+        "cached_tokens": prompt_details.get("cached_tokens"),
+        "reasoning_tokens": completion_details.get("reasoning_tokens"),
+        "usage_available": usage_available,
     }
-    record["cache_tokens"] = (
-        record["cache_read_tokens"] + record["cache_write_tokens"] + record["cached_tokens"]
+    cache_components = (
+        record["cache_read_tokens"],
+        record["cache_write_tokens"],
+        record["cached_tokens"],
     )
-    record["total_tokens"] = record["input_tokens"] + record["output_tokens"]
+    record["cache_tokens"] = (
+        sum(int(value) for value in cache_components)
+        if all(value is not None for value in cache_components)
+        else None
+    )
+    record["total_tokens"] = (
+        int(record["input_tokens"]) + int(record["output_tokens"])
+        if record["input_tokens"] is not None and record["output_tokens"] is not None
+        else None
+    )
     try:
         path = _token_log_path()
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -163,8 +178,12 @@ def _rewrite_body(body: dict, path: str) -> dict:
     if FORCE_MODEL and "model" in body:
         body["model"] = FORCE_MODEL
 
-    for param in STRIP_PARAMS:
+    for param in (*STRIP_PARAMS, "temperature", "reasoning_effort", "reasoning"):
         body.pop(param, None)
+
+    for name, value in FORCE_PARAMETERS.items():
+        if name not in {"reasoning_effort", "temperature"}:
+            body[name] = value
 
     # 消息归一化：relay 把 chat 转 Responses API 时，system-only 请求会因
     # input 为空报 400 ("One of input/previous_response_id/... must be provided")。
@@ -416,7 +435,7 @@ class ProxyHandler(BaseHTTPRequestHandler):
         if self.path.rstrip("/").endswith("/models"):
             if not self._authorized():
                 return
-            model = FORCE_MODEL or "gpt-5.5"
+            model = FORCE_MODEL
             self._send_json(200, {
                 "object": "list",
                 "data": [{"id": model, "object": "model", "created": 0, "owned_by": "relay-proxy"}],
@@ -515,6 +534,17 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=6200)
     parser.add_argument("--unix-socket", type=Path)
     args = parser.parse_args()
+
+    if (
+        not UPSTREAM_BASE_URL
+        or not FORCE_MODEL
+        or not FORCE_PARAMETERS
+        or _max_retries_raw is None
+    ):
+        raise RuntimeError(
+            "UPSTREAM_BASE_URL, LLM_FORCE_MODEL, and non-empty "
+            "LLM_FORCE_PARAMETERS_JSON plus explicit LLM_MAX_RETRIES are required"
+        )
 
     if not UPSTREAM_API_KEY:
         logger.warning("UPSTREAM_API_KEY / OPENAI_API_KEY 未设置，上游调用将失败")

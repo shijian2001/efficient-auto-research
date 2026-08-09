@@ -11,11 +11,14 @@ import time
 from pathlib import Path
 
 from ..artifacts import PublishedArtifact
-from ..contracts import AdapterError
+from ..contracts import AdapterError, require_formal_output_path
+from ..formal_contract import ModelTrackConfig
+from ..gpu_locks import gpu_allocation
 from ..process import run_command
 from ..protocol import BenchmarkMode, sha256_file, write_json_exclusive
 from ..records import BenchmarkRunResult, RunManifest, RunStatus
 from ..registry import AGENTS, ROOT
+from ..task_specs import task_spec_digest
 from ..relay import RelayProcess
 from .baseline import BaselineManifest, tree_digest
 from .dev_server import CandidateDevBroker
@@ -28,6 +31,7 @@ from .launchers import (
 from .protocol import TerminalAOProtocol
 from .revisions import RevisionStore
 from .sealed import SealedTestGate
+from .split import FrozenSplit
 
 
 def _git_identity(path: Path) -> tuple[str, bool]:
@@ -38,7 +42,7 @@ def _git_identity(path: Path) -> tuple[str, bool]:
         check=False,
     )
     dirty = subprocess.run(
-        ["git", "-C", str(path), "status", "--porcelain", "--untracked-files=no"],
+        ["git", "-C", str(path), "status", "--porcelain", "--untracked-files=normal"],
         capture_output=True,
         text=True,
         check=False,
@@ -54,10 +58,19 @@ def build_ao_manifest(
     agent: str,
     seed: int,
     formal: bool = True,
+    model_config: ModelTrackConfig | None = None,
+    agent_variant: str = "default",
+    hardware: dict[str, object] | None = None,
 ) -> RunManifest:
     agent_commit, agent_dirty = _git_identity(AGENTS[agent].install_path)
     adapter_commit, adapter_dirty = _git_identity(ROOT)
     baseline = BaselineManifest.load(protocol.baseline_manifest_path)
+    if formal:
+        protocol.require_formal_contract()
+        if model_config is None:
+            raise AdapterError("formal Terminal AO requires an explicit model track config")
+        model_config.validate(formal=True, require_terminal_inner=True)
+    outer_run_index = protocol.seeds.index(seed)
     return RunManifest(
         run_id=f"terminal-ao-{agent}-seed-{seed}",
         protocol_id=protocol.protocol_id,
@@ -69,18 +82,26 @@ def build_ao_manifest(
         source_dirty=agent_dirty or adapter_dirty,
         task_id="held-out-53",
         seed=seed,
-        model=protocol.inner_model,
-        reasoning_effort="high",
-        temperature=1.0,
+        model=model_config.outer_model_id if model_config else protocol.inner_model,
+        reasoning_effort=(
+            None
+            if model_config is None or model_config.model_parameters.get("reasoning_effort") is None
+            else str(model_config.model_parameters["reasoning_effort"])
+        ),
+        temperature=(
+            None
+            if model_config is None or model_config.model_parameters.get("temperature") is None
+            else float(model_config.model_parameters["temperature"])
+        ),
         wall_clock_seconds=protocol.outer_wall_clock_seconds,
-        asset_digests={
-            "dataset": protocol.dataset_digest,
-            "split": protocol.split_digest,
-            "baseline_manifest": protocol.baseline_manifest_digest,
-            "terminus_baseline": baseline.source_tree_digest,
-            "harbor_lock": protocol.harbor_lock_digest,
+        asset_digests=protocol.protocol_asset_digests(),
+        hardware=hardware
+        or {
+            "gpu_type": "RTX 4090",
+            "gpus_per_evaluation": 1,
+            "max_concurrent_evaluations": protocol.dev_concurrency,
+            "dev_concurrency": protocol.dev_concurrency,
         },
-        hardware={"dev_concurrency": protocol.dev_concurrency},
         policies={
             "retry": protocol.retry_policy,
             "failure": protocol.failure_policy,
@@ -89,6 +110,29 @@ def build_ao_manifest(
             "hardware": "48-hour outer wall clock with dev evaluator concurrency 8",
         },
         formal=formal,
+        schema_version=2,
+        benchmark_id="terminal-bench-ao",
+        protocol_version=protocol.protocol_id,
+        agent_variant=agent_variant,
+        benchmark_commit=protocol.benchmark_source_commit or "",
+        model_track_id=model_config.model_track_id if model_config else "non-formal",
+        outer_model_id=model_config.outer_model_id if model_config else protocol.inner_model,
+        terminal_inner_model_id=(
+            model_config.terminal_inner_model_id if model_config else protocol.inner_model
+        ),
+        relay_base_url=model_config.relay_base_url if model_config else "non-formal://local",
+        model_parameters=model_config.model_parameters if model_config else {},
+        outer_repetitions=protocol.outer_repetitions,
+        outer_run_index=outer_run_index,
+        development_seeds=(FrozenSplit.load(protocol.split_path).seed,),
+        heldout_seeds=(),
+        gpu_type="RTX 4090",
+        gpus_per_evaluation=1,
+        max_concurrent_evaluations=protocol.dev_concurrency,
+        task_spec_sha256=task_spec_digest("terminal-bench-ao"),
+        allowed_write_paths=protocol.editable_paths,
+        model_config_digest=model_config.digest if model_config else None,
+        non_comparable=not formal,
     )
 
 
@@ -139,7 +183,7 @@ def initialize_candidate_repository(candidate: Path) -> None:
             )
 
 
-def summarize_token_log(path: Path) -> dict[str, int]:
+def summarize_token_log(path: Path) -> dict[str, int | None]:
     totals = {
         "input": 0,
         "output": 0,
@@ -149,21 +193,32 @@ def summarize_token_log(path: Path) -> dict[str, int]:
         "retries": 0,
     }
     if not path.is_file():
-        return totals
+        return {name: None for name in totals}
+    complete = {name: True for name in ("input", "output", "cache", "reasoning")}
     for line_number, line in enumerate(path.read_text(encoding="utf-8").splitlines(), 1):
         if not line.strip():
             continue
         try:
             record = json.loads(line)
-            totals["input"] += int(record.get("input_tokens", 0))
-            totals["output"] += int(record.get("output_tokens", 0))
-            totals["cache"] += int(record.get("cache_tokens", 0))
-            totals["reasoning"] += int(record.get("reasoning_tokens", 0))
+            for total_name, record_name in (
+                ("input", "input_tokens"),
+                ("output", "output_tokens"),
+                ("cache", "cache_tokens"),
+                ("reasoning", "reasoning_tokens"),
+            ):
+                value = record.get(record_name)
+                if value is None:
+                    complete[total_name] = False
+                else:
+                    totals[total_name] += int(value)
             totals["requests"] += 1
             totals["retries"] += int(record.get("retries", 0))
         except (TypeError, ValueError, json.JSONDecodeError) as exc:
             raise AdapterError(f"invalid relay token log at line {line_number}: {path}") from exc
-    return totals
+    return {
+        name: (value if name not in complete or complete[name] else None)
+        for name, value in totals.items()
+    }
 
 
 def _run_terminal_ao_once(
@@ -177,20 +232,63 @@ def _run_terminal_ao_once(
     upstream_base_url: str | None = None,
     proxy: str | None = None,
     formal: bool = True,
+    model_config: ModelTrackConfig | None = None,
+    agent_variant: str = "default",
+    gpu_ids: tuple[str, ...] = (),
+    _hardware: dict[str, object] | None = None,
 ) -> BenchmarkRunResult:
     if agent not in AGENTS:
         raise AdapterError(f"unknown baseline agent: {agent}")
     protocol.validate()
+    if formal:
+        protocol.require_formal_contract()
     if seed not in protocol.seeds:
         raise AdapterError(f"seed {seed} is not registered by the Terminal AO protocol")
-    if model != protocol.inner_model:
-        raise AdapterError("Terminal AO model differs from the frozen protocol")
+    if model_config is None:
+        raise AdapterError("Terminal AO requires an explicit model track config")
+    model_config.validate(formal=formal, require_terminal_inner=True)
+    if upstream_base_url not in {None, model_config.relay_base_url}:
+        raise AdapterError("Terminal AO upstream relay override differs from the model track")
+    if formal and _hardware is None:
+        with gpu_allocation(
+            gpu_ids,
+            expected_type="RTX 4090",
+            gpus_per_evaluation=1,
+            max_concurrent_evaluations=protocol.dev_concurrency,
+        ) as hardware:
+            return _run_terminal_ao_once(
+                agent=agent,
+                protocol=protocol,
+                output_dir=output_dir,
+                seed=seed,
+                model=model,
+                timeout_seconds=timeout_seconds,
+                upstream_base_url=upstream_base_url,
+                proxy=proxy,
+                formal=formal,
+                model_config=model_config,
+                agent_variant=agent_variant,
+                gpu_ids=gpu_ids,
+                _hardware=hardware,
+            )
+    if model != model_config.outer_model_id:
+        raise AdapterError("Terminal AO outer model differs from the model track")
     if timeout_seconds != protocol.outer_wall_clock_seconds:
         raise AdapterError("Terminal AO outer timeout differs from the frozen 48-hour budget")
     output_dir = output_dir.resolve()
+    if formal:
+        require_formal_output_path(output_dir, ROOT)
     if output_dir.exists() or output_dir.is_symlink():
         raise AdapterError(f"Terminal AO output already exists: {output_dir}")
-    manifest = build_ao_manifest(protocol=protocol, agent=agent, seed=seed, formal=formal)
+    manifest = build_ao_manifest(
+        protocol=protocol,
+        agent=agent,
+        seed=seed,
+        formal=formal,
+        model_config=model_config,
+        agent_variant=agent_variant,
+        hardware=_hardware,
+    )
     manifest.validate()
     output_dir.mkdir(parents=True)
     manifest.write(output_dir / "manifest.json")
@@ -213,6 +311,8 @@ def _run_terminal_ao_once(
             candidate_dir=candidate,
             output_dir=output_dir,
             socket_path=Path(socket_directory) / "broker.sock",
+            model_config=model_config,
+            gpu_ids=gpu_ids,
         )
         with broker:
             broker.evaluate_current()
@@ -227,6 +327,9 @@ def _run_terminal_ao_once(
                 model=model,
                 seed=seed,
                 timeout_seconds=remaining_seconds,
+                model_parameters=model_config.model_parameters,
+                request_timeout_seconds=model_config.request_timeout_seconds,
+                retry_policy=model_config.retry_policy,
             )
             command = build_native_ao_command(request)
             try:
@@ -239,9 +342,12 @@ def _run_terminal_ao_once(
                         log_path=output_dir / "launcher/relay.log",
                         token_log_path=output_dir / "launcher/token_usage.jsonl",
                         unix_socket=relay_socket,
-                        upstream_base_url=upstream_base_url,
+                        upstream_base_url=model_config.relay_base_url,
                         upstream_proxy=proxy,
-                        model=model,
+                        model=model_config.outer_model_id,
+                        model_parameters=model_config.model_parameters,
+                        request_timeout_seconds=model_config.request_timeout_seconds,
+                        retry_policy=model_config.retry_policy,
                     )
                     with relay:
                         command = sandbox_native_ao_command(
@@ -328,19 +434,29 @@ def _run_terminal_ao_once(
         result.write(output_dir / "result.json")
         return result
     gate = SealedTestGate(output_dir / "sealed/test-consumed.json")
-    gate.consume(protocol_digest=protocol.digest, harness_digest=harness_digest)
+    gate.consume(
+        protocol_digest=protocol.digest,
+        split_digest=protocol.split_digest,
+        harness_digest=harness_digest,
+        outer_run_index=protocol.seeds.index(seed),
+    )
     test_record = evaluate_harness(
         protocol,
         split_name="test",
         harness_dir=final_harness,
         evaluation_dir=output_dir / "sealed/test-evaluation",
+        model_config=model_config,
     )
     artifact = archive_harness(final_harness, output_dir / "artifacts/final/harness.tar")
     token_totals = summarize_token_log(output_dir / "launcher/token_usage.jsonl")
-    dev_input = sum(item.evaluation.total_input_tokens for item in broker.calls)
-    dev_cache = sum(item.evaluation.total_cache_tokens for item in broker.calls)
-    dev_output = sum(item.evaluation.total_output_tokens for item in broker.calls)
-    dev_cost = sum(item.evaluation.total_cost_usd for item in broker.calls)
+    def optional_sum(values):
+        collected = tuple(values)
+        return sum(collected) if all(value is not None for value in collected) else None
+
+    dev_input = optional_sum(item.evaluation.total_input_tokens for item in broker.calls)
+    dev_cache = optional_sum(item.evaluation.total_cache_tokens for item in broker.calls)
+    dev_output = optional_sum(item.evaluation.total_output_tokens for item in broker.calls)
+    dev_cost = optional_sum(item.evaluation.total_cost_usd for item in broker.calls)
     result = BenchmarkRunResult(
         run_id=manifest.run_id,
         protocol_id=protocol.protocol_id,
@@ -379,7 +495,7 @@ def _run_terminal_ao_once(
             "inner_test_cache": test_record.total_cache_tokens,
         },
         cost={
-            "outer_reported_usd": 0.0,
+            "outer_reported_usd": None,
             "inner_dev_usd": dev_cost,
             "inner_test_usd": test_record.total_cost_usd,
         },
@@ -399,6 +515,9 @@ def run_terminal_ao(
     upstream_base_url: str | None = None,
     proxy: str | None = None,
     formal: bool = True,
+    model_config: ModelTrackConfig | None = None,
+    agent_variant: str = "default",
+    gpu_ids: tuple[str, ...] = (),
 ) -> BenchmarkRunResult:
     started = time.monotonic()
     try:
@@ -412,6 +531,9 @@ def run_terminal_ao(
             upstream_base_url=upstream_base_url,
             proxy=proxy,
             formal=formal,
+            model_config=model_config,
+            agent_variant=agent_variant,
+            gpu_ids=gpu_ids,
         )
     except Exception as exc:
         manifest_path = output_dir.resolve() / "manifest.json"
@@ -452,6 +574,9 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--output-dir", type=Path, required=True)
     parser.add_argument("--seed", type=int, required=True)
     parser.add_argument("--model", required=True)
+    parser.add_argument("--model-config", type=Path, required=True)
+    parser.add_argument("--agent-variant", required=True)
+    parser.add_argument("--gpu-id", action="append", default=[])
     parser.add_argument("--upstream-base-url")
     parser.add_argument("--proxy")
     parser.add_argument("--timeout", type=int, required=True)
@@ -466,6 +591,13 @@ def main(argv: list[str] | None = None) -> int:
             timeout_seconds=args.timeout,
             upstream_base_url=args.upstream_base_url,
             proxy=args.proxy,
+            model_config=ModelTrackConfig.load(
+                args.model_config,
+                formal=True,
+                require_terminal_inner=True,
+            ),
+            agent_variant=args.agent_variant,
+            gpu_ids=tuple(args.gpu_id),
         )
     except Exception as exc:
         print(

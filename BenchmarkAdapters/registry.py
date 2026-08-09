@@ -16,6 +16,8 @@ class AgentSpec:
     install_path: Path
     version_command: tuple[str, ...]
     mle_backend: str
+    autoresearch_backend: str
+    optimizer_design_backend: str
     terminal_ao_backend: str
     terminal_direct_smoke_backend: str | None
     terminal_direct_smoke_status: str
@@ -45,6 +47,8 @@ AGENTS = {
         ROOT / "mle-bench-agents/efficient-auto-research",
         ("git", "rev-parse", "HEAD"),
         "native-docker",
+        "native-ear-kts",
+        "optimizer-design-ear-kts",
         "native-ear-repository",
         "blocked:agent_adapters.ear:EARTerminalAgent",
         "non-comparable direct solver blocked; formal AO uses native EAR KTS repository backend",
@@ -55,6 +59,8 @@ AGENTS = {
         ROOT / "baselines/MLEvolve",
         ("git", "rev-parse", "HEAD"),
         "native-docker",
+        "native-mlevolve-uct",
+        "optimizer-design-mlevolve-uct",
         "native-mlevolve-repository",
         "blocked:agent_adapters.mlevolve:MLEvolveTerminalAgent",
         "non-comparable direct solver blocked; formal AO uses native MLEvolve UCT repository backend",
@@ -65,6 +71,8 @@ AGENTS = {
         ROOT / "baselines/Arbor",
         (str(ROOT / "baselines/Arbor/.venv/bin/arbor"), "--version"),
         "native-docker",
+        "native-arbor-coordinator",
+        "optimizer-design-arbor-coordinator",
         "native-arbor-repository",
         "agent_adapters.arbor:ArborTerminalAgent",
         "native Arbor ReAct loop with Harbor-backed tools",
@@ -77,6 +85,8 @@ AGENTS = {
         ("codex", "--version"),
         "generic-mle-workspace",
         "native-codex-cli",
+        "optimizer-design-codex-cli",
+        "native-codex-cli",
         "codex",
         "Harbor built-in Codex adapter",
     ),
@@ -87,6 +97,8 @@ AGENTS = {
         ("claude", "--version"),
         "generic-mle-workspace",
         "native-claude-cli",
+        "optimizer-design-claude-cli",
+        "native-claude-cli",
         "claude-code",
         "Harbor built-in Claude Code adapter",
     ),
@@ -96,6 +108,8 @@ AGENTS = {
         ROOT / "baselines/EvoMaster",
         (str(ROOT / "baselines/EvoMaster/.venv/bin/python"), "--version"),
         "native-mle",
+        "native-ml-master-2-workflow",
+        "optimizer-design-ml-master-2-workflow",
         "native-ml-master-2-repository",
         "blocked:agent_adapters.ml_master_2:MLMaster2Agent",
         "native ML-Master 2 direct solver blocked; formal AO uses native EvoMaster repository workflow",
@@ -106,6 +120,8 @@ AGENTS = {
         ROOT / "baselines/AiScientist",
         (str(ROOT / "baselines/AiScientist/.venv/bin/aisci"), "--help"),
         "native-mle",
+        "native-ai-scientist-subagent",
+        "optimizer-design-ai-scientist-subagent",
         "native-ai-scientist-subagent",
         "agent_adapters.ai_scientist:AiScientistTerminalAgent",
         "native AiScientist Subagent bridge; locked Harbor profile",

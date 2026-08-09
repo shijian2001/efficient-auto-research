@@ -1,0 +1,11 @@
+{
+  "files": {
+    "data/shard_00000.parquet": "054ddbd98abf30d773c54de578fc9d579bafeb6c14e04e97bd36aa90e825bf9b",
+    "data/shard_06542.parquet": "769fe59d108dfd2cfa186c63173b83fbfb90a7adb3519519ba6eaa6ca9889f94",
+    "tokenizer/token_bytes.pt": "f44a3d5f8cfaf7d1cf7fc64751fd896badcfdf620a75b2f8be854a49082d68c7",
+    "tokenizer/tokenizer.pkl": "14915209a2c791b62608396040608c65fb9458b190216422216d399200abde1c"
+  },
+  "manifest_digest": "3468b086a4720809840c4aac9e1409cf5e81a0f11c65c0249000fde2b3fb1b09",
+  "protocol_id": "autoresearch-architecture-reconstruction-v1",
+  "scope": "one training parquet shard plus the fixed validation shard and frozen tokenizer; reconstruction protocol"
+}

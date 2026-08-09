@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import subprocess
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Mapping
@@ -100,6 +101,29 @@ def protect_generated_output(
     return resolved
 
 
+def require_formal_output_path(path: Path, repository_root: Path) -> Path:
+    resolved = path.resolve()
+    root = repository_root.resolve()
+    if resolved == root:
+        raise AdapterError("formal output directory cannot be the source repository")
+    try:
+        relative = resolved.relative_to(root)
+    except ValueError:
+        return resolved
+    ignored = subprocess.run(
+        ["git", "-C", str(root), "check-ignore", "--no-index", "--quiet", "--", relative.as_posix()],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if ignored.returncode != 0:
+        raise AdapterError(
+            "formal output inside the source repository must already be covered by a reviewed "
+            f"gitignore rule: {resolved}"
+        )
+    return resolved
+
+
 def raise_for_result(result: CommandResult) -> None:
     if not result.succeeded:
         label = result.command.label or "adapter command"
@@ -113,6 +137,7 @@ __all__ = [
     "UnsupportedAdapterError",
     "raise_for_result",
     "protect_generated_output",
+    "require_formal_output_path",
     "require_directory",
     "require_file",
 ]

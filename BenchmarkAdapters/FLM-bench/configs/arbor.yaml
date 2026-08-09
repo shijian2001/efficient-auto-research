@@ -1,0 +1,36 @@
+agent:
+  arbor:
+    profile: smoke
+    command: uv
+    command_env_var: ARBOR_FML_COMMAND
+    command_args:
+      - run
+      - --project
+      - "{arbor_root}"
+      - executor
+      - --cwd
+      - "{repo_dir}"
+      - --idea
+      - "{prompt}"
+      - --no-git
+      - --workspace-dir
+      - "{step_dir}/arbor_workspace"
+      - --max-turns
+      - "30"
+      - --provider
+      - openai-responses
+      - --model
+      - "{model}"
+    arbor_root: /mnt/sda/shijianwang/efficient-auto-research/baselines/Arbor
+    command_stdin: none
+    response_mode: workspace
+    require_auth: true
+    use_relay_env: true
+    proxy: ""
+    max_steps: 1
+    command_retry_attempts: 1
+    metric_tolerance: 1.0e-8
+    prompt_suffix: |
+      Arbor-specific rules:
+      - Edit only target files.
+      - Do not run FML-bench validation yourself.

@@ -6,7 +6,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from ..contracts import AdapterError, CommandSpec, require_directory, require_file
-from ..process import DEFAULT_PROXY, DEFAULT_RELAY_BASE_URL, relay_client_env
+from ..formal_contract import ModelTrackConfig
+from ..process import DEFAULT_PROXY, relay_client_env
 from ..registry import AGENTS, ROOT
 
 
@@ -15,12 +16,15 @@ class TerminalAORequest:
     agent: str
     protocol_path: Path
     output_dir: Path
-    model: str = "gpt-5.5"
-    upstream_base_url: str = DEFAULT_RELAY_BASE_URL
+    model: str | None = None
+    upstream_base_url: str = ""
     proxy: str = DEFAULT_PROXY
     seed: int = 0
     timeout_seconds: int = 172800
     dry_run: bool = False
+    model_config_path: Path | None = None
+    agent_variant: str = "default"
+    gpu_ids: tuple[str, ...] = ()
 
 
 class TerminalAOAdapter:
@@ -37,6 +41,15 @@ class TerminalAOAdapter:
             raise AdapterError(f"Terminal AO output already exists: {request.output_dir.resolve()}")
         if request.timeout_seconds < 1:
             raise AdapterError("Terminal AO timeout must be positive")
+        if request.model_config_path is None:
+            raise AdapterError("Terminal AO requires --model-config")
+        model_config = ModelTrackConfig.load(
+            request.model_config_path,
+            formal=not request.dry_run,
+            require_terminal_inner=True,
+        )
+        if request.model is not None and request.model != model_config.outer_model_id:
+            raise AdapterError("Terminal AO model override differs from model track")
         return CommandSpec(
             argv=(
                 str(ROOT / "BenchmarkAdapters/.venv/bin/python"),
@@ -51,19 +64,28 @@ class TerminalAOAdapter:
                 "--seed",
                 str(request.seed),
                 "--model",
-                request.model,
+                model_config.outer_model_id,
+                "--model-config",
+                str(request.model_config_path.resolve()),
+                "--agent-variant",
+                request.agent_variant,
                 "--upstream-base-url",
-                request.upstream_base_url,
+                model_config.relay_base_url,
                 "--proxy",
                 request.proxy,
                 "--timeout",
                 str(request.timeout_seconds),
+                *tuple(
+                    value
+                    for gpu_id in request.gpu_ids
+                    for value in ("--gpu-id", gpu_id)
+                ),
             ),
             cwd=ROOT,
             env=relay_client_env(
-                base_url=request.upstream_base_url,
+                base_url=model_config.relay_base_url,
                 proxy=request.proxy,
-                model=request.model,
+                model=model_config.outer_model_id,
             ),
             timeout_seconds=request.timeout_seconds + 3600,
             label=f"{self.agent} Terminal-Bench 36/53 AO supervisor",

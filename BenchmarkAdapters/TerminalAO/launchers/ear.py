@@ -15,6 +15,7 @@ from agent.engine.graph import Attempt, SearchGraph
 from agent.engine.thompson import select_parent
 from agent.llm import query as llm_query
 
+from ...protocol import write_json_exclusive
 from .repository_tools import (
     apply_candidate_diff,
     candidate_prompt,
@@ -24,6 +25,7 @@ from .repository_tools import (
     extract_unified_diff,
     git,
 )
+from .model_config import outer_model_parameters
 
 
 def run_native_loop(
@@ -49,6 +51,7 @@ def run_native_loop(
     feedback: dict[str, dict[str, object]] = {}
     history: list[dict[str, object]] = []
     started = time.monotonic()
+    model_parameters = outer_model_parameters()
     stagnation = 0
     best_reward: float | None = None
     for step in range(max_steps):
@@ -67,8 +70,11 @@ def run_native_loop(
         )
         attempt_started = time.monotonic()
         try:
+            query_parameters = {}
+            if model_parameters.get("temperature") is not None:
+                query_parameters["temperature"] = float(model_parameters["temperature"])
             response, input_tokens, output_tokens = llm_query(
-                system, user, model=model, temperature=1.0
+                system, user, model=model, **query_parameters
             )
             diff_text = extract_unified_diff(response)
             commit = apply_candidate_diff(workspace, parent_commit, diff_text)
@@ -107,7 +113,7 @@ def run_native_loop(
             git("reset", "--hard", parent_commit, workspace=workspace, check=False)
             attempt = Attempt(
                 id=f"ear-{step:04d}",
-                plan=decision.reason,
+                plan=strategy,
                 code="",
                 error=f"{type(exc).__name__}: {exc}",
                 parent_id=parent.id if parent else None,
@@ -132,7 +138,7 @@ def run_native_loop(
         "best_dev_pass_rate": best.metric if best else None,
         "elapsed_seconds": time.monotonic() - started,
     }
-    result_path.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    write_json_exclusive(result_path, payload)
     return payload
 
 

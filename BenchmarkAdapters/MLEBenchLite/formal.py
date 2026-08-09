@@ -9,6 +9,7 @@ from pathlib import Path
 from ..artifacts import PublishedArtifact, publish_artifact
 from ..contracts import AdapterError
 from ..protocol import BenchmarkMode
+from ..protocol import sha256_file
 from ..records import BenchmarkRunResult, RunManifest, RunStatus
 from .adapter import MleLiteAdapter, MleLiteRequest
 from .grading import OfficialGrade, grade_submission
@@ -48,6 +49,7 @@ def run_formal_mle(
         report_path=run_dir / "grading/competition_report.json",
     )
     report = grade.report
+    report_digest = sha256_file(grade.report_path)
     result = BenchmarkRunResult(
         run_id=manifest.run_id,
         protocol_id=manifest.protocol_id,
@@ -60,7 +62,7 @@ def run_formal_mle(
         status=RunStatus.COMPLETED,
         score_valid=True,
         score=float(report["score"]),
-        metrics=report,
+        metrics={**report, "grader_report_file_sha256": report_digest},
         artifact_path=str(artifact.path),
         artifact_sha256=artifact.sha256,
         wall_clock_seconds=time.monotonic() - started,

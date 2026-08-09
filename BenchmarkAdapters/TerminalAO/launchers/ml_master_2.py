@@ -13,6 +13,15 @@ from evomaster.agent.session import LocalSession, LocalSessionConfig
 from evomaster.utils import LLMConfig, create_llm
 from evomaster.utils.types import TaskInstance
 
+from ...protocol import write_json_exclusive
+from .model_config import (
+    max_output_tokens,
+    max_retries,
+    outer_model_parameters,
+    request_timeout_seconds,
+    retry_policy,
+)
+
 
 SYSTEM_PROMPT = """You are ML-Master 2's repository optimization agent.
 Operate only in the configured terminus-2 repository workspace. Inspect the harness,
@@ -56,6 +65,21 @@ def run_native_loop(
     )
     session.open()
     try:
+        model_parameters = outer_model_parameters()
+        retries = max_retries(retry_policy())
+        llm_options: dict[str, object] = {}
+        if model_parameters.get("temperature") is not None:
+            llm_options["temperature"] = float(model_parameters["temperature"])
+        output_tokens = max_output_tokens(model_parameters)
+        if output_tokens is not None:
+            llm_options["max_tokens"] = output_tokens
+        if model_parameters.get("reasoning_effort") is not None:
+            llm_options["reasoning_effort"] = str(model_parameters["reasoning_effort"])
+        request_timeout = request_timeout_seconds()
+        if request_timeout is not None:
+            llm_options["timeout"] = request_timeout
+        if retries is not None:
+            llm_options["max_retries"] = retries
         tools = create_registry(builtin_names=["*"])
         user_prompt = (
             "Optimize this frozen terminus-2 harness for held-out Terminal-Bench pass rate. "
@@ -89,10 +113,7 @@ def run_native_loop(
                     model=model,
                     api_key=os.environ.get("OPENAI_API_KEY", ""),
                     base_url=os.environ.get("OPENAI_BASE_URL", ""),
-                    temperature=1.0,
-                    max_tokens=65536,
-                    timeout=3600,
-                    max_retries=3,
+                    **llm_options,
                 )
             )
             agent = RepositoryAgent(
@@ -139,9 +160,7 @@ def run_native_loop(
             for (name, _), trajectory in zip(stage_specs, trajectories)
         ],
     }
-    (output_dir / "native-result.json").write_text(
-        json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8"
-    )
+    write_json_exclusive(output_dir / "native-result.json", payload)
     if trajectories[-1].status not in {"completed", "failed"}:
         raise RuntimeError(f"ML-Master 2 native loop ended with {trajectories[-1].status}")
     return payload

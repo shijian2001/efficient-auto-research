@@ -1,0 +1,24 @@
+[project]
+name = "autoresearch-ml-master-2-runtime"
+version = "0.1.0"
+requires-python = ">=3.11,<3.12"
+dependencies = [
+  "aiohttp",
+  "anthropic",
+  "beautifulsoup4",
+  "fastapi>=0.100.0",
+  "flask",
+  "google-genai",
+  "matplotlib>=3.5.0",
+  "mcp",
+  "openai",
+  "oss2",
+  "pydantic",
+  "pymupdf>=1.23.0",
+  "python-dotenv",
+  "pyyaml",
+  "slowapi>=0.1.0",
+]
+
+[tool.uv]
+package = false

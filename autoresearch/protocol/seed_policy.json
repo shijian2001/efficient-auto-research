@@ -1,0 +1,16 @@
+{
+  "artifact_unchanged": true,
+  "dev_seed": 42,
+  "held_out_seeds": [
+    314159,
+    271828
+  ],
+  "injection_policy": "replace literal arguments of required torch seed calls in evaluator copy",
+  "policy_digest": "41761bcae636fcba24d317509dbac170af37145b333955d39600dac48f66ee44",
+  "protocol_id": "autoresearch-architecture-reconstruction-v1",
+  "supported_calls": [
+    "torch.cuda.manual_seed",
+    "torch.cuda.manual_seed_all",
+    "torch.manual_seed"
+  ]
+}

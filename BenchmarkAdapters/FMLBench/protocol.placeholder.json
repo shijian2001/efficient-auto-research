@@ -1,0 +1,39 @@
+{
+  "allowed_write_paths": [
+    "<SET_FROM_PINNED_UPSTREAM_TASK_PROTOCOL>"
+  ],
+  "artifact_relative_path": "<SET_FROM_PINNED_UPSTREAM_PROTOCOL>",
+  "benchmark_id": "fml-bench",
+  "evaluator_files": {
+    "<SET_EVALUATOR_RELATIVE_PATH>": "<SET_SHA256>"
+  },
+  "gpu_type": "H100",
+  "gpus_per_evaluation": 1,
+  "internal_proposal_policy": "<SET_FROM_PINNED_UPSTREAM_PROTOCOL>",
+  "internal_round_policy": "<SET_FROM_PINNED_UPSTREAM_PROTOCOL>",
+  "launcher_commands": {
+    "ai-scientist": ["<SET_CONCRETE_COMMAND>"],
+    "arbor": ["<SET_CONCRETE_COMMAND>"],
+    "claude-code": ["<SET_CONCRETE_COMMAND>"],
+    "codex": ["<SET_CONCRETE_COMMAND>"],
+    "ear": ["<SET_CONCRETE_COMMAND>"],
+    "ml-master-2": ["<SET_CONCRETE_COMMAND>"],
+    "mlevolve": ["<SET_CONCRETE_COMMAND>"]
+  },
+  "max_concurrent_evaluations": 1,
+  "metric_direction": "<SET_MINIMIZE_OR_MAXIMIZE>",
+  "primary_metric_name": "<SET_UPSTREAM_PRIMARY_METRIC>",
+  "outer_run_ids": [0],
+  "protocol_version": "<SET_FROM_PINNED_UPSTREAM_PROTOCOL>",
+  "schema_version": 1,
+  "task_config_digests": {
+    "<SET_TASK_CONFIG_FILE>": "<SET_SHA256>"
+  },
+  "task_config_paths": [
+    "<SET_ABSOLUTE_TASK_CONFIG_PATH>"
+  ],
+  "upstream_commit": "<SET_40_HEX_COMMIT>",
+  "upstream_root": "/mnt/sda/shijianwang/benchmark-deployments/repos/FML-bench",
+  "upstream_result_relative_path": "<SET_FROM_PINNED_UPSTREAM_PROTOCOL>",
+  "wall_clock_seconds": 172800
+}

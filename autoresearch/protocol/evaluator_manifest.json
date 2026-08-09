@@ -1,0 +1,35 @@
+{
+  "candidate_hard_timeout_seconds": 900,
+  "candidate_training_seconds": 300,
+  "editable_paths": [
+    "train.py"
+  ],
+  "implementation_files": {
+    "BenchmarkAdapters/AutoResearch/aggregate.py": "3dc1dc604aa24d10f2b6d313c4b18a3f594eed650dbc79b61487235b3644cd66",
+    "BenchmarkAdapters/AutoResearch/baseline.py": "acaa6d110192128bf88779ec17cda96f134d7efe6133d0954d12248a91076ae9",
+    "BenchmarkAdapters/AutoResearch/broker.py": "42f906d006a02d7048020e5d33b650862b8f19e3d5bde1ff9babec75de94390b",
+    "BenchmarkAdapters/AutoResearch/evaluator.py": "24ef1c70f675a508b1272ecf69bb0a3034653b8b48d6f78ab506ce04a293feb0",
+    "BenchmarkAdapters/AutoResearch/protocol.py": "b836e56681c74217462232d40470471ea9a769dbf05eb82170e37df2ec28d3f2",
+    "BenchmarkAdapters/AutoResearch/revisions.py": "5ade4deffed65309fa42cbf2f72b8dab351c60e7dbf3065f6a7dd88ce29f8153",
+    "BenchmarkAdapters/AutoResearch/seed_injection.py": "dca2d405d2a6f1a7033f3fed7c93118b7716cec0106f78e8d505baede110df11",
+    "BenchmarkAdapters/AutoResearch/supervisor.py": "46411e1cc8b3701fa87d1ed8a4b892efec98efc7391b4ba55a5bfea08149a154"
+  },
+  "metric_direction": "minimize",
+  "primary_metric": "val_bpb",
+  "required_metrics": [
+    "val_bpb",
+    "training_seconds",
+    "total_seconds",
+    "peak_vram_mb",
+    "mfu_percent",
+    "total_tokens_M",
+    "num_steps",
+    "num_params_M",
+    "depth"
+  ],
+  "schema_version": 1,
+  "training_seconds_tolerance": [
+    295.0,
+    315.0
+  ]
+}

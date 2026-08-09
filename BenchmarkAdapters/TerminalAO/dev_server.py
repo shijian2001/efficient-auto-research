@@ -11,6 +11,7 @@ from pathlib import Path
 from typing import Mapping
 
 from ..contracts import AdapterError
+from ..formal_contract import ModelTrackConfig
 from .baseline import tree_digest
 from .evaluator import EvaluationRecord, evaluate_harness
 from .protocol import TerminalAOProtocol
@@ -33,6 +34,8 @@ class CandidateDevBroker:
         output_dir: Path,
         socket_path: Path,
         environment: Mapping[str, str] | None = None,
+        model_config: ModelTrackConfig | None = None,
+        gpu_ids: tuple[str, ...] = (),
     ) -> None:
         self.protocol = protocol
         self.revision_store = revision_store
@@ -40,6 +43,11 @@ class CandidateDevBroker:
         self.output_dir = output_dir.resolve()
         self.socket_path = socket_path.resolve()
         self.environment = dict(environment or {})
+        if model_config is None:
+            raise AdapterError("Terminal AO dev broker requires an explicit inner model track")
+        model_config.validate(formal=True, require_terminal_inner=True)
+        self.model_config = model_config
+        self.gpu_ids = gpu_ids
         self.token = secrets.token_hex(32)
         self._lock = threading.Lock()
         self._calls = 0
@@ -85,6 +93,8 @@ class CandidateDevBroker:
                 harness_dir=revision.path,
                 evaluation_dir=self.output_dir / "dev-evaluations" / revision_id,
                 environment=self.environment,
+                model_config=self.model_config,
+                gpu_ids=self.gpu_ids,
             )
             scored = ScoredRevision(revision, evaluation)
             self._scored.append(scored)

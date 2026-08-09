@@ -15,6 +15,7 @@ from engine.search_node import SearchNode
 from llm import query as llm_query
 from utils.metric import MetricValue, WorstMetricValue
 
+from ...protocol import write_json_exclusive
 from .repository_tools import (
     apply_candidate_diff,
     candidate_prompt,
@@ -23,6 +24,7 @@ from .repository_tools import (
     extract_unified_diff,
     git,
 )
+from .model_config import max_output_tokens, outer_model_parameters
 
 
 def _config(model: str, seed: int, timeout: int, steps: int):
@@ -145,6 +147,7 @@ def run_native_loop(
     feedback: dict[str, dict[str, object]] = {}
     history: list[dict[str, object]] = []
     started = time.monotonic()
+    model_parameters = outer_model_parameters()
     for step in range(1, max_steps + 1):
         if time.monotonic() - started >= timeout:
             break
@@ -157,13 +160,18 @@ def run_native_loop(
             history=history,
         )
         try:
+            query_parameters = {}
+            if model_parameters.get("temperature") is not None:
+                query_parameters["temperature"] = float(model_parameters["temperature"])
+            output_tokens = max_output_tokens(model_parameters)
+            if output_tokens is not None:
+                query_parameters["max_tokens"] = output_tokens
             response = llm_query(
                 system,
                 user,
                 model=model,
-                temperature=1.0,
-                max_tokens=65536,
                 cfg=search.cfg,
+                **query_parameters,
             )
             diff_text = extract_unified_diff(str(response))
             commit = apply_candidate_diff(workspace, parent_commit, diff_text)
@@ -204,7 +212,7 @@ def run_native_loop(
         "best_dev_pass_rate": best.metric.value if best else None,
         "elapsed_seconds": time.monotonic() - started,
     }
-    result_path.write_text(json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8")
+    write_json_exclusive(result_path, payload)
     return payload
 
 

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import copy
+import json
 import shutil
 from pathlib import Path
 
@@ -20,6 +21,7 @@ def main() -> int:
     parser.add_argument("--workspace-dir", type=Path, required=True)
     parser.add_argument("--gpu-id", type=int, required=True)
     parser.add_argument("--timeout", type=int, required=True)
+    parser.add_argument("--model-parameters-json", required=True)
     args = parser.parse_args()
 
     if args.destination.exists() or args.staged_data_root.exists() or args.workspace_dir.exists():
@@ -34,7 +36,13 @@ def main() -> int:
     payload["data_root"] = str(args.staged_data_root.resolve())
     payload["grading_servers"] = []
     payload["llm"] = {"openai": copy.deepcopy(payload["llm"]["openai"]), "default": "openai"}
-    payload["llm"]["openai"]["reasoning_effort"] = "high"
+    model_parameters = json.loads(args.model_parameters_json)
+    if not isinstance(model_parameters, dict) or not model_parameters:
+        raise RuntimeError("ML-Master formal config requires explicit model parameters")
+    prohibited = {key for key in model_parameters if any(item in key.lower() for item in ("key", "token", "secret", "auth"))}
+    if prohibited:
+        raise RuntimeError("ML-Master model parameters cannot contain credentials")
+    payload["llm"]["openai"].update(model_parameters)
     for agent in payload.get("agents", {}).values():
         if isinstance(agent, dict) and "llm" in agent:
             agent["llm"] = "openai"

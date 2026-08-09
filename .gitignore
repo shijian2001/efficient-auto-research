@@ -40,6 +40,14 @@
 /terminal-bench-2/logs/
 /terminal-bench-2/results/
 /terminal-bench-2/home/
+/autoresearch/.runtime/
+/autoresearch/.uv-python/
+/autoresearch/data/
+/autoresearch/home/
+/optimizer-design/.runtime/
+/optimizer-design/data/
+/optimizer-design/home/
+/optimizer-design/baseline-evidence/
 
 # Agent and baseline runtime records.
 **/runs/

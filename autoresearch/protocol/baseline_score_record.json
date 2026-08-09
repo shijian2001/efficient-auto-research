@@ -1,0 +1,21 @@
+{
+  "baseline_manifest_digest": "165b08693cbb49bb6a8368055d027fec16ecdeafa124291d346db387ce5c1f02",
+  "baseline_train_sha256": "2954175f4ac42ad65164aef40910ef953789abcd05a5cc886ac9ba5a00814414",
+  "evaluation_record_digests": {},
+  "evaluator_manifest_digest": "c99031ddbcdf5a3b5405e02dd3fa31572725fb421651219a75b5984d00ce85fd",
+  "final_score": null,
+  "held_out_scores": {},
+  "held_out_seeds": [
+    314159,
+    271828
+  ],
+  "kernel_cache_manifest_digest": "26a68a2a5cc0db1f6de7464efe6a60268ed30d5c7f7d22971a04c6020ddc9ca4",
+  "metric_direction": "minimize",
+  "note": "Pending a clean, exclusive-H100 baseline run on the final frozen prepared-data scope; formal 48-hour campaign launch is blocked until completed.",
+  "prepared_manifest_digest": "3468b086a4720809840c4aac9e1409cf5e81a0f11c65c0249000fde2b3fb1b09",
+  "primary_metric": "val_bpb",
+  "protocol_id": "autoresearch-architecture-reconstruction-v1",
+  "schema_version": 1,
+  "seed_policy_digest": "41761bcae636fcba24d317509dbac170af37145b333955d39600dac48f66ee44",
+  "status": "pending"
+}

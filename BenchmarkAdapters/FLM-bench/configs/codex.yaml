@@ -1,0 +1,37 @@
+agent:
+  codex:
+    profile: smoke
+    command: codex
+    command_args:
+      - exec
+      - --full-auto
+      - --ephemeral
+      - -C
+      - "{repo_dir}"
+      - -m
+      - "{model}"
+      - -c
+      - model_provider="flm_relay"
+      - -c
+      - 'model_providers.flm_relay.name="FLM relay"'
+      - -c
+      - 'model_providers.flm_relay.base_url="{upstream_base_url}"'
+      - -c
+      - 'model_providers.flm_relay.wire_api="responses"'
+      - -c
+      - model_providers.flm_relay.requires_openai_auth=true
+      - -o
+      - "{response_path}"
+    command_stdin: prompt
+    command_output_file: "{response_path}"
+    response_mode: workspace
+    require_auth: true
+    use_relay_env: true
+    proxy: ""
+    max_steps: 1
+    command_retry_attempts: 1
+    metric_tolerance: 1.0e-8
+    prompt_suffix: |
+      Codex-specific rules:
+      - Edit only target files.
+      - Leave benchmark validation to FML-bench.

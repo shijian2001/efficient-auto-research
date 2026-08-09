@@ -11,6 +11,7 @@ import json
 import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any, Mapping
 
 import httpx
 
@@ -33,9 +34,12 @@ class RelayProcess:
     unix_socket: Path | None = None
     upstream_base_url: str | None = None
     upstream_proxy: str | None = None
-    model: str = "gpt-5.5"
-    reasoning_effort: str = "high"
-    temperature: float = 1.0
+    model: str | None = None
+    reasoning_effort: str | None = None
+    temperature: float | None = None
+    model_parameters: Mapping[str, Any] | None = None
+    request_timeout_seconds: int | None = None
+    retry_policy: Mapping[str, Any] | None = None
     process: subprocess.Popen | None = None
 
     def _stop(self) -> None:
@@ -79,6 +83,8 @@ class RelayProcess:
         return urllib.request.urlopen(request, timeout=timeout)
 
     def _check_upstream_ready(self) -> None:
+        if not self.model:
+            raise RuntimeError("relay model must be configured explicitly")
         payload = json.dumps(
             {
                 "model": self.model,
@@ -103,6 +109,14 @@ class RelayProcess:
         return f"http://127.0.0.1:{self.port}/v1"
 
     def __enter__(self) -> "RelayProcess":
+        if not self.model:
+            raise RuntimeError("relay model must be configured explicitly")
+        if not self.upstream_base_url:
+            raise RuntimeError("relay upstream base URL must be configured explicitly")
+        if not self.model_parameters:
+            raise RuntimeError("relay model parameters must be configured explicitly")
+        if self.request_timeout_seconds is not None and self.request_timeout_seconds < 1:
+            raise RuntimeError("relay request timeout must be positive")
         upstream_key = os.environ.get("UPSTREAM_API_KEY") or os.environ.get("OPENAI_API_KEY")
         if not upstream_key:
             raise RuntimeError("set UPSTREAM_API_KEY or OPENAI_API_KEY")
@@ -114,25 +128,56 @@ class RelayProcess:
             self.unix_socket.unlink(missing_ok=True)
         self.log_path.parent.mkdir(parents=True, exist_ok=True)
         self.token_log_path.parent.mkdir(parents=True, exist_ok=True)
-        environment = os.environ.copy()
+        allowed_environment = {
+            "LANG",
+            "LC_ALL",
+            "PATH",
+            "SSL_CERT_DIR",
+            "SSL_CERT_FILE",
+        }
+        environment = {
+            key: value for key, value in os.environ.items() if key in allowed_environment
+        }
         environment.update(
             {
-                "UPSTREAM_BASE_URL": self.upstream_base_url
-                or environment.get("UPSTREAM_BASE_URL", "https://relay.shuai-ederson-clow.xyz/v1"),
+                "UPSTREAM_BASE_URL": self.upstream_base_url,
                 "UPSTREAM_API_KEY": upstream_key,
                 "LLM_FORCE_MODEL": self.model,
-                "LLM_REASONING_EFFORT": self.reasoning_effort,
-                "LLM_TEMPERATURE": str(self.temperature),
                 "LLM_UPSTREAM_PROXY": self.upstream_proxy or environment.get(
                     "LLM_UPSTREAM_PROXY",
-                    environment.get("CLASH_PROXY", "http://127.0.0.1:17892"),
+                    environment.get("CLASH_PROXY", ""),
                 ),
                 "LLM_TOKEN_LOG_PATH": str(self.token_log_path),
                 "LLM_PROXY_AGENT_NAME": self.agent,
                 "LLM_PROXY_API_KEY": "proxy",
             }
         )
-        log_handle = self.log_path.open("w", encoding="utf-8")
+        parameters = dict(self.model_parameters or {})
+        if self.reasoning_effort is not None:
+            parameters.setdefault("reasoning_effort", self.reasoning_effort)
+        if self.temperature is not None:
+            parameters.setdefault("temperature", self.temperature)
+        environment["LLM_FORCE_PARAMETERS_JSON"] = json.dumps(parameters, sort_keys=True)
+        environment["LLM_UPSTREAM_TIMEOUT"] = (
+            "" if self.request_timeout_seconds is None else str(self.request_timeout_seconds)
+        )
+        retry_policy = dict(self.retry_policy or {})
+        retries = retry_policy.get("max_retries")
+        if retries is None and retry_policy.get("max_attempts") is not None:
+            retries = int(retry_policy["max_attempts"]) - 1
+        if retries is not None and int(retries) < 0:
+            raise RuntimeError("relay max retries must be non-negative")
+        environment["LLM_MAX_RETRIES"] = "0" if retries is None else str(int(retries))
+        if "reasoning_effort" in parameters:
+            environment["LLM_REASONING_EFFORT"] = str(parameters["reasoning_effort"])
+        if "temperature" in parameters:
+            environment["LLM_TEMPERATURE"] = str(parameters["temperature"])
+        if self.token_log_path.exists() or self.token_log_path.is_symlink():
+            raise RuntimeError(f"refusing to reuse relay telemetry path: {self.token_log_path}")
+        try:
+            log_handle = self.log_path.open("x", encoding="utf-8")
+        except FileExistsError as exc:
+            raise RuntimeError(f"refusing to overwrite relay log: {self.log_path}") from exc
         try:
             command = [
                     sys.executable,

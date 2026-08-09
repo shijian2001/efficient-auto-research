@@ -1,0 +1,42 @@
+agent:
+  efficient_auto_research:
+    profile: smoke
+    command: uv
+    command_env_var: EAIR_FML_COMMAND
+    command_args:
+      - run
+      - --project
+      - "{eair_root}"
+      - python
+      - /mnt/sda/shijianwang/efficient-auto-research/BenchmarkAdapters/FLM-bench/FLM-adapter/G3/source_edit.py
+      - --eair-root
+      - "{eair_root}"
+      - --model
+      - "{model}"
+      - --output-path
+      - "{response_path}"
+    command_stdin: prompt
+    command_env:
+      EAIR_ROOT: "{eair_root}"
+      FML_REPO_DIR: "{repo_dir}"
+      FML_TARGET_FILES: "{target_files}"
+      FML_TARGET_FILES_JSON: "{target_files_json}"
+      FML_RESPONSE_PATH: "{response_path}"
+      FML_STEP_DIR: "{step_dir}"
+      EAIR_REPO_DIR: "{repo_dir}"
+      EAIR_TARGET_FILES: "{target_files}"
+      EAIR_OUTPUT_PATH: "{response_path}"
+    eair_root: /mnt/sda/shijianwang/efficient-auto-research/mle-bench-agents/efficient-auto-research
+    response_mode: patch
+    require_auth: true
+    use_relay_env: true
+    proxy: ""
+    max_steps: 1
+    command_retry_attempts: 1
+    source_context_max_chars: 300000
+    metric_tolerance: 1.0e-8
+    prompt_suffix: |
+      efficient-auto-research-specific rules:
+      - Use G3 only as a source-editing sub-agent.
+      - Return one focused hypothesis and one unified diff.
+      - Do not start the native search loop, train, validate, test, or create submissions.

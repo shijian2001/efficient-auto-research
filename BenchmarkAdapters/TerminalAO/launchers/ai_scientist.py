@@ -12,6 +12,14 @@ from aisci_agent_runtime.shell_interface import ShellInterface
 from aisci_agent_runtime.subagents.base import SubagentConfig, SubagentStatus
 from aisci_agent_runtime.subagents.terminal_task import TerminalTaskSubagent
 
+from ...protocol import write_json_exclusive
+from .model_config import (
+    max_output_tokens,
+    outer_model_parameters,
+    request_timeout_seconds,
+    retry_policy,
+)
+
 
 def run_native_loop(
     *,
@@ -24,17 +32,31 @@ def run_native_loop(
     output_dir.mkdir(parents=True, exist_ok=True)
     if (output_dir / "native-result.json").exists():
         raise RuntimeError(f"refusing to overwrite AiScientist result: {output_dir}")
+    model_parameters = outer_model_parameters()
+    llm_options: dict[str, object] = {}
+    output_tokens = max_output_tokens(model_parameters)
+    if output_tokens is not None:
+        llm_options["max_tokens"] = output_tokens
+    if model_parameters.get("temperature") is not None:
+        llm_options["temperature"] = float(model_parameters["temperature"])
+    if model_parameters.get("reasoning_effort") is not None:
+        llm_options["reasoning_effort"] = str(model_parameters["reasoning_effort"])
+    if model_parameters.get("context_window") is not None:
+        llm_options["context_window"] = int(model_parameters["context_window"])
+    request_timeout = request_timeout_seconds()
+    if request_timeout is not None:
+        llm_options["request_timeout"] = request_timeout
+    retry_budget = retry_policy().get("retry_budget_seconds")
+    if retry_budget is not None:
+        llm_options["retry_budget"] = float(retry_budget)
     llm = create_llm_client(
         LLMConfig(
             provider="openai",
             model=model,
-            max_tokens=65536,
             api_key=os.environ.get("OPENAI_API_KEY"),
             base_url=os.environ.get("OPENAI_BASE_URL"),
-            temperature=1.0,
             api_mode="completions",
-            reasoning_effort="high",
-            context_window=256000,
+            **llm_options,
         )
     )
     subagent = TerminalTaskSubagent(
@@ -63,9 +85,7 @@ def run_native_loop(
         "token_usage": result.token_usage,
         "log_path": result.log_path,
     }
-    (output_dir / "native-result.json").write_text(
-        json.dumps(payload, sort_keys=True, indent=2) + "\n", encoding="utf-8"
-    )
+    write_json_exclusive(output_dir / "native-result.json", payload)
     if result.status not in {SubagentStatus.COMPLETED, SubagentStatus.TIMEOUT}:
         raise RuntimeError(f"AiScientist native loop ended with {result.status.value}")
     return payload

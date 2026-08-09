@@ -1,0 +1,28 @@
+{
+  "dataset": "kjj0/fineweb10B-gpt2",
+  "files": {
+    "fineweb10B/fineweb_train_000001.bin": "771fa4a99b9fe0946ffb6e848b4ba5c6a9b0fe87860ebf03bc2c1c7e45f8178e",
+    "fineweb10B/fineweb_train_000002.bin": "d4ba8d2d740905a836a4222d2aff01750560e7d49a51a745a1b3235520aec2cd",
+    "fineweb10B/fineweb_train_000003.bin": "f70fa272369730fd9e39f1848bfe4daa3289b6e490c1e7762777f00ea8b66246",
+    "fineweb10B/fineweb_train_000004.bin": "d8d88850f89fe2030e866380e90d544167467d407080403b830b903543925835",
+    "fineweb10B/fineweb_train_000005.bin": "36cef3fc41863eb6731b41e986edde38e368853ee6deb87b928990bf445a119c",
+    "fineweb10B/fineweb_train_000006.bin": "d80e5b209983e636655fc738fdf281f0132f0298bf4c0848f7e7a6bea6ca06f0",
+    "fineweb10B/fineweb_train_000007.bin": "fa9f94dce61686b5467bc6cd3078424203db23ac254d804a6d8d5d440afc1e11",
+    "fineweb10B/fineweb_train_000008.bin": "308e6937af5d78b7489a8aac3a3951dced5b46103e613f8bc4eb543f5092526c",
+    "fineweb10B/fineweb_train_000009.bin": "1635300891634346ecff3a78d6e489a69c647885f0dcd249fe3eb76fac683458",
+    "fineweb10B/fineweb_train_000010.bin": "72e88f66104dacca163eeb3a00fe40a45a821d2ecd4fb9ce343808996e5d2f5e",
+    "fineweb10B/fineweb_train_000011.bin": "99edff412654ca6e06d4b3ca563acd8937ee6042f49d009526b8f1074f4d7300",
+    "fineweb10B/fineweb_train_000012.bin": "92a2dc78e3971ac2a36ef3e9f19c92533bc35ef2dd735bb6759e7b864e301084",
+    "fineweb10B/fineweb_train_000013.bin": "6cc3884bf19a2d9b4a12d52e4861276da2e3c6614ce97e6bfa0769d701f7a4c5",
+    "fineweb10B/fineweb_train_000014.bin": "6bc06a838d5a258fb51a3c2a3d14fd784f83b173f408d8d2d3f85b3290094a96",
+    "fineweb10B/fineweb_train_000015.bin": "09ad252e5d641862f89c31e4f0fa9559933d3e2bc6f657fc05f63166c2d74741",
+    "fineweb10B/fineweb_train_000016.bin": "56e97975654bb7a1f08f1397dd7894146dd7f8c36bc9fdd71da9675c43ab9a85",
+    "fineweb10B/fineweb_train_000017.bin": "a51e60d3f9fce16a9dbcb20e5333e1c8e379acf3a703e63b1fecfef49aa17458",
+    "fineweb10B/fineweb_train_000018.bin": "8a35ee9b00834e085e20383711d1fa13efe9d05d3d20161cebd60d73ac935fe9",
+    "fineweb10B/fineweb_train_000019.bin": "e4c82c17c1805a8d946580bb09f10575add3fb56dc3305729d75eae083fa2856",
+    "fineweb10B/fineweb_train_000020.bin": "bbdb7866974ce4389c888fce7394a2c05e71cb6a0f1ada2e2a37520a03302b6c",
+    "fineweb10B/fineweb_val_000000.bin": "5b95c8e0966f0861685b307b23dc5ae42b228ef74b28cb499784ae021f201640"
+  },
+  "manifest_digest": "589c47454114ee5b3760df3ab6ef17288a98fe0d823e0f0ea716c497b72f95e5",
+  "scope": "20 official FineWeb training shards plus the fixed validation shard"
+}

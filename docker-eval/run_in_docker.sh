@@ -11,7 +11,7 @@
 #   - 路径一致挂载（容器内路径 == 宿主路径），避免 pip editable 包路径错位
 #
 #   - LLM 走本地转发代理 (llm_relay_proxy.py)，agent 代码保持纯上游零侵入：
-#       agent → http://127.0.0.1:$PROXY_PORT/v1 → relay (gpt-5.5)
+#       agent → http://127.0.0.1:$PROXY_PORT/v1 → explicitly configured relay/model track
 #     模型重写/reasoning_effort/参数清洗/重试/非流式化/tool兜底/token记录 全在代理内。
 #     端口按 GPU_ID 错开 (host 网络下多容器共享网络栈，不能撞)。
 #
@@ -115,7 +115,11 @@ ROOT=${HOST_ROOT:-$(dirname "$EAR")}
 ALIGNED_KNOWLEDGE_ROOT=${ALIGNED_KNOWLEDGE_ROOT:-${EAR}/ear-worktrees/g3-mlevolve-knowledge-aligned/configs/mlevolve_coldstart}
 
 # --- LLM 上游 (代理转发目标) ---
-UPSTREAM_BASE_URL=${UPSTREAM_BASE_URL:-${LLM_BASE_URL:-https://relay.shuai-ederson-clow.xyz/v1}}
+UPSTREAM_BASE_URL=${UPSTREAM_BASE_URL:-${LLM_BASE_URL:-}}
+if [ -z "$UPSTREAM_BASE_URL" ]; then
+  echo "缺少显式 UPSTREAM_BASE_URL" >&2
+  exit 2
+fi
 UPSTREAM_API_KEY=${UPSTREAM_API_KEY:-${OPENAI_API_KEY:-}}
 if [ -z "$UPSTREAM_API_KEY" ]; then
   echo "缺少上游 API credential：请设置 UPSTREAM_API_KEY 或 OPENAI_API_KEY" >&2
@@ -124,11 +128,18 @@ fi
 export UPSTREAM_API_KEY
 # Only the host relay receives this credential. Agent containers receive the
 # literal placeholder `proxy` below.
-MODEL=${MODEL:-gpt-5.5}
-LLM_REASONING_EFFORT=${LLM_REASONING_EFFORT:-${OPENAI_REASONING_EFFORT:-high}}
-LLM_TEMPERATURE=${LLM_TEMPERATURE:-1.0}
+MODEL=${MODEL:-}
+if [ -z "$MODEL" ]; then
+  echo "缺少显式 MODEL" >&2
+  exit 2
+fi
+LLM_FORCE_PARAMETERS_JSON=${LLM_FORCE_PARAMETERS_JSON:-}
+if [ -z "$LLM_FORCE_PARAMETERS_JSON" ]; then
+  echo "缺少显式 LLM_FORCE_PARAMETERS_JSON" >&2
+  exit 2
+fi
 LLM_UPSTREAM_TIMEOUT=${LLM_UPSTREAM_TIMEOUT:-}   # 空 = 不限
-LLM_MAX_RETRIES=${LLM_MAX_RETRIES:-20}
+LLM_MAX_RETRIES=${LLM_MAX_RETRIES:-0}
 
 # --- 本地转发代理 ---
 PROXY_PORT=$((6200 + GPU_ID))
@@ -148,9 +159,9 @@ case "$MLE_BENCH_DATA_ROOT" in
 esac
 DATA=${MLE_BENCH_DATA_ROOT}/${COMP}/prepared/public
 test -d "$DATA" || { echo "Missing public MLE-Bench data: $DATA" >&2; exit 95; }
-HF_CACHE_HOST=${HF_CACHE_HOST:-${EAR}/cache/huggingface}
-MLE_CACHE_HOST=${MLE_CACHE_HOST:-${HOME}/.cache/mle-bench}
-TOKEN_LOG_DIR=${EAR}/run-logs/${RUN_TAG}_token_usage
+HF_CACHE_HOST=${HF_CACHE_HOST:-${MLE_RUN_ROOT}/cache/huggingface}
+MLE_CACHE_HOST=${MLE_CACHE_HOST:-${MLE_RUN_ROOT}/cache/mle-bench}
+TOKEN_LOG_DIR=${MLE_RUN_ROOT}/relay-telemetry
 TOKEN_LOG_PATH=${TOKEN_LOG_DIR}/${AGENT}_${COMP}_gpu${GPU_ID}.jsonl
 mkdir -p "$TOKEN_LOG_DIR"
 mkdir -p "$HF_CACHE_HOST" "$MLE_CACHE_HOST"
@@ -209,7 +220,7 @@ case "$CLASH_PROXY" in
 esac
 UPSTREAM_BASE_URL=$UPSTREAM_BASE_URL UPSTREAM_API_KEY=$UPSTREAM_API_KEY \
 LLM_UPSTREAM_PROXY=$LLM_UPSTREAM_PROXY \
-LLM_FORCE_MODEL=$MODEL LLM_REASONING_EFFORT=$LLM_REASONING_EFFORT LLM_TEMPERATURE=$LLM_TEMPERATURE \
+LLM_FORCE_MODEL=$MODEL LLM_FORCE_PARAMETERS_JSON=$LLM_FORCE_PARAMETERS_JSON \
 LLM_UPSTREAM_TIMEOUT=$LLM_UPSTREAM_TIMEOUT LLM_MAX_RETRIES=$LLM_MAX_RETRIES \
 LLM_TOKEN_LOG_PATH=$TOKEN_LOG_PATH LLM_PROXY_AGENT_NAME=$AGENT \
 LLM_PROXY_API_KEY=$RELAY_API_KEY \
@@ -338,7 +349,7 @@ case "$AGENT" in
     LAUNCH_MANIFEST=$EAR_OUTPUT_DIR/launch_manifest.json
     LAUNCH_MANIFEST_TMP=$(mktemp "${LAUNCH_MANIFEST}.tmp.XXXXXX")
     MANIFEST_COMP="$COMP" MANIFEST_RUN_ID="$RUN_TAG" MANIFEST_SEED="$SEED" \
-    MANIFEST_MODEL="$MODEL" MANIFEST_REASONING_EFFORT="$LLM_REASONING_EFFORT" \
+    MANIFEST_MODEL="$MODEL" MANIFEST_MODEL_PARAMETERS="$LLM_FORCE_PARAMETERS_JSON" \
     MANIFEST_STEPS="$STEPS" MANIFEST_TIMEOUT="$TIMEOUT" \
     MANIFEST_GPU="$GPU_ID" MANIFEST_GPU_UUID="$GPU_UUID" \
     MANIFEST_GPU_MINOR="$GPU_MINOR" MANIFEST_CPUSET="$CPUSET" \
@@ -367,8 +378,7 @@ payload = {
     "run_id": os.environ["MANIFEST_RUN_ID"],
     "seed": int(os.environ["MANIFEST_SEED"]),
     "model": os.environ["MANIFEST_MODEL"],
-    "temperature": 1.0,
-    "reasoning_effort": os.environ["MANIFEST_REASONING_EFFORT"],
+    "model_parameters": json.loads(os.environ["MANIFEST_MODEL_PARAMETERS"]),
     "steps": int(os.environ["MANIFEST_STEPS"]),
     "timeout_seconds": int(os.environ["MANIFEST_TIMEOUT"]),
     "hardware": {
@@ -721,7 +731,7 @@ $INNER_CMD"
 esac
 
 echo "=== 启动容器 $CONTAINER_NAME (GPU index=$GPU_ID, uuid=$GPU_UUID, minor=$GPU_MINOR, steps=$STEPS, timeout=${TIMEOUT}s, cpuset=${CPUSET}, grading_port=$GRADING_PORT) ==="
-echo "=== LLM 代理: 127.0.0.1:$PROXY_PORT → $UPSTREAM_BASE_URL  model: $MODEL  effort: $LLM_REASONING_EFFORT  retries: $LLM_MAX_RETRIES ==="
+echo "=== LLM 代理: 127.0.0.1:$PROXY_PORT → $UPSTREAM_BASE_URL  model: $MODEL  retries: $LLM_MAX_RETRIES ==="
 echo "=== LLM token log: $TOKEN_LOG_PATH ==="
 
 DOCKER_RUN_FLAGS=(--rm --name "$CONTAINER_NAME")

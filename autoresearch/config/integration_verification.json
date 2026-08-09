@@ -1,0 +1,32 @@
+{
+  "benchmark": "autoresearch-architecture-design",
+  "environment": {
+    "kernels": "0.12.1",
+    "numpy": "2.2.6",
+    "pyarrow": "23.0.1",
+    "python": "3.10.20",
+    "python_header_exists": true,
+    "rustbpe": "0.1.0",
+    "torch": "2.9.1+cu128",
+    "triton": "3.5.1",
+    "uv_locked": true
+  },
+  "historical_smoke": {
+    "data_scope": "one training shard plus the fixed validation shard",
+    "peak_vram_mb": 45060.2,
+    "status": "completed",
+    "total_seconds": 337.9,
+    "training_seconds": 300.2,
+    "val_bpb": 1.111651
+  },
+  "observed_at": "2026-08-07T12:17:05.144383+00:00",
+  "runtime": {
+    "cuda_available": true,
+    "cuda_device_count": 4,
+    "prepared_parquet_shards": 2,
+    "tokenizer_complete": true
+  },
+  "scope": "installation and deployment smoke only; not an Arbor-paper reproduction",
+  "source_commit": "228791fb499afffb54b46200aca536f79142f117",
+  "source_mismatches": []
+}

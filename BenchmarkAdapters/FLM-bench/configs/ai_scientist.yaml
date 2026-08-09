@@ -1,0 +1,28 @@
+agent:
+  ai_scientist:
+    profile: smoke
+    # Set AISCI_FML_COMMAND to a source-edit command that reads the prompt
+    # from stdin and returns a unified diff.
+    command_env_var: AISCI_FML_COMMAND
+    command_args: []
+    command_stdin: prompt
+    command_env:
+      FML_REPO_DIR: "{repo_dir}"
+      FML_TARGET_FILES: "{target_files}"
+      FML_TARGET_FILES_JSON: "{target_files_json}"
+      FML_RESPONSE_PATH: "{response_path}"
+      FML_STEP_DIR: "{step_dir}"
+      AISCI_REPO_DIR: "{repo_dir}"
+      AISCI_TARGET_FILES: "{target_files}"
+      AISCI_OUTPUT_PATH: "{response_path}"
+    response_mode: patch
+    require_auth: true
+    use_relay_env: true
+    proxy: ""
+    max_steps: 1
+    command_retry_attempts: 1
+    metric_tolerance: 1.0e-8
+    prompt_suffix: |
+      AiScientist-specific rules:
+      - Return one focused hypothesis and one unified diff.
+      - Leave validation and final test to FML-bench.

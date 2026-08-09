@@ -8,6 +8,19 @@ and evidence requirements for all seven Agents on MLE-Bench Lite and
 Terminal-Bench 36/53 AO are defined in
 `BenchmarkAdapters/docs/SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md`.
 
+The target protocol, native-Agent adaptation plan, score validity rules,
+held-out evaluation design, and Definition of Done for all seven Agents on
+Autoresearch Architecture Design are defined in
+`BenchmarkAdapters/docs/AUTORESEARCH_SEVEN_AGENT_ADAPTER_PLAN.md`. The protocol,
+shared Benchmark adapter, seven native Agent bridges, held-out evaluator, and
+aggregation commands are implemented; real scored campaigns remain separate
+readiness gates.
+
+The two-layer modded-NanoGPT Track 3 Optimizer Design implementation, frozen
+upstream identity, baseline promotion procedure, and formal comparison rules are
+documented in
+`BenchmarkAdapters/docs/OPTIMIZER_DESIGN_SEVEN_AGENT_ADAPTER.md`.
+
 The important boundary is benchmark-specific:
 
 - `BenchmarkAdapters/MLEBenchLite/adapter.py` builds MLE-Bench Lite workspaces
@@ -16,6 +29,12 @@ The important boundary is benchmark-specific:
   selection, final freeze, and one-shot 53-test evaluation.
 - `BenchmarkAdapters/TerminalBench/adapter.py` is a direct-solving smoke path
   and is not comparable with Terminal AO.
+- `BenchmarkAdapters/AutoResearch/` provides reusable autonomous optimization
+  launchers; `BenchmarkAdapters/OptimizerDesign/` specializes that architecture
+  with Benchmark-owned optimizer policy and scoring.
+- `BenchmarkAdapters/FMLBench/` is the first-class pinned-upstream FML formal
+  runner and task-record replay aggregate. `BenchmarkAdapters/FLM-bench/` is a
+  retained non-formal smoke compatibility path only.
 - `terminal-bench-2/agent_adapters/shared/harbor_shell.py` is the common
   synchronous Harbor environment bridge used by native host-side Agent loops.
 

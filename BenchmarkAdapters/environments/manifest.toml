@@ -8,6 +8,18 @@ python = "3.11"
 project = "terminal-bench-2"
 python = "3.12"
 
+[standalone.autoresearch]
+kind = "uv_project"
+project = "autoresearch"
+python = "3.10"
+managed_python = true
+
+[standalone.optimizer-design]
+kind = "uv_project"
+project = "optimizer-design"
+python = "3.10"
+managed_python = true
+
 [agents.ear]
 kind = "uv_project"
 project = "mle-bench-agents/efficient-auto-research"
@@ -62,3 +74,95 @@ python = "3.11"
 kind = "uv_project"
 project = "BenchmarkAdapters/environments/mle/ear"
 python = "3.11"
+
+[profiles."autoresearch.ear"]
+kind = "uv_project"
+project = "BenchmarkAdapters/environments/agents/ear-autoresearch"
+python = "3.12"
+index = "https://pypi.tuna.tsinghua.edu.cn/simple"
+source_path = "mle-bench-agents/efficient-auto-research"
+source_snapshot = true
+
+[profiles."autoresearch.mlevolve"]
+kind = "uv_project"
+project = "BenchmarkAdapters/environments/agents/mlevolve-autoresearch"
+python = "3.11"
+index = "https://pypi.tuna.tsinghua.edu.cn/simple"
+source_path = "baselines/MLEvolve"
+source_snapshot = true
+
+[profiles."autoresearch.arbor"]
+kind = "uv_project"
+project = "BenchmarkAdapters/environments/terminal/arbor"
+python = "3.12"
+source_path = "baselines/Arbor"
+source_snapshot = true
+
+[profiles."autoresearch.codex"]
+kind = "cli"
+command = ["codex", "--version"]
+
+[profiles."autoresearch.claude-code"]
+kind = "cli"
+command = ["claude", "--version"]
+
+[profiles."autoresearch.ml-master-2"]
+kind = "uv_project"
+project = "BenchmarkAdapters/environments/agents/ml-master-2-autoresearch"
+python = "3.11"
+index = "https://pypi.tuna.tsinghua.edu.cn/simple"
+source_path = "baselines/EvoMaster"
+source_snapshot = true
+
+[profiles."autoresearch.ai-scientist"]
+kind = "uv_project"
+project = "BenchmarkAdapters/environments/terminal/ai-scientist"
+python = "3.12"
+source_path = "baselines/AiScientist"
+source_snapshot = true
+
+[profiles."optimizer-design.ear"]
+kind = "uv_project"
+project = "BenchmarkAdapters/environments/agents/ear-autoresearch"
+python = "3.12"
+index = "https://pypi.tuna.tsinghua.edu.cn/simple"
+source_path = "mle-bench-agents/efficient-auto-research"
+source_snapshot = true
+
+[profiles."optimizer-design.mlevolve"]
+kind = "uv_project"
+project = "BenchmarkAdapters/environments/agents/mlevolve-autoresearch"
+python = "3.11"
+index = "https://pypi.tuna.tsinghua.edu.cn/simple"
+source_path = "baselines/MLEvolve"
+source_snapshot = true
+
+[profiles."optimizer-design.arbor"]
+kind = "uv_project"
+project = "BenchmarkAdapters/environments/terminal/arbor"
+python = "3.12"
+source_path = "baselines/Arbor"
+source_snapshot = true
+
+[profiles."optimizer-design.codex"]
+kind = "cli"
+command = ["codex", "--version"]
+
+[profiles."optimizer-design.claude-code"]
+kind = "cli"
+command = ["claude", "--version"]
+
+[profiles."optimizer-design.ml-master-2"]
+kind = "uv_project"
+project = "BenchmarkAdapters/environments/agents/ml-master-2-autoresearch"
+python = "3.11"
+index = "https://pypi.tuna.tsinghua.edu.cn/simple"
+source_path = "baselines/EvoMaster"
+source_snapshot = true
+
+[profiles."optimizer-design.ai-scientist"]
+kind = "uv_project"
+project = "BenchmarkAdapters/environments/terminal/ai-scientist"
+python = "3.12"
+source_path = "baselines/AiScientist"
+source_snapshot = true

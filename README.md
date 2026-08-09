@@ -243,6 +243,19 @@ Adapter 和可复现的 UV 配置放在同一个集成树中。Adapter 的唯一
 `MLEBenchLite/` 与 `TerminalBench/`，公共进程、Relay、Agent registry 和 CLI
 位于其根目录。
 
+此外，`autoresearch/` 保存了 Architecture Design Benchmark 的固定上游源码快照
+`karpathy/autoresearch@228791f`、原始 `uv.lock` 和本项目部署脚本。共享 Benchmark
+Adapter、七 Agent 原生 bridge、held-out evaluator 和聚合命令已经实现；真实 smoke 与
+`7×3×48h` 正式 campaign 仍是独立验收门槛，因此不应把“命令就绪”写成“Arbor 论文
+48 小时协议已复现”。架构、评分有效性、held-out 复测、测试矩阵和完成条件见
+[`AUTORESEARCH_SEVEN_AGENT_ADAPTER_PLAN.md`](BenchmarkAdapters/docs/AUTORESEARCH_SEVEN_AGENT_ADAPTER_PLAN.md)。
+
+`optimizer-design/` 进一步复用上述架构，冻结
+`modded-nanogpt@bc1b58e` 的 Track 3 Optimizer Design，并采用“Benchmark 公共层 + 七个
+Agent 小 Adapter”的两层结构。当前命令和 contract 已就绪，但正式运行仍被双 held-out
+baseline 晋级 gate 阻断；详见
+[`OPTIMIZER_DESIGN_SEVEN_AGENT_ADAPTER.md`](BenchmarkAdapters/docs/OPTIMIZER_DESIGN_SEVEN_AGENT_ADAPTER.md)。
+
 Terminal-Bench 现在统一使用标准 Harbor `0.20.0` per-task 协议和本地 89 题数据集，
 不再使用项目自定义 AO evaluator。Codex、Claude Code 使用 Harbor 内置 Agent；Arbor
 复用原生 `arbor.core.agent.Agent.run`，AiScientist 复用原生 `Subagent.run`，两者只
@@ -258,6 +271,7 @@ Harbor workspace。这里不会把“可以 import”描述成“已经完成适
 
 ```bash
 bash BenchmarkAdapters/environments/install.sh --list
+bash BenchmarkAdapters/environments/install.sh autoresearch
 bash BenchmarkAdapters/environments/install.sh all
 ```
 

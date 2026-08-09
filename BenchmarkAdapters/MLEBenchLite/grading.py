@@ -74,6 +74,17 @@ def grade_submission(
             f"{output[-4000:]}"
         )
     report = json.loads(report_path.read_text(encoding="utf-8"))
+    expected_report_digest = report.pop("grader_report_digest", None)
+    actual_report_digest = __import__("hashlib").sha256(
+        __import__("BenchmarkAdapters.protocol", fromlist=["canonical_json"]).canonical_json(report)
+    ).hexdigest()
+    report["grader_report_digest"] = expected_report_digest
+    if (
+        expected_report_digest != actual_report_digest
+        or report.get("submission_sha256") != sha256_file(submission)
+        or report.get("competition_id") != competition_id
+    ):
+        raise AdapterError("official MLE grader report is not bound to the submitted artifact")
     grade = OfficialGrade(report_path, report, sha256_file(GRADER_WORKER))
     if completed.returncode != 0 or not grade.valid:
         raise AdapterError(

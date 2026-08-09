@@ -14,7 +14,7 @@ import hashlib
 import tempfile
 import stat
 from decimal import Decimal, InvalidOperation
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from dataclasses import replace
 from pathlib import Path
 
@@ -26,9 +26,10 @@ from ..contracts import (
     require_directory,
     require_file,
 )
-from ..process import DEFAULT_PROXY, DEFAULT_RELAY_BASE_URL, relay_client_env, run_command
+from ..process import DEFAULT_PROXY, relay_client_env, run_command
 from ..relay import RelayProcess
 from ..registry import AGENTS, ROOT
+from ..task_specs import task_spec_digest, task_spec_text
 
 
 @dataclass(frozen=True)
@@ -40,8 +41,8 @@ class MleLiteRequest:
     gpu_id: int = 0
     steps: int = 1
     timeout_seconds: int = 900
-    model: str = "gpt-5.5"
-    upstream_base_url: str = DEFAULT_RELAY_BASE_URL
+    model: str | None = None
+    upstream_base_url: str = ""
     proxy: str = DEFAULT_PROXY
     run_tag: str | None = None
     instruction: str | None = None
@@ -51,6 +52,9 @@ class MleLiteRequest:
     dry_run: bool = False
     relay_socket: Path | None = None
     seed: int = 0
+    model_parameters: dict[str, object] = field(default_factory=dict)
+    request_timeout_seconds: int | None = None
+    retry_policy: dict[str, object] = field(default_factory=dict)
 
 
 @dataclass(frozen=True)
@@ -147,6 +151,168 @@ def _required_executable(name: str) -> Path:
     if executable is None:
         raise AdapterError(f"required executable is not installed: {name}")
     return Path(executable).resolve()
+
+
+def _minimal_host_environment() -> dict[str, str]:
+    allowed = {
+        "DOCKER_HOST",
+        "LANG",
+        "LC_ALL",
+        "PATH",
+        "SSL_CERT_DIR",
+        "SSL_CERT_FILE",
+        "XDG_RUNTIME_DIR",
+    }
+    environment = {key: value for key, value in os.environ.items() if key in allowed}
+    environment.setdefault("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin")
+    environment.setdefault("LANG", "C.UTF-8")
+    environment.setdefault("LC_ALL", "C.UTF-8")
+    return environment
+
+
+def _host_relay_environment(request: MleLiteRequest) -> dict[str, str]:
+    environment = _minimal_host_environment()
+    credential = os.environ.get("UPSTREAM_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    if not credential and not request.dry_run:
+        raise AdapterError("MLE formal launcher requires UPSTREAM_API_KEY or OPENAI_API_KEY")
+    if credential:
+        environment["UPSTREAM_API_KEY"] = credential
+    return environment
+
+
+def _mount_parent_directories(argv: list[str], path: Path, created: set[Path]) -> None:
+    current = Path("/")
+    for part in path.resolve().parent.parts[1:]:
+        current /= part
+        if current not in created:
+            argv.extend(["--dir", str(current)])
+            created.add(current)
+
+
+def _native_host_sandbox_argv(
+    *,
+    request: MleLiteRequest,
+    wrapper_argv: tuple[str, ...],
+    source_root: Path,
+    public_dir: Path,
+) -> tuple[str, ...]:
+    if request.relay_socket is None:
+        raise AdapterError("native MLE sandbox requires a host-owned Unix relay socket")
+    bwrap = _required_executable("bwrap")
+    sandbox_runner = require_file(
+        ROOT / "BenchmarkAdapters/sandbox_runner.py", "sandbox network runner"
+    )
+    relay_forwarder = require_file(
+        ROOT / "BenchmarkAdapters/unix_relay_forwarder.py", "sandbox relay forwarder"
+    )
+    adapter_venv = require_directory(ROOT / "BenchmarkAdapters/.venv", "adapter runtime")
+    output_dir = request.output_dir.resolve()
+    if not request.dry_run:
+        for name in ("home", "tmp", "cache", "config"):
+            (output_dir / name).mkdir(parents=True, exist_ok=True)
+    mounts = (
+        (source_root.resolve(), False),
+        (public_dir.resolve(), False),
+        (output_dir, True),
+        ((ROOT / "BenchmarkAdapters").resolve(), False),
+        (adapter_venv.resolve(), False),
+    )
+    argv = [
+        str(adapter_venv / "bin/python"),
+        str(sandbox_runner),
+        "--",
+        str(bwrap),
+        "--die-with-parent",
+        "--new-session",
+        "--unshare-all",
+        "--ro-bind",
+        "/usr",
+        "/usr",
+        "--ro-bind",
+        "/bin",
+        "/bin",
+        "--ro-bind",
+        "/lib",
+        "/lib",
+        "--ro-bind",
+        "/lib64",
+        "/lib64",
+        "--ro-bind",
+        "/etc/ssl",
+        "/etc/ssl",
+        "--ro-bind",
+        "/etc/hosts",
+        "/etc/hosts",
+        "--ro-bind",
+        "/etc/passwd",
+        "/etc/passwd",
+        "--ro-bind",
+        "/etc/group",
+        "/etc/group",
+        "--proc",
+        "/proc",
+        "--dev",
+        "/dev",
+    ]
+    created: set[Path] = set()
+    for path, writable in mounts:
+        _mount_parent_directories(argv, path, created)
+        argv.extend(["--bind" if writable else "--ro-bind", str(path), str(path)])
+    runtime_paths: set[Path] = set()
+    for value in wrapper_argv:
+        executable = Path(value)
+        if not executable.is_absolute() or not executable.is_file():
+            continue
+        resolved = executable.resolve()
+        runtime_root = resolved.parents[1]
+        if runtime_root in runtime_paths or runtime_root.is_relative_to(source_root.resolve()):
+            continue
+        _mount_parent_directories(argv, runtime_root, created)
+        argv.extend(["--ro-bind", str(runtime_root), str(runtime_root)])
+        runtime_paths.add(runtime_root)
+    relay_socket = request.relay_socket.resolve()
+    _mount_parent_directories(argv, relay_socket, created)
+    argv.extend(["--ro-bind", str(relay_socket), str(relay_socket)])
+    minor_result = subprocess.run(
+        ["nvidia-smi", "-q", "-i", str(request.gpu_id)],
+        capture_output=True,
+        text=True,
+        timeout=30,
+        check=False,
+    )
+    minor = next(
+        (
+            line.split(":", 1)[1].strip()
+            for line in minor_result.stdout.splitlines()
+            if "Minor Number" in line and ":" in line
+        ),
+        "",
+    )
+    if minor_result.returncode or not minor.isdigit():
+        raise AdapterError(f"could not resolve GPU device minor for GPU {request.gpu_id}")
+    for device in (
+        Path(f"/dev/nvidia{minor}"),
+        Path("/dev/nvidiactl"),
+        Path("/dev/nvidia-uvm"),
+        Path("/dev/nvidia-uvm-tools"),
+    ):
+        if device.exists():
+            argv.extend(["--dev-bind", str(device), str(device)])
+    argv.extend(
+        [
+            "--chdir",
+            str(source_root.resolve()),
+            str(adapter_venv / "bin/python"),
+            str(relay_forwarder),
+            "--socket",
+            str(relay_socket),
+            "--port",
+            "6200",
+            "--",
+            *wrapper_argv,
+        ]
+    )
+    return tuple(argv)
 
 
 def _workspace_sandbox_argv(
@@ -402,19 +568,8 @@ def prepare_workspace(request: MleLiteRequest) -> MleLiteWorkspace:
     shutil.copy2(description, workspace_dir / "description.md")
     sample = _copy_sample_submission(public_dir, workspace_dir / "sample_submission.csv")
     (workspace_dir / "AGENT_TASK.md").write_text(
-        textwrap.dedent(
-            f"""
-            # MLE-Bench Lite task
-
-            Competition: `{request.competition_id}`
-
-            Read `description.md` and the public files below `input/`. Do not search for
-            private labels or any path outside this workspace. Build a reproducible public-data
-            solution and leave a regular file named `submission.csv` in this directory.
-            `sample_submission.csv` is format guidance only; it is not a score.
-            """
-        ).strip()
-        + "\n",
+        task_spec_text("mle-bench-lite")
+        + f"\n\nCurrent competition: `{request.competition_id}`\n",
         encoding="utf-8",
     )
     return MleLiteWorkspace(
@@ -427,6 +582,8 @@ def prepare_workspace(request: MleLiteRequest) -> MleLiteWorkspace:
 
 
 def _docker_command(request: MleLiteRequest) -> CommandSpec:
+    if not request.model:
+        raise AdapterError("MLE launcher requires an explicit model")
     agent_name = NATIVE_DOCKER_NAMES[request.agent]
     run_tag = request.run_tag or f"adapter_{request.agent}_{request.competition_id}"
     return CommandSpec(
@@ -440,12 +597,26 @@ def _docker_command(request: MleLiteRequest) -> CommandSpec:
         ),
         cwd=ROOT / "docker-eval",
         env={
+            **_host_relay_environment(request),
             "MODEL": request.model,
             "RUN_TAG": run_tag,
             "UPSTREAM_BASE_URL": request.upstream_base_url,
             "LLM_UPSTREAM_PROXY": request.proxy,
-            "LLM_REASONING_EFFORT": "high",
-            "LLM_TEMPERATURE": "1.0",
+            "LLM_FORCE_PARAMETERS_JSON": json.dumps(request.model_parameters, sort_keys=True),
+            "LLM_UPSTREAM_TIMEOUT": (
+                ""
+                if request.request_timeout_seconds is None
+                else str(request.request_timeout_seconds)
+            ),
+            "LLM_MAX_RETRIES": str(
+                int(
+                    request.retry_policy.get(
+                        "max_retries",
+                        max(0, int(request.retry_policy.get("max_attempts", 1)) - 1),
+                    )
+                )
+            ),
+            "BENCHMARK_TASK_SPEC_SHA256": task_spec_digest("mle-bench-lite"),
             "ARBOR_OUTPUT_DIR": str(request.output_dir.resolve()),
             "MLE_RUN_ROOT": str(request.output_dir.resolve()),
             "MLE_BENCH_DATA_ROOT": str(request.data_root.resolve()),
@@ -457,6 +628,7 @@ def _docker_command(request: MleLiteRequest) -> CommandSpec:
         },
         timeout_seconds=request.timeout_seconds + 120,
         label=f"{request.agent} MLE-Bench Lite launcher",
+        inherit_env=False,
         artifact_path=request.output_dir.resolve() / "submission.csv",
     )
 
@@ -467,10 +639,9 @@ def _workspace_command(
     *,
     preview: bool = False,
 ) -> CommandSpec:
-    instruction = request.instruction or (
-        "Solve the MLE-Bench Lite competition in this workspace. Read the task description and "
-        "public data, write and run the solution, and leave submission.csv in the current directory."
-    )
+    if not request.model:
+        raise AdapterError("MLE launcher requires an explicit model")
+    instruction = request.instruction or task_spec_text("mle-bench-lite")
     environment = relay_client_env(
         base_url="http://127.0.0.1:6200/v1",
         proxy="",
@@ -563,10 +734,12 @@ def _workspace_command(
 
 
 def _ai_scientist_command(request: MleLiteRequest) -> CommandSpec:
+    if not request.model:
+        raise AdapterError("MLE launcher requires an explicit model")
     public_dir = public_task_dir(request)
-    executable = require_file(
-        AGENTS[request.agent].install_path / ".venv" / "bin" / "aisci",
-        "AiScientist executable",
+    executable_path = AGENTS[request.agent].install_path / ".venv" / "bin" / "aisci"
+    executable = executable_path.resolve() if request.dry_run else require_file(
+        executable_path, "AiScientist executable"
     )
     native_argv = (
             str(executable),
@@ -585,29 +758,56 @@ def _ai_scientist_command(request: MleLiteRequest) -> CommandSpec:
             "--wait",
             "--skip-final-validation",
     )
-    return CommandSpec(
-        argv=(
-            str(ROOT / "BenchmarkAdapters/.venv/bin/python"),
+    wrapper_argv = (
+             str(ROOT / "BenchmarkAdapters/.venv/bin/python"),
             str(Path(__file__).with_name("native_wrappers.py")),
             "ai-scientist",
             "--output-dir",
             str(request.output_dir.resolve()),
             "--",
-            *native_argv,
-        ),
+             *native_argv,
+    )
+    environment = relay_client_env(
+        base_url="http://127.0.0.1:6200/v1",
+        proxy="",
+        model=request.model,
+        include_credentials=False,
+    )
+    environment.update(
+        {
+            "HOME": str(request.output_dir.resolve() / "home"),
+            "OPENAI_API_KEY": "proxy",
+            "ANTHROPIC_API_KEY": "proxy",
+            "TMPDIR": str(request.output_dir.resolve() / "tmp"),
+            "XDG_CACHE_HOME": str(request.output_dir.resolve() / "cache"),
+            "XDG_CONFIG_HOME": str(request.output_dir.resolve() / "config"),
+            "BENCHMARK_TASK_SPEC_SHA256": task_spec_digest("mle-bench-lite"),
+        }
+    )
+    argv = (
+        (str(_required_executable("bwrap")), "<sandbox-options>", *wrapper_argv)
+        if request.dry_run
+        else _native_host_sandbox_argv(
+            request=request,
+            wrapper_argv=wrapper_argv,
+            source_root=AGENTS[request.agent].install_path,
+            public_dir=public_dir,
+        )
+    )
+    return CommandSpec(
+        argv=argv,
         cwd=AGENTS[request.agent].install_path,
-        env=relay_client_env(
-            base_url=request.upstream_base_url,
-            proxy=request.proxy,
-            model=request.model,
-        ),
+        env=environment,
         timeout_seconds=request.timeout_seconds + 120,
         label="AiScientist MLE-Bench Lite adapter",
+        inherit_env=False,
         artifact_path=request.output_dir.resolve() / "submission.csv",
     )
 
 
 def _ml_master_command(request: MleLiteRequest) -> CommandSpec:
+    if not request.model:
+        raise AdapterError("MLE launcher requires an explicit model")
     if request.config_path is None:
         raise AdapterError(
             "ML-Master 2 requires a generated per-run config_path; the upstream example "
@@ -633,14 +833,25 @@ def _ml_master_command(request: MleLiteRequest) -> CommandSpec:
             str(request.output_dir.resolve()),
     )
     environment = relay_client_env(
-        base_url=request.upstream_base_url,
-        proxy=request.proxy,
+        base_url="http://127.0.0.1:6200/v1",
+        proxy="",
         model=request.model,
+        include_credentials=False,
     )
-    environment["ML_MASTER_RUN_TIMEOUT_SECONDS"] = str(request.timeout_seconds)
-    return CommandSpec(
-        argv=(
-            str(ROOT / "BenchmarkAdapters/.venv/bin/python"),
+    environment.update(
+        {
+            "HOME": str(request.output_dir.resolve() / "home"),
+            "OPENAI_API_KEY": "proxy",
+            "ANTHROPIC_API_KEY": "proxy",
+            "ML_MASTER_RUN_TIMEOUT_SECONDS": str(request.timeout_seconds),
+            "TMPDIR": str(request.output_dir.resolve() / "tmp"),
+            "XDG_CACHE_HOME": str(request.output_dir.resolve() / "cache"),
+            "XDG_CONFIG_HOME": str(request.output_dir.resolve() / "config"),
+            "BENCHMARK_TASK_SPEC_SHA256": task_spec_digest("mle-bench-lite"),
+        }
+    )
+    wrapper_argv = (
+             str(ROOT / "BenchmarkAdapters/.venv/bin/python"),
             str(Path(__file__).with_name("native_wrappers.py")),
             "ml-master-2",
             "--output-dir",
@@ -648,12 +859,25 @@ def _ml_master_command(request: MleLiteRequest) -> CommandSpec:
             "--workspace-dir",
             str(workspace_dir),
             "--",
-            *native_argv,
-        ),
+             *native_argv,
+    )
+    argv = (
+        (str(_required_executable("bwrap")), "<sandbox-options>", *wrapper_argv)
+        if request.dry_run
+        else _native_host_sandbox_argv(
+            request=request,
+            wrapper_argv=wrapper_argv,
+            source_root=AGENTS[request.agent].install_path,
+            public_dir=public_task_dir(request),
+        )
+    )
+    return CommandSpec(
+        argv=argv,
         cwd=AGENTS[request.agent].install_path,
         env=environment,
         timeout_seconds=request.timeout_seconds + 120,
         label="ML-Master 2 MLE-Bench Lite adapter",
+        inherit_env=False,
         artifact_path=request.output_dir.resolve() / "submission.csv",
     )
 
@@ -697,7 +921,7 @@ class MleLiteAdapter:
         roots = submission_roots(request)
         previous = _submission_snapshot(*roots)
         forbidden_hashes = _sample_hashes(request)
-        if AGENTS[self.agent].mle_mode == "generic-mle-workspace":
+        if AGENTS[self.agent].mle_mode != "native-docker":
             output_dir = protect_generated_output(request.output_dir, ROOT)
             with tempfile.TemporaryDirectory(prefix="mle-agent-relay-") as temporary:
                 socket_path = Path(temporary) / "relay.sock"
@@ -709,6 +933,9 @@ class MleLiteAdapter:
                     upstream_base_url=request.upstream_base_url,
                     upstream_proxy=request.proxy,
                     model=request.model,
+                    model_parameters=request.model_parameters,
+                    request_timeout_seconds=request.request_timeout_seconds,
+                    retry_policy=request.retry_policy,
                 )
                 with relay:
                     command = self.build_command(replace(request, relay_socket=socket_path))

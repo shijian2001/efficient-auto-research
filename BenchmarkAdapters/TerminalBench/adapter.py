@@ -14,7 +14,7 @@ from ..contracts import (
     protect_generated_output,
     require_directory,
 )
-from ..process import DEFAULT_PROXY, DEFAULT_RELAY_BASE_URL, relay_client_env
+from ..process import DEFAULT_PROXY, relay_client_env
 from ..registry import AGENTS, ROOT
 from ..security import contains_sensitive_name
 
@@ -29,8 +29,8 @@ class HarborTerminalRequest:
     agent: str
     dataset_dir: Path = DEFAULT_DATASET_DIR
     jobs_dir: Path = DEFAULT_JOBS_DIR
-    model: str = "gpt-5.5"
-    upstream_base_url: str = DEFAULT_RELAY_BASE_URL
+    model: str | None = None
+    upstream_base_url: str = ""
     proxy: str = DEFAULT_PROXY
     attempts: int = 1
     concurrency: int = 1
@@ -56,6 +56,8 @@ class HarborTerminalAdapter:
     def build_command(self, request: HarborTerminalRequest) -> CommandSpec:
         if request.agent != self.agent:
             raise AdapterError("request agent does not match adapter agent")
+        if not (request.model or "").strip() or not request.upstream_base_url.strip():
+            raise AdapterError("Terminal direct smoke requires an explicit model and relay URL")
         if request.attempts < 1 or request.concurrency < 1:
             raise AdapterError("attempts and concurrency must be positive")
         if request.agent_concurrency is not None and not (

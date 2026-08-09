@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
+import tempfile
 from dataclasses import asdict, dataclass
 from enum import Enum
 from pathlib import Path
@@ -14,8 +16,11 @@ from .contracts import AdapterError
 
 class BenchmarkMode(str, Enum):
     MLE = "mle"
+    AUTORESEARCH = "autoresearch"
+    OPTIMIZER_DESIGN = "optimizer-design"
     TERMINAL_AO = "terminal-ao"
     TERMINAL_DIRECT_SMOKE = "terminal-direct-smoke"
+    FML = "fml-bench"
 
 
 def canonical_json(payload: Mapping[str, Any]) -> bytes:
@@ -43,7 +48,7 @@ class FormalProtocol:
     asset_digests: Mapping[str, str]
     model: str
     reasoning_effort: str
-    temperature: float
+    temperature: float | None
     wall_clock_seconds: int
     seeds: tuple[int, ...]
     retry_policy: str
@@ -52,8 +57,11 @@ class FormalProtocol:
     aggregation_policy: str
     hardware_policy: str
     formal: bool = True
+    schema_version: int = 1
 
     def validate(self) -> None:
+        if self.schema_version not in {1, 2}:
+            raise AdapterError("unsupported formal protocol schema")
         if not self.protocol_id.strip():
             raise AdapterError("protocol_id must not be empty")
         if not self.task_ids or len(set(self.task_ids)) != len(self.task_ids):
@@ -67,8 +75,8 @@ class FormalProtocol:
             raise AdapterError("protocol requires a model and positive wall-clock budget")
         if not self.seeds or len(set(self.seeds)) != len(self.seeds):
             raise AdapterError("protocol seeds must be non-empty and unique")
-        if self.formal and len(self.seeds) < 3:
-            raise AdapterError("formal protocol requires at least three seeds")
+        if self.formal and len(self.seeds) not in {1, 3}:
+            raise AdapterError("formal protocol outer repetitions must be 1 or 3")
         required_policies = (
             self.retry_policy,
             self.failure_policy,
@@ -83,6 +91,8 @@ class FormalProtocol:
 
     def to_dict(self) -> dict[str, Any]:
         payload = asdict(self)
+        if self.schema_version == 1:
+            payload.pop("schema_version")
         payload["mode"] = self.mode.value
         payload["task_ids"] = list(self.task_ids)
         payload["seeds"] = list(self.seeds)
@@ -110,7 +120,9 @@ class FormalProtocol:
             asset_digests=dict(payload["asset_digests"]),
             model=str(payload["model"]),
             reasoning_effort=str(payload["reasoning_effort"]),
-            temperature=float(payload["temperature"]),
+            temperature=(
+                None if payload.get("temperature") is None else float(payload["temperature"])
+            ),
             wall_clock_seconds=int(payload["wall_clock_seconds"]),
             seeds=tuple(int(seed) for seed in payload["seeds"]),
             retry_policy=str(payload["retry_policy"]),
@@ -119,6 +131,7 @@ class FormalProtocol:
             aggregation_policy=str(payload["aggregation_policy"]),
             hardware_policy=str(payload["hardware_policy"]),
             formal=bool(payload.get("formal", True)),
+            schema_version=int(payload.get("schema_version", 1)),
         )
         protocol.validate()
         if expected != protocol.digest:
@@ -130,12 +143,33 @@ def write_json_exclusive(path: Path, payload: Mapping[str, Any]) -> None:
     path = path.resolve()
     path.parent.mkdir(parents=True, exist_ok=True)
     serialized = json.dumps(payload, ensure_ascii=False, sort_keys=True, indent=2) + "\n"
+    temporary_path: Path | None = None
     try:
-        with path.open("x", encoding="utf-8") as handle:
+        descriptor, temporary_name = tempfile.mkstemp(
+            prefix=f".{path.name}.",
+            suffix=".tmp",
+            dir=path.parent,
+            text=True,
+        )
+        temporary_path = Path(temporary_name)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
             handle.write(serialized)
             handle.flush()
+            os.fsync(handle.fileno())
+        try:
+            os.link(temporary_path, path)
+        except FileExistsError as exc:
+            raise AdapterError(f"refusing to overwrite immutable record: {path}") from exc
+        directory = os.open(path.parent, os.O_RDONLY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
     except FileExistsError as exc:
         raise AdapterError(f"refusing to overwrite immutable record: {path}") from exc
+    finally:
+        if temporary_path is not None:
+            temporary_path.unlink(missing_ok=True)
 
 
 __all__ = [

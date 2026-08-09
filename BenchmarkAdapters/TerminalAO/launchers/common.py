@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import json
 import shlex
 import shutil
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Mapping
 
 from ...contracts import AdapterError, CommandSpec, require_file
 from ...registry import AGENTS, ROOT
+from ...task_specs import task_spec_text
 
 
 @dataclass(frozen=True)
@@ -22,6 +25,9 @@ class NativeAOLaunchRequest:
     model: str
     seed: int
     timeout_seconds: int
+    model_parameters: Mapping[str, object]
+    request_timeout_seconds: int | None
+    retry_policy: Mapping[str, object]
 
     @property
     def dev_command(self) -> str:
@@ -37,14 +43,7 @@ class NativeAOLaunchRequest:
 
 
 def _instruction(request: NativeAOLaunchRequest) -> str:
-    return (
-        "Optimize this frozen Harbor terminus-2 harness for held-out Terminal-Bench performance. "
-        "Only edit terminus_2.py, terminus_json_plain_parser.py, terminus_xml_plain_parser.py, "
-        "tmux_session.py, or files under templates/. Run the following host-owned command whenever "
-        f"you need structured DEV-only feedback: {request.dev_command}. The command returns only "
-        "aggregate dev statistics. Hidden test tasks and test evaluation are unavailable during "
-        "search. Keep the best replayable harness in this workspace; do not create symlinks."
-    )
+    return task_spec_text("terminal-bench-ao") + "\n\nDEV capability: " + request.dev_command
 
 
 def _codex(request: NativeAOLaunchRequest) -> CommandSpec:
@@ -61,8 +60,6 @@ def _codex(request: NativeAOLaunchRequest) -> CommandSpec:
             "workspace-write",
             "--model",
             request.model,
-            "-c",
-            "model_reasoning_effort=high",
             _instruction(request),
         ),
         cwd=request.candidate_dir,
@@ -82,8 +79,6 @@ def _claude(request: NativeAOLaunchRequest) -> CommandSpec:
             "--no-session-persistence",
             "--model",
             request.model,
-            "--effort",
-            "high",
             "--permission-mode",
             "bypassPermissions",
             _instruction(request),
@@ -151,7 +146,21 @@ def _python_native(request: NativeAOLaunchRequest, module: str, python: Path, la
             str(request.timeout_seconds),
         ),
         cwd=ROOT,
-        env={"PYTHONPATH": python_path, "PYTHONHASHSEED": str(request.seed)},
+        env={
+            "PYTHONPATH": python_path,
+            "PYTHONHASHSEED": str(request.seed),
+            "TERMINAL_OUTER_MODEL_PARAMETERS": json.dumps(
+                request.model_parameters, sort_keys=True
+            ),
+            "TERMINAL_OUTER_REQUEST_TIMEOUT_SECONDS": (
+                ""
+                if request.request_timeout_seconds is None
+                else str(request.request_timeout_seconds)
+            ),
+            "TERMINAL_OUTER_RETRY_POLICY": json.dumps(
+                request.retry_policy, sort_keys=True
+            ),
+        },
         timeout_seconds=request.timeout_seconds,
         label=label,
     )

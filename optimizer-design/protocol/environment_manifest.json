@@ -1,0 +1,13 @@
+{
+  "cuda_runtime": "12.8",
+  "huggingface_hub": "1.26.0",
+  "environment_sha256": "4a23daf443a540eccf9709d4027ccba5a67c4d4c8b0f19a7c3919a7f1f7176d8",
+  "manifest_digest": "d6ebb0ac790f1fee2fd506ed5087aa081710a11d52baa558ba213a6825d771a9",
+  "numpy": "2.2.6",
+  "package_fingerprint": "24111168b3f7e4b37ecb1bf3a4c708130d35d8be68dc8af4639ba71541f1422f",
+  "python": "3.10.20",
+  "python_executable_sha256": "41285baf724b49e508033719e903dac6576ab34e0123ae62bafc6e8727df3e2a",
+  "status": "verified-h100-import-bf16-smoke-and-offline-lock-sync",
+  "torch": "2.11.0+cu128",
+  "triton": "3.6.0"
+}

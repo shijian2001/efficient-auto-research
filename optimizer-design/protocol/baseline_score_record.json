@@ -1,0 +1,23 @@
+{
+  "baseline_candidate_sha256": "d39470e5b0535baf9c6caf7dbcd15efa79d8eacc9badf6e7c45b536e8537deec",
+  "agent_runtime_manifest_digest": "58caa83cb9c85e72778540a315ccd22f942b591f5e85de49bfff54da0c14c9cd",
+  "data_manifest_digest": "589c47454114ee5b3760df3ab6ef17288a98fe0d823e0f0ea716c497b72f95e5",
+  "environment_manifest_digest": "d6ebb0ac790f1fee2fd506ed5087aa081710a11d52baa558ba213a6825d771a9",
+  "evaluator_manifest_digest": "73d9a35877f49b4a3ad30945ade8cd5b6586ea24ff7d41a5400566b51e063db4",
+  "environment_lock_digest": "7b79173e144cb194d805ae83b884bf543f0be1f899de253848a9bf73bab2cf08",
+  "evidence_files": {},
+  "evaluation_record_digests": {},
+  "final_score_steps": null,
+  "hardware_fingerprint": null,
+  "held_out_score_steps": {},
+  "held_out_seeds": [
+    314159,
+    271828
+  ],
+  "note": "Pending a clean four-H100 baseline run on both frozen held-out seeds; the tracked UV lock is synchronized and verified offline.",
+  "protocol_id": "modded-nanogpt-optimizer-design-reconstruction-v1",
+  "record_digest": "4cc7d37f23aa636cd282a699be760703fcd5ce25aa99bd2627cbd3704b6f0a0a",
+  "schema_version": 1,
+  "source_manifest_digest": "82f637a9ba1ae2af1ca55d138213a99d6c809583f53b04576da3ded93a5a49c5",
+  "status": "pending"
+}

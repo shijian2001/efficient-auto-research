@@ -6,6 +6,7 @@ from dataclasses import dataclass
 
 from .contracts import AdapterError, CommandSpec
 from .MLEBenchLite.adapter import MleLiteAdapter, MleLiteRequest
+from .OptimizerDesign.adapter import OptimizerDesignBenchmarkAdapter
 from .registry import AGENTS, AgentSpec
 from .TerminalBench.adapter import HarborTerminalAdapter, HarborTerminalRequest
 from .TerminalAO.adapter import TerminalAOAdapter, TerminalAORequest
@@ -32,6 +33,10 @@ class AgentAdapter:
     @property
     def terminal_ao(self) -> TerminalAOAdapter:
         return TerminalAOAdapter(self.spec.key)
+
+    @property
+    def optimizer_design(self) -> OptimizerDesignBenchmarkAdapter:
+        return OptimizerDesignBenchmarkAdapter(self.spec.key)
 
     def build_mle_command(self, request: MleLiteRequest) -> CommandSpec:
         return self.mle_lite.build_command(request)

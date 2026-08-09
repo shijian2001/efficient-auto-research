@@ -1,0 +1,23 @@
+{
+  "files": {
+    "blobs/02f36ddbcfde635b8a04d2c877d3cda292b866e080a995b183f903c30f4c311b": "02f36ddbcfde635b8a04d2c877d3cda292b866e080a995b183f903c30f4c311b",
+    "blobs/48f62eb48ad4005c223687f3c7e7be0115633829": "0026578b2957bedafbdf1511ff1bd3cf28c19b195200927a4d2ad9f59bba9af9",
+    "blobs/6c880f44203ba43b62b3465d6de77eb20f1e03e8": "881e9fa882b00820f096f2f2fda166eceb83c99606cdd482245befa392dfaebf",
+    "blobs/d66ad504a8025d7e7e632f7e84d4543d66a0a68e": "b7b5db2071bdce8f31160bb92d8d1765bf696d0dee3bd580a37efdc847c17ae5",
+    "refs/main": "f27cc5ee7217507f5b7e83b134913b5b201c956c5401df11dc0313ba5035ea46",
+    "snapshots/de87b9b5af06dd9984df595bef90b2eba44b181a/build/torch29-cxx11-cu128-x86_64-linux/flash_attention_3/__pycache__/__init__.cpython-310.pyc": "27be6a2a8e6cc088ad1b5acef120525576c827b3bf6ea0f8d2a59af529049aa5",
+    "snapshots/de87b9b5af06dd9984df595bef90b2eba44b181a/build/torch29-cxx11-cu128-x86_64-linux/flash_attention_3/__pycache__/flash_attn_config.cpython-310.pyc": "9b181296bcdc39b2956ca49d7c26398dac0b5a9203c7bc93a492df841fc42bd2",
+    "snapshots/de87b9b5af06dd9984df595bef90b2eba44b181a/build/torch29-cxx11-cu128-x86_64-linux/flash_attention_3/__pycache__/flash_attn_interface.cpython-310.pyc": "3bb6f80e3ab79112246790ee13586e9f843bdc1a147e1030bb2f1cadaaff72f0"
+  },
+  "manifest_digest": "26a68a2a5cc0db1f6de7464efe6a60268ed30d5c7f7d22971a04c6020ddc9ca4",
+  "protocol_id": "autoresearch-architecture-reconstruction-v1",
+  "repository": "varunneal/flash-attention-3",
+  "revision": "de87b9b5af06dd9984df595bef90b2eba44b181a",
+  "symlinks": {
+    "snapshots/de87b9b5af06dd9984df595bef90b2eba44b181a/build/torch29-cxx11-cu128-x86_64-linux/flash_attention_3/__init__.py": "../../../../../blobs/6c880f44203ba43b62b3465d6de77eb20f1e03e8",
+    "snapshots/de87b9b5af06dd9984df595bef90b2eba44b181a/build/torch29-cxx11-cu128-x86_64-linux/flash_attention_3/_C.abi3.so": "../../../../../blobs/02f36ddbcfde635b8a04d2c877d3cda292b866e080a995b183f903c30f4c311b",
+    "snapshots/de87b9b5af06dd9984df595bef90b2eba44b181a/build/torch29-cxx11-cu128-x86_64-linux/flash_attention_3/flash_attn_config.py": "../../../../../blobs/48f62eb48ad4005c223687f3c7e7be0115633829",
+    "snapshots/de87b9b5af06dd9984df595bef90b2eba44b181a/build/torch29-cxx11-cu128-x86_64-linux/flash_attention_3/flash_attn_interface.py": "../../../../../blobs/d66ad504a8025d7e7e632f7e84d4543d66a0a68e"
+  },
+  "variant": "torch29-cxx11-cu128-x86_64-linux"
+}

@@ -5,10 +5,12 @@ from __future__ import annotations
 import hashlib
 import json
 import subprocess
+import stat
 from pathlib import Path
 
 from ..contracts import AdapterError
 from ..protocol import canonical_json, sha256_file
+from ..protocol import write_json_exclusive
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -51,6 +53,74 @@ def load_data_manifest(path: Path = DEFAULT_DATA_MANIFEST) -> dict[str, object]:
     return {**payload, "manifest_digest": expected_digest}
 
 
+def _tree_file_hashes(root: Path) -> dict[str, str]:
+    root = root.resolve()
+    hashes: dict[str, str] = {}
+    for path in sorted(root.rglob("*")):
+        relative = path.relative_to(root).as_posix()
+        mode = path.lstat().st_mode
+        if stat.S_ISLNK(mode):
+            raise AdapterError(f"MLE prepared asset contains a symlink: {path}")
+        if path.is_dir():
+            continue
+        if not stat.S_ISREG(mode):
+            raise AdapterError(f"MLE prepared asset is not a regular file: {path}")
+        hashes[relative] = sha256_file(path)
+    if not hashes:
+        raise AdapterError(f"MLE prepared asset tree is empty: {root}")
+    return hashes
+
+
+def freeze_data_manifest(
+    *,
+    data_root: Path,
+    output_path: Path,
+    split_file: Path = DEFAULT_SPLIT_FILE,
+) -> dict[str, object]:
+    """Explicit maintenance operation; never called by formal preflight."""
+
+    task_ids = load_lite_task_ids(split_file)
+    source = ROOT / "mle-bench-lite/source"
+    completed = subprocess.run(
+        ["git", "-C", str(source), "rev-parse", "HEAD"],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    if completed.returncode or len(completed.stdout.strip()) != 40:
+        raise AdapterError("cannot freeze MLE assets without an immutable benchmark commit")
+    records = []
+    for task_id in task_ids:
+        task_root = data_root.resolve() / task_id
+        archive = task_root / f"{task_id}.zip"
+        public = task_root / "prepared/public"
+        private = task_root / "prepared/private"
+        if not archive.is_file() or archive.is_symlink():
+            raise AdapterError(f"MLE source archive is missing or unsafe: {task_id}")
+        records.append(
+            {
+                "task_id": task_id,
+                "archive_size_bytes": archive.stat().st_size,
+                "archive_sha256": sha256_file(archive),
+                "prepared_public_files": _tree_file_hashes(public),
+                "prepared_private_files": _tree_file_hashes(private),
+            }
+        )
+    payload: dict[str, object] = {
+        "schema_version": 2,
+        "mlebench_source_commit": completed.stdout.strip(),
+        "split_digest": split_digest(split_file),
+        "grader_assets": {
+            "grader_worker": sha256_file(Path(__file__).with_name("grader_worker.py")),
+            "dependency_lock": sha256_file(ROOT / "mle-bench-lite/uv.lock"),
+        },
+        "tasks": records,
+    }
+    digest = hashlib.sha256(canonical_json(payload)).hexdigest()
+    write_json_exclusive(output_path, {**payload, "manifest_digest": digest})
+    return {**payload, "manifest_digest": digest}
+
+
 def data_manifest_digest(path: Path = DEFAULT_DATA_MANIFEST) -> str:
     return str(load_data_manifest(path)["manifest_digest"])
 
@@ -75,31 +145,32 @@ def validate_lite_data_root(
 ) -> tuple[str, ...]:
     data_root = data_root.resolve()
     expected = load_lite_task_ids(split_file)
-    missing: list[str] = []
+    manifest = load_data_manifest()
+    if manifest.get("schema_version") != 2:
+        raise AdapterError(
+            "formal MLE assets require schema_version 2 with prepared public/private hashes; "
+            "run the explicit mle-freeze-assets maintenance command"
+        )
+    records = {str(item["task_id"]): item for item in manifest["tasks"]}
     for task_id in expected:
         public = data_root / task_id / "prepared/public"
         private = data_root / task_id / "prepared/private"
-        if (
-            not public.is_dir()
-            or not (public / "description.md").is_file()
-            or not private.is_dir()
-            or not any(path.is_file() for path in private.iterdir())
-        ):
-            missing.append(task_id)
-    if missing:
-        raise AdapterError(
-            "MLE-Bench Lite data root is incomplete; missing prepared public/private tasks: "
-            + ", ".join(missing)
-        )
+        record = records[task_id]
+        if _tree_file_hashes(public) != record.get("prepared_public_files"):
+            raise AdapterError(f"MLE prepared public asset drift: {task_id}")
+        if _tree_file_hashes(private) != record.get("prepared_private_files"):
+            raise AdapterError(f"MLE prepared private asset drift: {task_id}")
     return expected
 
 
-def verify_task_archive(data_root: Path, task_id: str, *, verify_hash: bool = False) -> None:
+def verify_task_archive(data_root: Path, task_id: str, *, verify_hash: bool = True) -> None:
     manifest = load_data_manifest()
     record = next(item for item in manifest["tasks"] if item["task_id"] == task_id)
     archive = data_root.resolve() / task_id / f"{task_id}.zip"
     if not archive.is_file() or archive.stat().st_size != int(record["archive_size_bytes"]):
         raise AdapterError(f"MLE source archive differs from frozen data manifest: {task_id}")
+    if not record.get("archive_sha256"):
+        raise AdapterError(f"MLE formal archive hash is missing: {task_id}")
     if verify_hash and sha256_file(archive) != record["archive_sha256"]:
         raise AdapterError(f"MLE source archive SHA-256 mismatch: {task_id}")
 
@@ -113,6 +184,7 @@ __all__ = [
     "DEFAULT_SPLIT_FILE",
     "DEFAULT_DATA_MANIFEST",
     "data_manifest_digest",
+    "freeze_data_manifest",
     "load_data_manifest",
     "load_lite_task_ids",
     "require_lite_task",
