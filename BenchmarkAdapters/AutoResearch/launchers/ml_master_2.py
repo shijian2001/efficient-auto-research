@@ -70,6 +70,7 @@ def run_native_loop(
     )
     session.open()
     stage_records: list[dict[str, object]] = []
+    remaining_steps = max_steps
     try:
         tools = create_registry(builtin_names=["*"])
         for stage_name, objective in (
@@ -78,12 +79,14 @@ def run_native_loop(
             ("improve", "Implement and evaluate the strongest generalizable improvement."),
             ("review", "Review all dev evidence and restore the strongest observed train.py."),
         ):
+            if remaining_steps is not None and remaining_steps <= 0:
+                break
             agent = ArchitectureDesignAgent(
                 llm=llm_factory(stage=stage_name, seed=seed),
                 session=session,
                 tools=tools,
                 config=AgentConfig(
-                    max_turns=max_steps or 100,
+                    max_turns=remaining_steps if remaining_steps is not None else 100,
                     context_config=ContextConfig(
                         max_tokens=256000,
                         truncation_strategy="latest_half",
@@ -109,12 +112,15 @@ def run_native_loop(
                     description=objective,
                 )
             )
+            steps_used = len(trajectory.steps)
+            if remaining_steps is not None:
+                remaining_steps -= max(1, steps_used)
             feedback = evaluate_current(socket_path, token, artifact_path, state_path)
             stage_records.append(
                 {
                     "stage": stage_name,
                     "trajectory_status": trajectory.status,
-                    "steps": len(trajectory.steps),
+                    "steps": steps_used,
                     "dev_feedback": feedback,
                 }
             )

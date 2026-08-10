@@ -151,10 +151,19 @@ def test_agent_sandbox_hides_protocol_and_exposes_only_workspace_runtime_and_dev
     output = tmp_path / "native"
     workspace.mkdir()
     runtime.mkdir()
+    relay_runtime = runtime / "BenchmarkAdapters/LLMRelay"
+    relay_runtime.mkdir(parents=True)
+    __import__("shutil").copy2(
+        ROOT / "BenchmarkAdapters/LLMRelay/forwarder.py",
+        relay_runtime / "forwarder.py",
+    )
     (workspace / "train.py").write_text("print('candidate')\n", encoding="utf-8")
     socket_path = tmp_path / "dev.sock"
     server_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
     server_socket.bind(str(socket_path))
+    relay_socket_path = tmp_path / "relay.sock"
+    relay_socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+    relay_socket.bind(str(relay_socket_path))
     hidden_protocol = ROOT / "autoresearch/protocol/seed_policy.json"
     command = CommandSpec(
         argv=(
@@ -174,10 +183,12 @@ def test_agent_sandbox_hides_protocol_and_exposes_only_workspace_runtime_and_dev
             output_dir=output,
             runtime_root=runtime,
             host_socket=socket_path,
+            host_relay_socket=relay_socket_path,
         )
         result = run_command(sandboxed)
     finally:
         server_socket.close()
+        relay_socket.close()
     assert result.return_code == 0, result.stdout
     assert sandboxed.inherit_env is False
     assert str(ROOT / "autoresearch") not in sandboxed.argv

@@ -28,7 +28,11 @@ class MLMasterAutoresearchVariantFMLAdapter(FMLAgentAdapter):
     native_entrypoint = "evomaster.agent.agent.BaseAgent.run"
     installation_probe_arguments = (
         "-c",
-        "from evomaster.agent import Agent, AgentConfig, create_registry",
+        (
+            "from mcp.client import streamable_http as m; "
+            "m.streamablehttp_client = getattr(m, 'streamablehttp_client', m.streamable_http_client); "
+            "from evomaster.agent import Agent, AgentConfig, create_registry"
+        ),
     )
 
     def installation_executable(self) -> Path | None:
@@ -101,9 +105,13 @@ def run_native_loop(
         ("improve", "Implement and validate the strongest hypothesis; leave the best revision in place."),
     )
     trajectories = []
+    executed_stages = []
+    remaining_steps = max_steps
     try:
         tools = create_registry(builtin_names=["*"])
         for stage_name, objective in stages:
+            if remaining_steps <= 0:
+                break
             llm = create_llm(
                 LLMConfig(
                     provider="openai",
@@ -119,7 +127,7 @@ def run_native_loop(
                 session=session,
                 tools=tools,
                 config=AgentConfig(
-                    max_turns=max(1, max_steps // len(stages)),
+                    max_turns=remaining_steps,
                     context_config=ContextConfig(
                         max_tokens=256000,
                         truncation_strategy="latest_half",
@@ -137,15 +145,16 @@ def run_native_loop(
                 enabled_tool_names=["*"],
             )
             agent.set_agent_name(f"fml_{stage_name}")
-            trajectories.append(
-                agent.run(
-                    TaskInstance(
-                        task_id=f"fml-{stage_name}",
-                        task_type="repository_optimization",
-                        description=objective,
-                    )
+            trajectory = agent.run(
+                TaskInstance(
+                    task_id=f"fml-{stage_name}",
+                    task_type="repository_optimization",
+                    description=objective,
                 )
             )
+            trajectories.append(trajectory)
+            executed_stages.append((stage_name, objective))
+            remaining_steps -= max(1, len(trajectory.steps))
     finally:
         session.close()
     payload = {
@@ -158,7 +167,7 @@ def run_native_loop(
                 "steps": len(trajectory.steps),
                 "result": trajectory.result,
             }
-            for (name, _), trajectory in zip(stages, trajectories)
+            for (name, _), trajectory in zip(executed_stages, trajectories)
         ],
     }
     write_json_exclusive(output_dir / "native-result.json", payload)

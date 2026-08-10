@@ -15,7 +15,7 @@ from aisci_agent_runtime.tools.base import SubagentCompleteSignal, Tool
 
 from ...autonomous_optimization import task_contract
 from ...protocol import write_json_exclusive
-from ..dev_client import declare_current, evaluate_current, request
+from ..dev_client import declare_current, evaluate_current
 from .proposal import load_factory
 
 
@@ -87,9 +87,10 @@ class ListExperimentsTool(Tool):
 
 
 class RestoreCandidateTool(Tool):
-    def __init__(self, workspace: Path, experiments_dir: Path) -> None:
+    def __init__(self, workspace: Path, experiments_dir: Path, state_path: Path) -> None:
         self.workspace = workspace
         self.experiments_dir = experiments_dir
+        self.state_path = state_path
         self.contract = task_contract()
 
     def name(self) -> str:
@@ -99,9 +100,26 @@ class RestoreCandidateTool(Tool):
         if not revision_id.startswith("candidate-") or not revision_id.removeprefix("candidate-").isdigit():
             raise RuntimeError("invalid candidate revision ID")
         source = self.experiments_dir / f"{revision_id}.py"
+        feedback_path = self.experiments_dir / f"{revision_id}.json"
         if not source.is_file() or source.is_symlink():
             raise RuntimeError(f"unknown evaluated candidate: {revision_id}")
+        if not feedback_path.is_file() or feedback_path.is_symlink():
+            raise RuntimeError(f"candidate feedback is unavailable: {revision_id}")
+        feedback = json.loads(feedback_path.read_text(encoding="utf-8"))
         shutil.copy2(source, self.contract.artifact_path(self.workspace))
+        self.state_path.write_text(
+            json.dumps(
+                {
+                    "revision_id": revision_id,
+                    "candidate_sha256": feedback["candidate_sha256"],
+                    "last_feedback": feedback,
+                },
+                sort_keys=True,
+                indent=2,
+            )
+            + "\n",
+            encoding="utf-8",
+        )
         return json.dumps({"restored_revision_id": revision_id}, sort_keys=True)
 
     def get_tool_schema(self) -> dict:
@@ -120,50 +138,24 @@ class RestoreCandidateTool(Tool):
         }
 
 
-class CompleteWithBestTool(Tool):
+class CompleteCurrentTool(Tool):
     def __init__(
         self,
-        workspace: Path,
-        experiments_dir: Path,
         socket_path: str,
         token: str,
         state_path: Path,
     ) -> None:
-        self.workspace = workspace
-        self.experiments_dir = experiments_dir
         self.socket_path = socket_path
         self.token = token
         self.state_path = state_path
-        self.contract = task_contract()
 
     def name(self) -> str:
-        return "complete_with_best"
+        return "complete_current"
 
     def execute(self, _shell, **_kwargs: object) -> str:
-        best = request(self.socket_path, self.token, "best-dev")
-        if not isinstance(best, dict):
-            raise RuntimeError("no valid development candidate is available")
-        revision_id = str(best["revision_id"])
-        source = self.experiments_dir / f"{revision_id}.py"
-        if not source.is_file() or source.is_symlink():
-            raise RuntimeError(f"best candidate source is unavailable: {revision_id}")
-        shutil.copy2(source, self.contract.artifact_path(self.workspace))
-        self.state_path.write_text(
-            json.dumps(
-                {
-                    "revision_id": revision_id,
-                    "candidate_sha256": best["candidate_sha256"],
-                    "last_feedback": best,
-                },
-                sort_keys=True,
-                indent=2,
-            )
-            + "\n",
-            encoding="utf-8",
-        )
         declared = declare_current(self.socket_path, self.token, self.state_path)
         raise SubagentCompleteSignal(
-            content=f"Declared best development candidate {revision_id}",
+            content=f"Declared Agent-selected development candidate {declared['revision_id']}",
             artifacts={"declared_revision_id": declared["revision_id"]},
         )
 
@@ -172,7 +164,7 @@ class CompleteWithBestTool(Tool):
             "type": "function",
             "function": {
                 "name": self.name(),
-                "description": "Restore and declare the host-selected best development candidate, then finish.",
+                "description": "Declare the currently selected evaluated candidate, then finish.",
                 "parameters": {"type": "object", "properties": {}, "additionalProperties": False},
             },
         }
@@ -201,7 +193,7 @@ class ArchitectureDesignSubagent(TerminalTaskSubagent):
         return (
             f"You are AiScientist's {contract.task_name} subagent. {contract.task_instruction} "
             "Use evaluate_candidate for trusted development feedback, list_experiments and "
-            "restore_candidate to compare revisions, and complete_with_best to finish. Never infer or seek "
+            "restore_candidate to compare and explicitly select revisions, then complete_current to finish. Never infer or seek "
             "held-out seeds and never edit benchmark, evaluator, protocol, or capability files."
         )
 
@@ -217,10 +209,12 @@ class ArchitectureDesignSubagent(TerminalTaskSubagent):
             *tools,
             evaluator,
             ListExperimentsTool(evaluator.experiments_dir),
-            RestoreCandidateTool(self.workspace, evaluator.experiments_dir),
-            CompleteWithBestTool(
+            RestoreCandidateTool(
                 self.workspace,
                 evaluator.experiments_dir,
+                self.state_path,
+            ),
+            CompleteCurrentTool(
                 self.socket_path,
                 self.token,
                 self.state_path,
@@ -270,7 +264,7 @@ def run_native_loop(
     result = subagent.run(
         f"Optimize the frozen task using the native typed capabilities. The metric is "
         f"{contract.metric_name} and {contract.metric_direction} is better. Evaluate serious candidates "
-        "and finish only with complete_with_best."
+        "then explicitly select a revision with restore_candidate and finish with complete_current."
     )
     if not state_path.is_file():
         evaluate_current(socket_path, token, artifact_path, state_path)
@@ -318,7 +312,7 @@ if __name__ == "__main__":
 
 __all__ = [
     "ArchitectureDesignSubagent",
-    "CompleteWithBestTool",
+    "CompleteCurrentTool",
     "EvaluateCandidateTool",
     "ListExperimentsTool",
     "RestoreCandidateTool",

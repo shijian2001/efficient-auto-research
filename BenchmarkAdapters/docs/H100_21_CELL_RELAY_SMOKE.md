@@ -13,34 +13,43 @@ Every selected cell used the repository-owned `BenchmarkAdapters/LLMRelay`, whic
 upstream model to `gpt-5.5`. The maximum API concurrency was one. The host credential was passed
 only in process environment and is not stored in this report or the archived run evidence.
 
-This was not a benchmark run. It used a synthetic development capability, one native search step,
-and a 60-second process limit. It did not execute GPU training, benchmark evaluators, held-out
-evaluation, aggregate scoring, or any formal/comparable score.
+This was not a benchmark run. It used a synthetic development capability and one global native
+search step. The original matrix used a 60-second process limit; the five launchers affected by the
+fairness and step-budget fixes were retested with a 180-second process limit. It did not execute GPU
+training, benchmark evaluators, held-out evaluation, aggregate scoring, or any formal/comparable
+score.
 
 ## Result Matrix
 
 | Benchmark | EAR | MLEvolve | Arbor | Codex | Claude Code | ML-Master 2.0 | AiScientist |
 |---|---|---|---|---|---|---|---|
-| AutoResearch Architecture | clean exit | clean exit | clean exit | clean exit | clean exit | Relay passed; 60s limit | clean exit |
+| AutoResearch Architecture | clean exit | clean exit | clean exit | clean exit | clean exit | clean exit | clean exit |
 | Optimizer Design | clean exit | clean exit | clean exit | clean exit | clean exit | clean exit | clean exit |
-| FML-Bench | clean exit | clean exit | clean exit | clean exit | clean exit | Relay passed; 60s limit | clean exit |
+| FML-Bench | clean exit | clean exit | clean exit | clean exit | clean exit | clean exit | clean exit |
 
 Summary:
 
-- Relay transport and forced-model evidence: 21/21 cells;
-- native clean exit within 60 seconds: 19/21 cells;
-- ML-Master AutoResearch and FML produced valid Relay calls before reaching the smoke time limit;
-- selected cell traffic: 43 successful upstream requests and approximately 104,919 tokens;
-- total traffic including six Relay readiness probes: approximately 104,997 tokens;
+- Relay transport, forced-model evidence, and native clean exit: 21/21 cells;
+- 16 unaffected cells retain the original archived evidence;
+- the five cells sharing the modified AiScientist or ML-Master launchers were retested on the
+  current source and passed 5/5 with clean exit;
+- composite selected-cell traffic: 41 successful upstream requests and approximately 109,803
+  tokens;
+- the final five-cell retest used seven successful upstream requests and approximately 12,339
+  tokens, excluding two small Relay readiness probes;
 - API concurrency: one.
 
 ## Per-Benchmark Telemetry
 
 | Benchmark | Relay cells | Clean exits | Requests | Approx. tokens |
 |---|---:|---:|---:|---:|
-| AutoResearch Architecture | 7/7 | 6/7 | 13 | 27,813 |
-| Optimizer Design | 7/7 | 7/7 | 15 | 28,260 |
-| FML-Bench | 7/7 | 6/7 | 15 | 48,846 |
+| AutoResearch Architecture | 7/7 | 7/7 | 14 | 32,603 |
+| Optimizer Design | 7/7 | 7/7 | 12 | 25,501 |
+| FML-Bench | 7/7 | 7/7 | 15 | 51,699 |
+
+The table is a composite, not one simultaneous run. Original evidence is stored under
+`run-logs/h100-21-minimal-relay-smoke-20260810/`; current-source retest evidence is stored under
+`run-logs/h100-current-source-minimal-api-retest-20260810/`.
 
 ## Explicit Variants
 
@@ -66,15 +75,29 @@ readiness or score validity.
 - Native timeout output normalizes byte and text streams before evidence capture.
 - FML deterministic tests use explicit registered variants rather than unsupported original-ID
   fallback.
+- AiScientist no longer calls a host-side `best-dev` operation. The Agent must explicitly restore
+  the revision it selects and then declare the current revision.
+- ML-Master now treats `max_steps` as a global staged-workflow budget instead of multiplying the
+  requested budget by the number of stages. The same rule applies to its FML staged variant.
 
 ## Deterministic Validation
 
-The focused offline suite completed with `75 passed` and covered Relay normalization, thin Adapter
-identity, native timeout handling, and FML synthetic end-to-end contracts. `compileall`,
-`git diff --check`, repository secret scanning, and archived-evidence secret scanning also passed.
+The final focused offline suite completed with `77 passed` and covered Relay normalization, thin
+Adapter identity, native timeout handling, sandbox isolation, global native step budgets, and FML
+synthetic end-to-end contracts. `compileall`, `git diff --check`, hardcoded-model scanning, and
+archived-evidence secret scanning also passed. A separate Agent-artifact scan covered 262 files and
+found no authorization header, bearer token, API-key marker, upstream host, or host-home path.
+
+The broader AutoResearch and Optimizer Design formal suites currently reject the workspace because
+their protected implementation digests have drifted. This is the intended fail-closed behavior and
+must not be bypassed or silently re-frozen. It means this smoke does not establish formal-preflight
+readiness.
 
 ## Interpretation
 
 The result supports only this statement: all 21 Agent/Benchmark launcher cells can reach the shared
-Relay and make a request that the Relay forces to `gpt-5.5`. It does not establish that all 21 cells
-can complete real GPU evaluation, finish full benchmark budgets, or produce fair formal scores.
+Relay, use the Relay-forced `gpt-5.5` model, respect the one-step smoke budget, and exit cleanly under
+the synthetic launcher contract. No credential, upstream-bypass, held-out-access, host-home, or
+host-side candidate-selection anomaly was detected in this scope. It does not prove that all 21
+cells can complete real GPU evaluation, finish full benchmark budgets, or produce fair formal
+scores.

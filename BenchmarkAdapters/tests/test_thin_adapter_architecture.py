@@ -374,7 +374,36 @@ class ThinAdapterArchitectureTests(unittest.TestCase):
         )
         self.assertTrue(all("TerminalTaskSubagent" in value for value in terminal_sources))
         self.assertIn("ArchitectureDesignSubagent", architecture_source)
-        self.assertIn("complete_with_best", architecture_source)
+        self.assertIn("complete_current", architecture_source)
+        self.assertNotIn("complete_with_best", architecture_source)
+        self.assertNotIn('request(self.socket_path, self.token, "best-dev")', architecture_source)
+
+    def test_ml_master_step_limit_is_global_across_native_stages(self) -> None:
+        source = (
+            ROOT / "BenchmarkAdapters/AutoResearch/launchers/ml_master_2.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("remaining_steps = max_steps", source)
+        self.assertIn(
+            "if remaining_steps is not None and remaining_steps <= 0:", source
+        )
+        self.assertIn(
+            "max_turns=remaining_steps if remaining_steps is not None else 100", source
+        )
+        self.assertIn("remaining_steps -= max(1, steps_used)", source)
+        self.assertNotIn("max_turns=max_steps or 100", source)
+
+        fml_source = (
+            ROOT
+            / "BenchmarkAdapters/FMLBench/agents/ml_master_autoresearch_variant.py"
+        ).read_text(encoding="utf-8")
+        self.assertIn("remaining_steps = max_steps", fml_source)
+        self.assertIn("if remaining_steps <= 0:", fml_source)
+        self.assertIn("max_turns=remaining_steps", fml_source)
+        self.assertIn(
+            "remaining_steps -= max(1, len(trajectory.steps))", fml_source
+        )
+        self.assertNotIn("max(1, max_steps // len(stages))", fml_source)
+        self.assertIn("m.streamablehttp_client = getattr", fml_source)
         self.assertIn("ai-scientist-terminal-variant", self.thin.AGENT_VARIANTS)
         self.assertIn("ai-scientist-architecture-variant", self.thin.AGENT_VARIANTS)
 
