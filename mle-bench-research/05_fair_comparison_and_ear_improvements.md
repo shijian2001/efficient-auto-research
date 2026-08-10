@@ -18,7 +18,7 @@
 EAR / MLEvolve / Arbor
     │  OPENAI_BASE_URL → http://127.0.0.1:620X/v1   (端口 = 6200+GPU_ID, 每容器一个实例)
     ▼
-docker-eval/llm_relay_proxy.py
+BenchmarkAdapters/LLMRelay/server.py
     │  模型重写→gpt-5.5 · 强制 reasoning_effort=high · 剥 max_tokens 等参数
     │  重试20次 · 不限超时 · 非流式化+SSE合成 · tool-call JSON兜底 · system-only消息归一化
     │  token 独立记账 → run-logs/<TAG>_token_usage/<agent>_<comp>_gpu<N>.jsonl
@@ -124,7 +124,7 @@ EAR 的 plan 里反复提到 BirdNET/CNN/spectrogram（方向它知道），但�
 ```
 代码:     EAR proxy-based-eval 分支 @ 107e437 (github.com/VonEquinox/efficient-auto-research)
            MLEvolve = 纯上游 fe92521; coldstart=False
-评测框架: docker-eval/run_in_docker.sh + llm_relay_proxy.py (用法见 docker-eval/README)
+评测框架: docker-eval/run_in_docker.sh + BenchmarkAdapters/LLMRelay/server.py (用法见 docker-eval/README)
 三轮报告: run-logs/20260703_12h_proxy_rerun/  20260704_12h_fair/  20260710_12h_ear_improved/
 进度图:   analysis/plots/20260703_12h_proxy_rerun/  20260704_12h_fair/  (各12张)
 trace:    analysis/traces_20260704_fair/ (人类可读汇总); 原始在各 agent 目录

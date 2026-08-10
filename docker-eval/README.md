@@ -80,7 +80,8 @@ config SHA-256.
 
 ## LLM Relay
 
-Each container starts `llm_relay_proxy.py` on host-network port `6200+GPU_ID`:
+Each container uses the repository-owned `BenchmarkAdapters/LLMRelay/server.py`
+service on host-network port `6200+GPU_ID`:
 
 ```text
 agent -> http://127.0.0.1:620X/v1 -> relay proxy -> configured upstream

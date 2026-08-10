@@ -20,7 +20,7 @@ def main() -> int:
     parser.add_argument("--staged-data-root", type=Path, required=True)
     parser.add_argument("--workspace-dir", type=Path, required=True)
     parser.add_argument("--gpu-id", type=int, required=True)
-    parser.add_argument("--timeout", type=int, required=True)
+    parser.add_argument("--model", required=True)
     parser.add_argument("--model-parameters-json", required=True)
     args = parser.parse_args()
 
@@ -34,7 +34,6 @@ def main() -> int:
     shutil.copytree(args.public_dir, public_destination)
     payload["competition_id"] = args.competition_id
     payload["data_root"] = str(args.staged_data_root.resolve())
-    payload["grading_servers"] = []
     payload["llm"] = {"openai": copy.deepcopy(payload["llm"]["openai"]), "default": "openai"}
     model_parameters = json.loads(args.model_parameters_json)
     if not isinstance(model_parameters, dict) or not model_parameters:
@@ -42,22 +41,31 @@ def main() -> int:
     prohibited = {key for key in model_parameters if any(item in key.lower() for item in ("key", "token", "secret", "auth"))}
     if prohibited:
         raise RuntimeError("ML-Master model parameters cannot contain credentials")
-    payload["llm"]["openai"].update(model_parameters)
+    upstream_model_parameters = {
+        key: value
+        for key, value in model_parameters.items()
+        if key
+        in {
+            "model",
+            "temperature",
+            "max_tokens",
+            "timeout",
+            "max_retries",
+            "retry_delay",
+            "use_completion_api",
+        }
+    }
+    upstream_model_parameters["model"] = args.model
+    payload["llm"]["openai"].update(upstream_model_parameters)
     for agent in payload.get("agents", {}).values():
         if isinstance(agent, dict) and "llm" in agent:
             agent["llm"] = "openai"
     local = payload["session"]["local"]
     local["working_dir"] = str(args.workspace_dir.resolve())
     local["workspace_path"] = str(args.workspace_dir.resolve())
-    local["timeout"] = args.timeout
     local["gpu_devices"] = [str(args.gpu_id)]
     local["cpu_devices"] = None
     local["symlinks"] = {str(public_destination.resolve()): "input"}
-    local["parallel"] = {
-        "enabled": False,
-        "max_parallel": 1,
-        "split_workspace_for_exp": False,
-    }
     args.destination.parent.mkdir(parents=True, exist_ok=True)
     with args.destination.open("x", encoding="utf-8") as handle:
         yaml.safe_dump(payload, handle, sort_keys=False)

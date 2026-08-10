@@ -16,6 +16,7 @@ from typing import Any, Mapping
 
 from ...contracts import AdapterError, CommandResult, CommandSpec
 from ...formal_contract import ModelTrackConfig, assert_no_secrets
+from ...LLMRelay import relay_agent_environment
 from ...process import redact_sensitive_payload, relay_client_env, run_command
 from ...protocol import canonical_json, sha256_file, write_json_exclusive
 from ...registry import AGENTS, ROOT
@@ -68,6 +69,7 @@ class FMLAgentLaunchContext:
     outer_run_id: int
     timeout_seconds: int
     credential_env_names: tuple[str, ...]
+    relay_base_url: str
     runtime_executable: Path | None = None
     formal: bool = True
 
@@ -293,7 +295,7 @@ class FMLAgentAdapter(ABC):
         if context.formal and not context.model_config.retry_policy:
             raise AdapterError("formal FML model track requires an explicit retry policy")
         environment = relay_client_env(
-            base_url=context.model_config.relay_base_url,
+            base_url=context.relay_base_url,
             model=context.model_config.outer_model_id,
             include_credentials=False,
         )
@@ -340,24 +342,13 @@ class FMLAgentAdapter(ABC):
                 raise AdapterError(
                     f"FML credential environment name is not recognized as sensitive: {name}"
                 )
-            value = os.environ.get(name)
-            if not value:
-                raise AdapterError(f"required FML credential environment variable is unset: {name}")
-            environment[name] = value
-        credential = next(
-            (os.environ.get(name) for name in context.credential_env_names if os.environ.get(name)),
-            None,
+        environment.update(
+            {
+                "OPENAI_API_KEY": "proxy",
+                "UPSTREAM_API_KEY": "proxy",
+                "ANTHROPIC_API_KEY": "proxy",
+            }
         )
-        if credential:
-            environment.update(
-                {
-                    "OPENAI_API_KEY": credential,
-                    "UPSTREAM_API_KEY": credential,
-                    "ANTHROPIC_API_KEY": credential,
-                }
-            )
-        elif context.formal and context.runtime_executable is None:
-            raise AdapterError("formal FML launch requires an explicit relay credential")
         return environment
 
     def build_launch_command(self, context: FMLAgentLaunchContext) -> tuple[CommandSpec, str]:
@@ -388,10 +379,15 @@ class FMLAgentAdapter(ABC):
             )
         else:
             command = self.build_native_command(context, prompt)
+            routed_environment = relay_agent_environment(
+                base_url=context.relay_base_url,
+                model=context.model_config.outer_model_id,
+                environment={**self.build_environment(context), **dict(command.env)},
+            )
             command = CommandSpec(
                 argv=command.argv,
                 cwd=command.cwd,
-                env={**self.build_environment(context), **dict(command.env)},
+                env=routed_environment,
                 timeout_seconds=context.timeout_seconds,
                 label=command.label,
                 inherit_env=False,

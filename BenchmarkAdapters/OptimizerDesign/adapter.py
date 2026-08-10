@@ -32,6 +32,7 @@ from .protocol import (
 from .revisions import OptimizerRevisionStore
 from .resource import optimizer_design_resource_lease
 from .runtime import AgentRuntimeManifest
+from ..thin_registry import backend_identity, selected_variant
 
 
 @dataclass(frozen=True)
@@ -135,7 +136,9 @@ class OptimizerDesignBenchmarkAdapter:
         protocol = self._load_protocol(request)
         if request.outer_seed not in protocol.outer_seeds:
             raise AdapterError("Optimizer Design outer seed is outside the frozen protocol")
-        model_environment = self.agent_adapter.task_environment(request.model_environment)
+        model_environment = self.agent_adapter.task_environment(
+            request.model_environment, request.agent_variant
+        )
         launch_request = NativeLaunchRequest(
             agent=request.agent,
             workspace=request.output_dir.resolve() / "launcher/workspace",
@@ -147,6 +150,7 @@ class OptimizerDesignBenchmarkAdapter:
             runtime_root=request.output_dir.resolve() / "launcher/runtime",
             model_environment=model_environment,
             native_step_limit=request.native_step_limit,
+            agent_variant=request.agent_variant,
         )
         return self.agent_adapter.build_command(launch_request)
 
@@ -321,7 +325,9 @@ class OptimizerDesignBenchmarkAdapter:
             policies={
                 "editable": source_manifest.editable_path,
                 "score": "earliest common two-seed significant step; failure penalty retained",
-                "native_backend": self.agent_adapter.native_component,
+                "native_backend": backend_identity(
+                    request.agent, "optimizer-design", request.agent_variant
+                ),
                 "run_kind": request.run_kind,
                 "cpu_policy": protocol.cpu_policy,
                 "memory_policy": protocol.memory_policy,
@@ -349,7 +355,9 @@ class OptimizerDesignBenchmarkAdapter:
             non_comparable=not formal,
         )
         manifest.write(output_dir / "manifest.json")
-        model_environment = self.agent_adapter.task_environment(request.model_environment)
+        model_environment = self.agent_adapter.task_environment(
+            request.model_environment, request.agent_variant
+        )
         runner = search_runner or NativeCommandSearchRunner(
             sandbox=request.sandbox,
             model_environment=model_environment,
@@ -361,7 +369,9 @@ class OptimizerDesignBenchmarkAdapter:
             outcome = runner(
                 SearchContext(
                     agent=request.agent,
-                    native_backend=self.agent_adapter.native_component,
+                    native_backend=backend_identity(
+                        request.agent, "optimizer-design", request.agent_variant
+                    ),
                     outer_seed=request.outer_seed,
                     outer_deadline_monotonic=started + request.outer_budget_seconds,
                     candidate_training_seconds=0,
@@ -369,6 +379,7 @@ class OptimizerDesignBenchmarkAdapter:
                     baseline_train_path=store.get("baseline").path,
                     output_dir=output_dir / "launcher",
                     broker=broker,
+                    agent_variant=request.agent_variant,
                 )
             )
         except Exception as exc:
@@ -392,7 +403,15 @@ class OptimizerDesignBenchmarkAdapter:
             )
             result.write(output_dir / "result.json")
             return result
-        best = broker.best
+        canonical_arbor = (
+            request.agent == "arbor"
+            and selected_variant(
+                request.agent, "optimizer-design", request.agent_variant
+            )
+            is None
+        )
+        declaration = outcome.declared_revision_id or broker.declared_revision_id
+        best = broker.scored(declaration) if canonical_arbor and declaration else broker.best
         if not outcome.completed or best is None:
             result = BenchmarkRunResult(
                 run_id=manifest.run_id,
@@ -446,7 +465,11 @@ class OptimizerDesignBenchmarkAdapter:
             output_dir / "selection.json",
             {
                 "selected_revision_id": best.revision.revision_id,
-                "selection_policy": "minimum valid development score_steps",
+                "selection_policy": (
+                    "Agent-owned final trunk revision"
+                    if canonical_arbor
+                    else "minimum valid development score_steps"
+                ),
                 "development_score_steps": best.evaluation.score_steps,
                 "selection_uses_held_out": False,
                 "artifact_sha256": artifact.sha256,

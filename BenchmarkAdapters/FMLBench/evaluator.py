@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import base64
 import math
 import os
 import shutil
@@ -89,12 +90,20 @@ class FMLSharedEvaluator:
     def development_calls(self) -> int:
         return self._development_calls
 
-    def _run(self, *, phase: str, sequence: int, command: str) -> FMLEvaluationRecord:
-        self.workspace.validate_changes(self.task)
-        candidate_digest = tree_digest(self.workspace.root)
+    def _run(
+        self,
+        *,
+        phase: str,
+        sequence: int,
+        command: str,
+        workspace: FMLWorkspace | None = None,
+    ) -> FMLEvaluationRecord:
+        workspace = workspace or self.workspace
+        workspace.validate_changes(self.task)
+        candidate_digest = tree_digest(workspace.root)
         evaluation_root = self.evidence_dir / f"{phase}-{sequence:04d}"
         candidate = disposable_evaluation_workspace(
-            self.workspace.root, evaluation_root / "candidate"
+            workspace.root, evaluation_root / "candidate"
         )
         task_assets = self.upstream_root / "ml_tasks" / self.task.upstream_task_name
         isolated_assets = evaluation_root / "ml_tasks" / self.task.upstream_task_name
@@ -182,14 +191,45 @@ class FMLSharedEvaluator:
         record.write(evaluation_root / "evaluation-record.json")
         return record
 
-    def evaluate_development(self) -> dict[str, Any]:
+    def evaluate_development(self, *, files: object = None) -> dict[str, Any]:
         if self._development_calls >= self.max_calls:
             raise AdapterError("FML development evaluator call budget is exhausted")
         self._development_calls += 1
+        workspace = self.workspace
+        if files is not None:
+            if not isinstance(files, dict):
+                raise AdapterError("FML candidate snapshot must be an object")
+            snapshot = self.evidence_dir / "transport-snapshots" / f"request-{self._development_calls:04d}"
+            shutil.copytree(self.workspace.root, snapshot, symlinks=False)
+            for relative in self.task.editable_paths:
+                target = snapshot / relative
+                if target.is_dir():
+                    shutil.rmtree(target)
+                elif target.exists() or target.is_symlink():
+                    target.unlink()
+            for relative, encoded in files.items():
+                if not isinstance(relative, str) or not isinstance(encoded, str):
+                    raise AdapterError("FML candidate snapshot entries must be strings")
+                target = (snapshot / relative).resolve()
+                try:
+                    target.relative_to(snapshot.resolve())
+                except ValueError as exc:
+                    raise AdapterError("FML candidate snapshot path is unsafe") from exc
+                target.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    target.write_bytes(base64.b64decode(encoded, validate=True))
+                except ValueError as exc:
+                    raise AdapterError("FML candidate snapshot is not valid base64") from exc
+            workspace = FMLWorkspace(
+                root=snapshot,
+                initial_manifest=self.workspace.initial_manifest,
+                initial_digest=self.workspace.initial_digest,
+            )
         record = self._run(
             phase="development",
             sequence=self._development_calls,
             command=self.task.development_evaluation_command,
+            workspace=workspace,
         )
         return {
             "status": record.status,

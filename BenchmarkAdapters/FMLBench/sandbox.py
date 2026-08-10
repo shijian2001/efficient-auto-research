@@ -171,7 +171,7 @@ def sandbox_fml_command(
             str(workspace),
             "--",
             "/usr/bin/python3",
-            str(ROOT / "BenchmarkAdapters/unix_relay_forwarder.py"),
+            str(ROOT / "BenchmarkAdapters/LLMRelay/forwarder.py"),
             "--socket",
             "/relay/llm.sock",
             "--port",

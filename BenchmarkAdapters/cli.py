@@ -131,6 +131,7 @@ def _mle_parser(subparsers: argparse._SubParsersAction) -> None:
     parser.add_argument("--max-turns", type=int, default=8)
     parser.add_argument("--instruction")
     parser.add_argument("--config-path", type=Path)
+    parser.add_argument("--agent-variant", default="default")
     parser.add_argument("--force", action="store_true")
     parser.add_argument("--dry-run", action="store_true")
     _add_common_endpoint_args(parser)
@@ -1334,6 +1335,7 @@ def main(argv: list[str] | None = None) -> int:
             runtime_root=args.output_dir.resolve() / "launcher/runtime",
             model_environment=model_environment,
             native_step_limit=args.native_step_limit,
+            agent_variant=args.agent_variant,
         )
         command = build_native_command(request)
         if args.dry_run:
@@ -1607,6 +1609,7 @@ def main(argv: list[str] | None = None) -> int:
             force=args.force,
             dry_run=args.dry_run,
             seed=args.seed,
+            agent_variant=args.agent_variant,
         )
         adapter = get_agent_adapter(args.agent).mle_lite
         if args.dry_run:

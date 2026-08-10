@@ -40,7 +40,6 @@ class FMLBenchmarkAdapter:
         if agent not in AGENTS:
             raise AdapterError(f"unknown FML Agent: {agent}")
         self.agent = agent
-        self.agent_adapter = get_fml_agent_adapter(agent)
 
     def build_command(self, request: FMLRunRequest) -> CommandSpec:
         if request.agent != self.agent:
@@ -77,10 +76,13 @@ class FMLBenchmarkAdapter:
             outer_run_id=request.protocol.outer_run_ids[request.outer_run_index],
             timeout_seconds=request.protocol.wall_clock_seconds,
             credential_env_names=request.credential_env_names,
+            relay_base_url="http://127.0.0.1:6200/v1",
             runtime_executable=request.runtime_executable,
             formal=request.formal,
         )
-        return self.agent_adapter.build_launch_command(context)[0]
+        return get_fml_agent_adapter(
+            self.agent, request.agent_variant
+        ).build_launch_command(context)[0]
 
 
 __all__ = ["FMLBenchmarkAdapter", "FMLRunRequest"]

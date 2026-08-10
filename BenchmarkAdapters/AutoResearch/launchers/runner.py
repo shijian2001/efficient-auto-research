@@ -12,8 +12,15 @@ from pathlib import Path
 from typing import Callable, Mapping
 
 from ...contracts import AdapterError, CommandResult, CommandSpec
+from ...LLMRelay import (
+    RelayProcess,
+    relay_agent_environment,
+    resolve_upstream_api_key,
+    route_command_through_relay,
+)
 from ...process import redact_process_output, redact_sensitive_payload
 from ...registry import AGENTS
+from ...thin_registry import selected_variant
 from ..broker import DevBrokerServer
 from ..dev_client import declare_current
 from ..search import SearchContext, SearchOutcome
@@ -107,7 +114,10 @@ def collect_model_usage(
                 payload = json.loads(line)
             except json.JSONDecodeError:
                 continue
-            record = payload.get("usage") if isinstance(payload, dict) else None
+            record = None
+            if isinstance(payload, dict):
+                nested = payload.get("usage")
+                record = nested if isinstance(nested, dict) else payload
             if isinstance(record, dict):
                 _merge_usage(usage, record, maximum=False)
     for mapping in _usage_mappings(native_result):
@@ -178,8 +188,15 @@ def _initialize_workspace(
 def _stage_runtime(destination: Path) -> Path:
     package = destination / "BenchmarkAdapters/AutoResearch"
     launchers = package / "launchers"
+    relay_package = destination / "BenchmarkAdapters/LLMRelay"
     launchers.mkdir(parents=True, exist_ok=False)
-    for init_path in (destination / "BenchmarkAdapters/__init__.py", package / "__init__.py", launchers / "__init__.py"):
+    relay_package.mkdir(parents=True, exist_ok=False)
+    for init_path in (
+        destination / "BenchmarkAdapters/__init__.py",
+        package / "__init__.py",
+        launchers / "__init__.py",
+        relay_package / "__init__.py",
+    ):
         init_path.parent.mkdir(parents=True, exist_ok=True)
         init_path.write_text("\n", encoding="utf-8")
     source_root = Path(__file__).resolve().parents[1]
@@ -187,6 +204,10 @@ def _stage_runtime(destination: Path) -> Path:
     shutil.copy2(source_root.parent / "contracts.py", destination / "BenchmarkAdapters/contracts.py")
     shutil.copy2(source_root / "dev_client.py", package / "dev_client.py")
     shutil.copy2(source_root / "model_adapters.py", package / "model_adapters.py")
+    shutil.copy2(
+        source_root.parent / "LLMRelay/forwarder.py",
+        relay_package / "forwarder.py",
+    )
     for name in (
         "proposal.py",
         "ear.py",
@@ -247,7 +268,54 @@ class NativeCommandSearchRunner:
         _initialize_workspace(context, workspace, contract)
         runtime_root = _stage_runtime(context.output_dir / "runtime")
         socket_path = context.output_dir / "capability/dev.sock"
-        with self.broker_server_factory(context.broker, socket_path) as server:
+        model = self.model_environment.get("AUTORESEARCH_MODEL", "").strip()
+        upstream_base_url = self.model_environment.get("OPENAI_BASE_URL", "").strip()
+        try:
+            model_parameters = json.loads(
+                self.model_environment.get("AUTORESEARCH_MODEL_PARAMETERS", "")
+            )
+            retry_policy = json.loads(
+                self.model_environment.get("AUTORESEARCH_RETRY_POLICY", "{}")
+            )
+        except json.JSONDecodeError as exc:
+            raise AdapterError("Autoresearch relay configuration is invalid JSON") from exc
+        if not model or not upstream_base_url or not isinstance(model_parameters, dict):
+            raise AdapterError("Autoresearch requires an explicit host relay model track")
+        timeout_value = self.model_environment.get(
+            "AUTORESEARCH_REQUEST_TIMEOUT_SECONDS", ""
+        ).strip()
+        relay_socket = (
+            context.output_dir / "capability/llm.sock" if self.sandbox else None
+        )
+        relay = RelayProcess(
+            agent=context.agent,
+            log_path=context.output_dir / "relay.log",
+            token_log_path=context.output_dir / "relay-token-usage.jsonl",
+            unix_socket=relay_socket,
+            upstream_base_url=upstream_base_url,
+            upstream_api_key=resolve_upstream_api_key(
+                environment=self.model_environment
+            ),
+            upstream_proxy=(
+                self.model_environment.get("HTTPS_PROXY")
+                or self.model_environment.get("https_proxy")
+                or None
+            ),
+            model=model,
+            model_parameters=model_parameters,
+            request_timeout_seconds=int(timeout_value) if timeout_value else None,
+            retry_policy=retry_policy,
+        )
+        with relay, self.broker_server_factory(context.broker, socket_path) as server:
+            local_base_url = (
+                "http://127.0.0.1:6200/v1" if self.sandbox else relay.base_url
+            )
+            relay_environment = relay_agent_environment(
+                base_url=local_base_url,
+                model=model,
+                environment=self.model_environment,
+            )
+            relay_environment["AUTORESEARCH_CODEX_BASE_URL"] = local_base_url
             remaining = max(1, int(context.outer_deadline_monotonic - time.monotonic()))
             request = NativeLaunchRequest(
                 agent=context.agent,
@@ -258,11 +326,18 @@ class NativeCommandSearchRunner:
                 outer_seed=context.outer_seed,
                 timeout_seconds=remaining,
                 runtime_root=runtime_root,
-                model_environment=self.model_environment,
+                model_environment=relay_environment,
                 native_step_limit=self.native_step_limit,
                 runtime_executable=self.runtime_executables.get(context.agent),
+                agent_variant=context.agent_variant,
+                sandboxed=self.sandbox,
             )
             command = self.command_builder(request)
+            command = route_command_through_relay(
+                command,
+                base_url=local_base_url,
+                model=model,
+            )
             if self.sandbox:
                 command = sandbox_native_command(
                     agent=context.agent,
@@ -271,6 +346,7 @@ class NativeCommandSearchRunner:
                     output_dir=request.output_dir,
                     runtime_root=runtime_root,
                     host_socket=socket_path,
+                    host_relay_socket=relay_socket,
                 )
             try:
                 result = execute_native_command(command)
@@ -281,7 +357,32 @@ class NativeCommandSearchRunner:
             redacted_stdout = result.stdout.replace(server.token, "<capability-token>")
             with (context.output_dir / "native-agent.log").open("x", encoding="utf-8") as handle:
                 handle.write(redacted_stdout)
-            if context.broker.declared_revision_id is None and request.state_path.is_file():
+            canonical_arbor = (
+                context.agent == "arbor"
+                and selected_variant(
+                    context.agent,
+                    "autoresearch-architecture",
+                    context.agent_variant,
+                )
+                is None
+            )
+            if (
+                canonical_arbor
+                and request.state_path.is_file()
+            ):
+                request.state_path.unlink()
+            if canonical_arbor:
+                evaluate_current(
+                    str(socket_path),
+                    server.token,
+                    contract.artifact_path(workspace),
+                    request.state_path,
+                )
+                declare_current(str(socket_path), server.token, request.state_path)
+            elif (
+                context.broker.declared_revision_id is None
+                and request.state_path.is_file()
+            ):
                 declare_current(str(socket_path), server.token, request.state_path)
         native_result_path = request.output_dir / "native-result.json"
         native_result = None
@@ -292,7 +393,7 @@ class NativeCommandSearchRunner:
             native_result = redact_sensitive_payload(native_result, command.merged_env())
         token_usage = collect_model_usage(
             stdout=result.stdout,
-            usage_path=request.output_dir / "model-usage.jsonl",
+            usage_path=context.output_dir / "relay-token-usage.jsonl",
             native_result=native_result,
         )
         payload = {

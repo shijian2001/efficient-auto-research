@@ -1,4 +1,4 @@
-"""Local relay process supervisor shared by benchmark adapters."""
+"""Host-owned relay process supervisor shared by every benchmark."""
 
 from __future__ import annotations
 
@@ -13,10 +13,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Mapping
 
-import httpx
 
-
-ROOT = Path(__file__).resolve().parents[1]
+ROOT = Path(__file__).resolve().parents[2]
 
 
 def _free_port() -> int:
@@ -33,6 +31,7 @@ class RelayProcess:
     port: int | None = None
     unix_socket: Path | None = None
     upstream_base_url: str | None = None
+    upstream_api_key: str | None = None
     upstream_proxy: str | None = None
     model: str | None = None
     reasoning_effort: str | None = None
@@ -40,7 +39,24 @@ class RelayProcess:
     model_parameters: Mapping[str, Any] | None = None
     request_timeout_seconds: int | None = None
     retry_policy: Mapping[str, Any] | None = None
+    upstream_api: str | None = None
     process: subprocess.Popen | None = None
+
+    def _resolved_upstream_api(self) -> str:
+        parameters = dict(self.model_parameters or {})
+        api_mode = str(parameters.get("api_mode", "")).strip().lower()
+        upstream_api = (
+            self.upstream_api
+            or (
+                "responses"
+                if api_mode == "responses"
+                and parameters.get("use_completion_api") is not True
+                else "chat"
+            )
+        )
+        if upstream_api not in {"chat", "responses"}:
+            raise RuntimeError("relay upstream API must be chat or responses")
+        return upstream_api
 
     def _stop(self) -> None:
         if self.process is not None and self.process.poll() is None:
@@ -54,6 +70,8 @@ class RelayProcess:
             self.unix_socket.unlink(missing_ok=True)
 
     def _request(self, path: str, *, payload: bytes | None = None, timeout: float = 120):
+        import httpx
+
         if self.unix_socket is not None:
             transport = httpx.HTTPTransport(uds=str(self.unix_socket))
             with httpx.Client(transport=transport, timeout=timeout) as client:
@@ -85,14 +103,22 @@ class RelayProcess:
     def _check_upstream_ready(self) -> None:
         if not self.model:
             raise RuntimeError("relay model must be configured explicitly")
-        payload = json.dumps(
-            {
+        if self._resolved_upstream_api() == "responses":
+            path = "/v1/responses"
+            request_body = {
+                "model": self.model,
+                "max_output_tokens": 8,
+                "input": "Reply READY",
+            }
+        else:
+            path = "/v1/chat/completions"
+            request_body = {
                 "model": self.model,
                 "max_tokens": 8,
                 "messages": [{"role": "user", "content": "Reply READY"}],
             }
-        ).encode("utf-8")
-        response = self._request("/v1/chat/completions", payload=payload, timeout=120)
+        payload = json.dumps(request_body).encode("utf-8")
+        response = self._request(path, payload=payload, timeout=120)
         try:
             status = getattr(response, "status_code", getattr(response, "status", None))
             if status != 200:
@@ -109,6 +135,8 @@ class RelayProcess:
         return f"http://127.0.0.1:{self.port}/v1"
 
     def __enter__(self) -> "RelayProcess":
+        import httpx
+
         if not self.model:
             raise RuntimeError("relay model must be configured explicitly")
         if not self.upstream_base_url:
@@ -117,7 +145,11 @@ class RelayProcess:
             raise RuntimeError("relay model parameters must be configured explicitly")
         if self.request_timeout_seconds is not None and self.request_timeout_seconds < 1:
             raise RuntimeError("relay request timeout must be positive")
-        upstream_key = os.environ.get("UPSTREAM_API_KEY") or os.environ.get("OPENAI_API_KEY")
+        upstream_key = (
+            self.upstream_api_key
+            or os.environ.get("UPSTREAM_API_KEY")
+            or os.environ.get("OPENAI_API_KEY")
+        )
         if not upstream_key:
             raise RuntimeError("set UPSTREAM_API_KEY or OPENAI_API_KEY")
         if self.unix_socket is None:
@@ -153,11 +185,13 @@ class RelayProcess:
             }
         )
         parameters = dict(self.model_parameters or {})
+        upstream_api = self._resolved_upstream_api()
         if self.reasoning_effort is not None:
             parameters.setdefault("reasoning_effort", self.reasoning_effort)
         if self.temperature is not None:
             parameters.setdefault("temperature", self.temperature)
         environment["LLM_FORCE_PARAMETERS_JSON"] = json.dumps(parameters, sort_keys=True)
+        environment["LLM_UPSTREAM_API"] = upstream_api
         environment["LLM_UPSTREAM_TIMEOUT"] = (
             "" if self.request_timeout_seconds is None else str(self.request_timeout_seconds)
         )
@@ -179,11 +213,7 @@ class RelayProcess:
         except FileExistsError as exc:
             raise RuntimeError(f"refusing to overwrite relay log: {self.log_path}") from exc
         try:
-            command = [
-                    sys.executable,
-                    "-u",
-                    str(ROOT / "docker-eval/llm_relay_proxy.py"),
-                ]
+            command = [sys.executable, "-u", str(Path(__file__).with_name("server.py"))]
             if self.unix_socket is None:
                 command.extend(["--port", str(self.port)])
             else:

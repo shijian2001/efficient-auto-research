@@ -14,7 +14,7 @@ from ..contracts import AdapterError, CommandSpec
 from ..formal_contract import ModelTrackConfig
 from ..process import run_command
 from ..protocol import canonical_json, sha256_file, write_json_exclusive
-from ..relay import RelayProcess
+from ..LLMRelay import RelayProcess, relay_agent_environment
 from ..registry import ROOT
 from .baseline import tree_digest
 from .protocol import TerminalAOProtocol
@@ -336,20 +336,10 @@ def evaluate_harness(
         request_timeout_seconds=model_config.request_timeout_seconds,
         retry_policy=model_config.retry_policy,
     ) as relay:
-        safe_environment = {
-            key: value
-            for key, value in command.env.items()
-            if key not in {"OPENAI_API_KEY", "UPSTREAM_API_KEY", "ANTHROPIC_API_KEY"}
-        }
-        safe_environment.update(
-            {
-                "OPENAI_BASE_URL": relay.base_url,
-                "OPENAI_API_BASE": relay.base_url,
-                "OPENAI_API_KEY": "proxy",
-                "ANTHROPIC_API_KEY": "proxy",
-                "NO_PROXY": "localhost,127.0.0.1",
-                "no_proxy": "localhost,127.0.0.1",
-            }
+        safe_environment = relay_agent_environment(
+            base_url=relay.base_url,
+            model=model_config.terminal_inner_model_id,
+            environment=command.env,
         )
         command = CommandSpec(
             argv=command.argv,

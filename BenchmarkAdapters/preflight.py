@@ -24,6 +24,7 @@ from .protocol import sha256_file
 from .registry import AGENTS, ROOT
 from .TerminalAO.protocol import TerminalAOProtocol
 from .TerminalAO.split import FrozenSplit
+from .thin_registry import THIN_CLASSIFICATIONS, UPSTREAM_REVISIONS
 
 
 DEFAULT_AO_PROTOCOL = ROOT / "terminal-bench-2/ao_protocol/protocol.json"
@@ -45,36 +46,28 @@ def _executable_available(command: str) -> bool:
 
 
 def _autoresearch_runtime_available(agent: str) -> bool:
+    if agent == "arbor":
+        executable = ROOT / "baselines/Arbor/.venv/bin/arbor"
+        return executable.is_file() and os.access(executable, os.X_OK)
+    if agent in {"ai-scientist", "ml-master-2"}:
+        return False
     executable, source_root, module = {
         "ear": ROOT / "BenchmarkAdapters/environments/agents/ear-autoresearch/.venv/bin/python",
         "mlevolve": ROOT
         / "BenchmarkAdapters/environments/agents/mlevolve-autoresearch/.venv/bin/python",
-        "arbor": ROOT / "BenchmarkAdapters/environments/terminal/arbor/.venv/bin/python",
         "codex": Path(shutil.which("codex") or ""),
         "claude-code": Path(shutil.which("claude") or ""),
-        "ml-master-2": ROOT
-        / "BenchmarkAdapters/environments/agents/ml-master-2-autoresearch/.venv/bin/python",
-        "ai-scientist": ROOT
-        / "BenchmarkAdapters/environments/terminal/ai-scientist/.venv/bin/python",
     }[agent], {
         "ear": ROOT / "BenchmarkAdapters/environments/agents/ear-autoresearch/.venv/agent-source",
         "mlevolve": ROOT
         / "BenchmarkAdapters/environments/agents/mlevolve-autoresearch/.venv/agent-source",
-        "arbor": ROOT / "BenchmarkAdapters/environments/terminal/arbor/.venv/agent-source",
         "codex": None,
         "claude-code": None,
-        "ml-master-2": ROOT
-        / "BenchmarkAdapters/environments/agents/ml-master-2-autoresearch/.venv/agent-source",
-        "ai-scientist": ROOT
-        / "BenchmarkAdapters/environments/terminal/ai-scientist/.venv/agent-source/src",
     }[agent], {
         "ear": "agent.engine.thompson",
         "mlevolve": "engine.agent_search",
-        "arbor": "arbor.coordinator.orchestrator",
         "codex": None,
         "claude-code": None,
-        "ml-master-2": "BenchmarkAdapters.AutoResearch.launchers.ml_master_2",
-        "ai-scientist": "aisci_agent_runtime.subagents.terminal_task",
     }[agent]
     if not executable.is_file() or not os.access(executable, os.X_OK):
         return False
@@ -491,6 +484,20 @@ def collect_preflight(
             ("optimizer-design", optimizer_design_protocol_record),
             ("terminal-ao", ao_protocol_record),
         ):
+            benchmark_id = {
+                "mle": "mle-bench-lite",
+                "autoresearch": "autoresearch-architecture",
+                "optimizer-design": "optimizer-design",
+                "terminal-ao": "terminal-bench-ao",
+            }[mode]
+            classification = THIN_CLASSIFICATIONS.get(key, {}).get(benchmark_id)
+            reviewed_original_source = (
+                key not in UPSTREAM_REVISIONS
+                or (
+                    commit == UPSTREAM_REVISIONS[key]
+                    and dirty is False
+                )
+            )
             protocol_valid = bool(protocol_record.get("valid"))
             agent_environment_ready = (
                 autoresearch_environment_ready
@@ -502,7 +509,15 @@ def collect_preflight(
                 if mode in {"autoresearch", "optimizer-design"}
                 else True
             )
-            if not source_ready:
+            if classification == "unsupported":
+                level = ReadinessLevel.NOT_READY
+                detail = "unsupported: no official thin adapter entrypoint"
+                evidence = None
+            elif not reviewed_original_source:
+                level = ReadinessLevel.NOT_READY
+                detail = "original thin adapter requires the reviewed clean upstream revision"
+                evidence = None
+            elif not source_ready:
                 level = ReadinessLevel.NOT_READY
                 detail = "source checkout or commit identity is missing"
                 evidence = None
@@ -537,6 +552,8 @@ def collect_preflight(
                 "level_value": int(level),
                 "detail": detail,
                 "evidence_path": evidence,
+                "thin_adapter_classification": classification,
+                "reviewed_original_source": reviewed_original_source,
                 "formal_launch_allowed": bool(
                     level >= ReadinessLevel.COMMAND_READY
                     and dirty is False

@@ -21,6 +21,11 @@ from .protocol import FormalProtocol, sha256_file
 from .registry import AGENTS, ROOT
 from .task_specs import task_spec_digest
 from .TerminalAO.protocol import TerminalAOProtocol
+from .thin_registry import (
+    backend_identity,
+    require_clean_upstream_source,
+    require_thin_support,
+)
 
 
 def git_identity(path: Path) -> tuple[str | None, bool | None]:
@@ -67,8 +72,15 @@ def _require_executable(value: str | Path, description: str) -> str:
     return str(Path(executable).resolve())
 
 
-def _registered_launcher_runtime(benchmark_id: str, agent_id: str, protocol: object) -> str:
+def _registered_launcher_runtime(
+    benchmark_id: str,
+    agent_id: str,
+    protocol: object,
+    registered_variant: str | None,
+) -> str:
     if benchmark_id == "optimizer-design":
+        if agent_id == "arbor" and registered_variant is None:
+            return _require_executable(ROOT / "baselines/Arbor/.venv/bin/arbor", "Arbor")
         manifest = AgentRuntimeManifest.load(protocol.agent_runtime_manifest_path)
         manifest.validate(agent_id)
         return manifest.agents[agent_id].executable_path
@@ -100,7 +112,7 @@ def _registered_launcher_runtime(benchmark_id: str, agent_id: str, protocol: obj
         runtimes = {
             "ear": ROOT / "BenchmarkAdapters/environments/agents/ear-autoresearch/.venv/bin/python",
             "mlevolve": ROOT / "BenchmarkAdapters/environments/agents/mlevolve-autoresearch/.venv/bin/python",
-            "arbor": ROOT / "BenchmarkAdapters/environments/terminal/arbor/.venv/bin/python",
+            "arbor": ROOT / "baselines/Arbor/.venv/bin/arbor",
             "codex": "codex",
             "claude-code": "claude",
             "ml-master-2": ROOT / "BenchmarkAdapters/environments/agents/ml-master-2-autoresearch/.venv/bin/python",
@@ -206,25 +218,28 @@ def collect_formal_preflight(
 
     def launcher() -> str:
         value = protocol_state()
+        variant = require_thin_support(agent_id, benchmark_id, agent_variant)
+        if agent_id in {"arbor", "ai-scientist", "ml-master-2"} and variant is None:
+            require_clean_upstream_source(agent_id)
         if benchmark_id == "fml-bench":
             from .FMLBench.agents import get_fml_agent_adapter
 
-            adapter = get_fml_agent_adapter(agent_id)
+            adapter = get_fml_agent_adapter(agent_id, agent_variant)
             report = adapter.validate_installation()
             if not report.ready:
                 raise AdapterError(report.failure_reason or f"FML {agent_id} runtime is unavailable")
             if agent_id not in value.agent_adapter_ids:
                 raise AdapterError(f"FML protocol omitted concrete adapter: {agent_id}")
             return f"{adapter.native_entrypoint}: {report.executable_path}"
-        backend = {
-            "mle-bench-lite": AGENTS[agent_id].mle_backend,
-            "terminal-bench-ao": AGENTS[agent_id].terminal_ao_backend,
-            "autoresearch-architecture": AGENTS[agent_id].autoresearch_backend,
-            "optimizer-design": AGENTS[agent_id].optimizer_design_backend,
-        }[benchmark_id]
+        backend = backend_identity(agent_id, benchmark_id, agent_variant)
         if not backend or backend.startswith("blocked:"):
             raise AdapterError(f"formal launcher backend is unavailable: {agent_id}")
-        runtime = _registered_launcher_runtime(benchmark_id, agent_id, value)
+        runtime = _registered_launcher_runtime(
+            benchmark_id,
+            agent_id,
+            value,
+            None if variant is None else variant.key,
+        )
         return f"{backend}: {runtime}"
 
     def hardware() -> str:

@@ -59,6 +59,7 @@ def sandbox_native_command(
     output_dir: Path,
     runtime_root: Path,
     host_socket: Path,
+    host_relay_socket: Path,
 ) -> CommandSpec:
     if agent not in AGENTS:
         raise AdapterError(f"unknown Autoresearch Agent: {agent}")
@@ -70,6 +71,7 @@ def sandbox_native_command(
     output_dir = output_dir.resolve()
     output_dir.mkdir(parents=True, exist_ok=False)
     host_socket = _socket(host_socket)
+    host_relay_socket = _socket(host_relay_socket)
     argv = [
         str(bubblewrap),
         "--die-with-parent",
@@ -77,6 +79,7 @@ def sandbox_native_command(
         "--unshare-ipc",
         "--unshare-pid",
         "--unshare-uts",
+        "--unshare-net",
         "--ro-bind",
         "/usr",
         "/usr",
@@ -118,6 +121,8 @@ def sandbox_native_command(
         "/tmp/xdg-config",
         "--dir",
         "/capability",
+        "--dir",
+        "/relay",
     ]
     created = {
         Path("/tmp"),
@@ -125,6 +130,7 @@ def sandbox_native_command(
         Path("/tmp/xdg-cache"),
         Path("/tmp/xdg-config"),
         Path("/capability"),
+        Path("/relay"),
     }
     _bind(argv, workspace, workspace, created, read_only=False)
     _bind(argv, output_dir, output_dir, created, read_only=False)
@@ -150,6 +156,7 @@ def sandbox_native_command(
             if runtime not in {Path("/usr"), Path("/bin"), Path("/lib"), Path("/lib64")}:
                 _bind(argv, runtime, runtime, created, read_only=True)
     _bind(argv, host_socket, Path("/capability/dev.sock"), created, read_only=False)
+    _bind(argv, host_relay_socket, Path("/relay/llm.sock"), created, read_only=False)
     child_argv = tuple(
         value.replace(str(host_socket), "/capability/dev.sock") for value in command.argv
     )
@@ -166,20 +173,6 @@ def sandbox_native_command(
         "XDG_CONFIG_HOME": "/tmp/xdg-config",
     }
     allowed_host_environment = {
-        "OPENAI_API_KEY",
-        "UPSTREAM_API_KEY",
-        "OPENAI_BASE_URL",
-        "OPENAI_API_BASE",
-        "ANTHROPIC_API_KEY",
-        "ANTHROPIC_BASE_URL",
-        "HTTP_PROXY",
-        "HTTPS_PROXY",
-        "ALL_PROXY",
-        "NO_PROXY",
-        "http_proxy",
-        "https_proxy",
-        "all_proxy",
-        "no_proxy",
         "AUTORESEARCH_PROPOSER_COMMAND",
         "AUTORESEARCH_ARBOR_PROVIDER_FACTORY",
         "AUTORESEARCH_CODEX_BASE_URL",
@@ -190,7 +183,6 @@ def sandbox_native_command(
         "AUTORESEARCH_REQUEST_TIMEOUT_SECONDS",
         "AUTORESEARCH_RETRY_POLICY",
         "AUTORESEARCH_MODEL_FACTORY_ROOT",
-        "GPT_BASE_URL",
         "GPT_CHAT_MODEL",
         "MODEL",
         "OPTIMIZATION_ARTIFACT_NAME",
@@ -211,7 +203,21 @@ def sandbox_native_command(
             for key, value in command.env.items()
         }
     )
-    argv.extend(("--chdir", str(workspace), "--", *child_argv))
+    argv.extend(
+        (
+            "--chdir",
+            str(workspace),
+            "--",
+            "/usr/bin/python3",
+            str(runtime_root / "BenchmarkAdapters/LLMRelay/forwarder.py"),
+            "--socket",
+            "/relay/llm.sock",
+            "--port",
+            "6200",
+            "--",
+            *child_argv,
+        )
+    )
     return CommandSpec(
         argv=tuple(argv),
         cwd=workspace,

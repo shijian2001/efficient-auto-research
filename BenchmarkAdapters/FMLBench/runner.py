@@ -6,7 +6,6 @@ import hashlib
 import json
 import subprocess
 import time
-from contextlib import nullcontext
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -16,7 +15,7 @@ from ..formal_contract import write_hashed_json
 from ..gpu_locks import gpu_allocation
 from ..protocol import BenchmarkMode, canonical_json, sha256_file
 from ..records import RunManifest
-from ..relay import RelayProcess
+from ..LLMRelay import RelayProcess, resolve_upstream_api_key
 from ..registry import AGENTS, ROOT
 from ..task_specs import task_spec_digest
 from .adapter import FMLRunRequest
@@ -28,6 +27,7 @@ from .records import FMLTaskRecord
 from .sandbox import sandbox_fml_command
 from .task import FMLTaskSpec, load_fml_task
 from .workspace import FMLWorkspace
+from ..thin_registry import selected_variant
 
 
 def _git_commit(path: Path) -> tuple[str, bool]:
@@ -190,6 +190,15 @@ def run_fml_task(
         raise AdapterError(f"FML output already exists: {output_dir}")
     request.protocol.validate(formal=request.formal)
     request.model_config.validate(formal=request.formal)
+    if (
+        request.formal
+        and request.agent in {"arbor", "ai-scientist", "ml-master-2"}
+        and selected_variant(request.agent, "fml-bench", request.agent_variant) is None
+        and request.runtime_executable is not None
+    ):
+        raise AdapterError(
+            "formal original thin adapters do not accept runtime executable overrides"
+        )
     if not 0 <= request.outer_run_index < request.protocol.outer_repetitions:
         raise AdapterError("FML outer run index is outside protocol")
     if request.task_config.resolve() not in {
@@ -229,7 +238,7 @@ def run_fml_task(
         environment=request.evaluator_environment,
         direct_execution=request.runtime_executable is not None,
     )
-    adapter = get_fml_agent_adapter(request.agent)
+    adapter = get_fml_agent_adapter(request.agent, request.agent_variant)
     stdout_path = output_dir / "stdout.log"
     stderr_path = output_dir / "stderr.log"
     stderr_path.write_text("", encoding="utf-8")
@@ -245,15 +254,20 @@ def run_fml_task(
             agent=request.agent,
             log_path=output_dir / "relay.log",
             token_log_path=output_dir / "relay-token-usage.jsonl",
-            unix_socket=relay_socket,
+            unix_socket=(
+                relay_socket
+                if request.formal and request.runtime_executable is None
+                else None
+            ),
             upstream_base_url=request.model_config.relay_base_url,
+            upstream_api_key=resolve_upstream_api_key(
+                request.credential_env_names
+            ),
             model=request.model_config.outer_model_id,
             model_parameters=request.model_config.model_parameters,
             request_timeout_seconds=request.model_config.request_timeout_seconds,
             retry_policy=request.model_config.retry_policy,
         )
-        if request.formal and request.runtime_executable is None
-        else nullcontext(None)
     )
     with relay_context as relay, fml_dev_broker(
         evaluator, output_dir / "capability/dev.sock"
@@ -271,6 +285,11 @@ def run_fml_task(
             outer_run_id=request.protocol.outer_run_ids[request.outer_run_index],
             timeout_seconds=request.protocol.wall_clock_seconds,
             credential_env_names=request.credential_env_names,
+            relay_base_url=(
+                "http://127.0.0.1:6200/v1"
+                if request.formal and request.runtime_executable is None
+                else relay.base_url
+            ),
             runtime_executable=request.runtime_executable,
             formal=request.formal,
         )

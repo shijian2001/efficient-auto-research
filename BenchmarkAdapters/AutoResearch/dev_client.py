@@ -128,6 +128,12 @@ def main(argv: list[str] | None = None) -> int:
             result = declare_current(args.socket, args.token, args.state)
         else:
             result = request(args.socket, args.token, "best-dev")
+        if isinstance(result, dict):
+            for metric_name in ("val_bpb", "score_steps", "pass_rate", "metric"):
+                metric = result.get(metric_name)
+                if isinstance(metric, (int, float)):
+                    result = {**result, "score": metric}
+                    break
         print(json.dumps(result, sort_keys=True))
     except (OSError, RuntimeError, ValueError, UnicodeError, json.JSONDecodeError) as exc:
         print(json.dumps({"ok": False, "error": str(exc)}, sort_keys=True), file=sys.stderr)

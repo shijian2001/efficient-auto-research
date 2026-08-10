@@ -9,9 +9,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Mapping
 
+from ...arbor_thin import write_arbor_config
 from ...contracts import AdapterError, CommandSpec, require_file
 from ...registry import AGENTS, ROOT
 from ...task_specs import task_spec_text
+from ...thin_registry import require_clean_upstream_source, require_thin_support
 
 
 @dataclass(frozen=True)
@@ -28,6 +30,11 @@ class NativeAOLaunchRequest:
     model_parameters: Mapping[str, object]
     request_timeout_seconds: int | None
     retry_policy: Mapping[str, object]
+    agent_variant: str = "default"
+    model_base_url: str = "http://127.0.0.1:6200/v1"
+    editable_paths: tuple[str, ...] = ()
+    protected_paths: tuple[str, ...] = ()
+    sandboxed: bool = False
 
     @property
     def dev_command(self) -> str:
@@ -41,9 +48,18 @@ class NativeAOLaunchRequest:
         )
         return shlex.join(argv)
 
-
 def _instruction(request: NativeAOLaunchRequest) -> str:
     return task_spec_text("terminal-bench-ao") + "\n\nDEV capability: " + request.dev_command
+
+
+def _arbor_instruction() -> str:
+    return (
+        task_spec_text("terminal-bench-ao")
+        + "\n\nThe official project plugin injects the host-owned B_dev evaluator "
+        "into each executor worktree. Held-out evaluation is unavailable. Use Arbor's "
+        "native tree, merge, promotion, selection, and stop behavior, and leave the "
+        "Agent-selected final candidate on the trunk."
+    )
 
 
 def _codex(request: NativeAOLaunchRequest) -> CommandSpec:
@@ -89,31 +105,61 @@ def _claude(request: NativeAOLaunchRequest) -> CommandSpec:
     )
 
 
-def _arbor(request: NativeAOLaunchRequest) -> CommandSpec:
+def _arbor(
+    request: NativeAOLaunchRequest,
+    *,
+    require_upstream: bool,
+) -> CommandSpec:
+    if require_upstream:
+        require_clean_upstream_source("arbor")
     executable = require_file(AGENTS["arbor"].install_path / ".venv/bin/arbor", "Arbor CLI")
+    socket_path = Path("/capability/dev.sock") if request.sandboxed else request.dev_socket
+    eval_argv = [
+        "/usr/bin/python3",
+        str(request.dev_client_path.resolve()),
+        "--socket",
+        str(socket_path),
+        "--operation",
+        "evaluate-dev",
+        "--candidate-root",
+        "{cwd}",
+    ]
+    for relative in request.editable_paths:
+        eval_argv.extend(("--editable", relative))
+    config_path = write_arbor_config(
+        request.launcher_output_dir / "arbor-thin-config.yaml",
+        model=request.model,
+        base_url=request.model_base_url,
+        model_parameters=request.model_parameters,
+        eval_command=shlex.join(eval_argv) + ' --token "$TERMINAL_AO_DEV_TOKEN"',
+        metric_direction="maximize",
+        protected_paths=request.protected_paths,
+        required_outputs=request.editable_paths,
+    )
+    argv = [
+        str(executable),
+        "run",
+        _arbor_instruction(),
+        "--cwd",
+        str(request.candidate_dir),
+        "--yes",
+        "--yes-cwd",
+        str(request.candidate_dir),
+        "--workspace-dir",
+        str(request.launcher_output_dir / "arbor-session"),
+        "--config",
+        str(config_path),
+        "--interaction-mode",
+        "auto",
+        "--no-followup",
+        "--no-webui",
+    ]
+    if not require_upstream:
+        argv.extend(("--max-cycles", "24", "--max-turns", "96"))
     return CommandSpec(
-        argv=(
-            str(executable),
-            "run",
-            _instruction(request),
-            "--cwd",
-            str(request.candidate_dir),
-            "--yes",
-            "--yes-cwd",
-            str(request.candidate_dir),
-            "--workspace-dir",
-            str(request.launcher_output_dir / "arbor-session"),
-            "--max-cycles",
-            "24",
-            "--max-turns",
-            "96",
-            "--interaction-mode",
-            "auto",
-            "--no-followup",
-            "--no-webui",
-        ),
+        argv=tuple(argv),
         cwd=request.candidate_dir,
-        env={"ARBOR_MODEL": request.model, "SEED": str(request.seed)},
+        env={"SEED": str(request.seed), "TERMINAL_AO_DEV_TOKEN": request.dev_token},
         timeout_seconds=request.timeout_seconds,
         label="Arbor native coordinator Terminal AO loop",
     )
@@ -169,12 +215,26 @@ def _python_native(request: NativeAOLaunchRequest, module: str, python: Path, la
 def build_native_ao_command(request: NativeAOLaunchRequest) -> CommandSpec:
     if request.agent not in AGENTS:
         raise AdapterError(f"unknown baseline agent: {request.agent}")
+    variant = require_thin_support(
+        request.agent, "terminal-bench-ao", request.agent_variant
+    )
     if request.agent == "codex":
         return _codex(request)
     if request.agent == "claude-code":
         return _claude(request)
     if request.agent == "arbor":
-        return _arbor(request)
+        if variant is not None and variant.key != "arbor-benchmark-patched":
+            raise AdapterError(f"unexpected Arbor variant: {variant.key}")
+        command = _arbor(request, require_upstream=variant is None)
+        if variant is None:
+            return command
+        return CommandSpec(
+            argv=command.argv,
+            cwd=command.cwd,
+            env=command.env,
+            timeout_seconds=command.timeout_seconds,
+            label="Arbor benchmark-patched Terminal AO loop",
+        )
     modules = {
         "ear": (
             "BenchmarkAdapters.TerminalAO.launchers.ear",
@@ -197,7 +257,18 @@ def build_native_ao_command(request: NativeAOLaunchRequest) -> CommandSpec:
             "AiScientist native subagent Terminal AO loop",
         ),
     }
+    if request.agent in {"ml-master-2", "ai-scientist"} and variant is None:
+        raise AdapterError(f"unreachable original {request.agent} Terminal AO dispatch")
     module, python, label = modules[request.agent]
+    if variant is not None:
+        label = {
+            "ai-scientist-terminal-variant": (
+                "AiScientist TerminalTaskSubagent variant"
+            ),
+            "ml-master-autoresearch-variant": (
+                "ML-Master benchmark-defined staged workflow variant"
+            ),
+        }.get(variant.key, label)
     return _python_native(request, module, python, label)
 
 

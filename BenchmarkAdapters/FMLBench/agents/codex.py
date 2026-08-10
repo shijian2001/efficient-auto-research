@@ -40,7 +40,7 @@ class CodexFMLAdapter(FMLAgentAdapter):
         argv.extend(
             (
                 "-c",
-                f"openai_base_url={json.dumps('http://127.0.0.1:6200/v1')}",
+                f"openai_base_url={json.dumps(context.relay_base_url)}",
                 prompt,
             )
         )

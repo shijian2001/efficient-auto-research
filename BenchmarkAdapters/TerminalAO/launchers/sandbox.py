@@ -78,7 +78,7 @@ def sandbox_native_ao_command(
     bwrap = require_file(Path(shutil.which("bwrap") or ""), "Bubblewrap executable")
     sandbox_runner = require_file(ROOT / "BenchmarkAdapters/sandbox_runner.py", "sandbox runner")
     relay_forwarder = require_file(
-        ROOT / "BenchmarkAdapters/unix_relay_forwarder.py", "sandbox relay forwarder"
+        ROOT / "BenchmarkAdapters/LLMRelay/forwarder.py", "sandbox relay forwarder"
     )
     adapter_python = require_file(ROOT / "BenchmarkAdapters/.venv/bin/python", "adapter Python")
     candidate_dir = require_directory(candidate_dir, "Terminal AO candidate")

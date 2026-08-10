@@ -22,6 +22,7 @@ from .revisions import TrainRevisionStore
 from .search import SearchContext, SearchOutcome, SearchRunner
 from .seed_injection import SeedPolicy
 from ..task_specs import task_spec_digest
+from ..thin_registry import backend_identity, selected_variant
 
 
 def _git_identity(path: Path) -> tuple[str, bool]:
@@ -123,7 +124,9 @@ def build_run_manifest(
             "failure": protocol.failure_policy,
             "artifact": protocol.artifact_policy,
             "aggregation": protocol.aggregation_policy,
-            "native_backend": AGENTS[agent].autoresearch_backend,
+            "native_backend": backend_identity(
+                agent, "autoresearch-architecture", agent_variant
+            ),
             "run_kind": run_kind,
         },
         formal=formal,
@@ -371,7 +374,9 @@ def _run_autoresearch_once(
         search_outcome = search_runner(
             SearchContext(
                 agent=agent,
-                native_backend=AGENTS[agent].autoresearch_backend,
+                native_backend=backend_identity(
+                    agent, "autoresearch-architecture", agent_variant
+                ),
                 outer_seed=outer_seed,
                 outer_deadline_monotonic=started + run_budget,
                 candidate_training_seconds=protocol.candidate_training_seconds,
@@ -379,6 +384,7 @@ def _run_autoresearch_once(
                 baseline_train_path=store.get("baseline").path / "train.py",
                 output_dir=output_dir / "launcher",
                 broker=broker,
+                agent_variant=agent_variant,
             )
         )
     except Exception as exc:
@@ -398,11 +404,18 @@ def _run_autoresearch_once(
         )
         result.write(output_dir / "result.json")
         return result
-    best = broker.best
+    canonical_arbor = (
+        agent == "arbor"
+        and selected_variant(agent, "autoresearch-architecture", agent_variant) is None
+    )
     declaration = search_outcome.declared_revision_id or broker.declared_revision_id
     if declaration is not None and broker.declared_revision_id is None:
         broker.declare_final(declaration)
-    native_matches = search_outcome.native_component == AGENTS[agent].autoresearch_backend
+    native_matches = search_outcome.native_component == backend_identity(
+        agent, "autoresearch-architecture", agent_variant
+    )
+    selected = broker.scored(declaration) if declaration is not None else None
+    best = selected if canonical_arbor else broker.best
     failure_reason = None
     if not native_matches:
         failure_reason = "native search component differs from the registered Agent backend"
@@ -442,7 +455,11 @@ def _run_autoresearch_once(
         {
             "declared_revision_id": declaration,
             "selected_revision_id": selected.revision.revision_id,
-            "selection_policy": "minimum valid development val_bpb",
+            "selection_policy": (
+                "Agent-owned final trunk revision"
+                if canonical_arbor
+                else "minimum valid development val_bpb"
+            ),
             "selection_uses_held_out": False,
             "dev_val_bpb": selected.evaluation.val_bpb,
             "train_sha256": selected.revision.train_sha256,

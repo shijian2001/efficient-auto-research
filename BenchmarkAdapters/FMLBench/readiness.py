@@ -7,6 +7,12 @@ from typing import Any
 
 from ..contracts import AdapterError
 from ..registry import AGENTS
+from ..thin_registry import (
+    AGENT_VARIANTS,
+    THIN_CLASSIFICATIONS,
+    UPSTREAM_REVISIONS,
+    git_source_state,
+)
 from .agents import FML_AGENT_ADAPTERS, get_fml_agent_adapter
 from .protocol import FMLProtocol
 
@@ -17,13 +23,31 @@ def collect_fml_readiness(
     agents: dict[str, Any] = {}
     for agent_id in AGENTS:
         adapter_class = FML_AGENT_ADAPTERS.get(agent_id)
-        adapter_defined = adapter_class is not None
-        report = get_fml_agent_adapter(agent_id).validate_installation()
+        classification = THIN_CLASSIFICATIONS.get(agent_id, {}).get("fml-bench")
+        adapter_defined = adapter_class is not None and classification != "unsupported"
+        report = adapter_class().validate_installation()
+        source_commit, source_dirty = git_source_state(AGENTS[agent_id].install_path)
+        reviewed_original_source = (
+            agent_id not in UPSTREAM_REVISIONS
+            or (
+                source_commit == UPSTREAM_REVISIONS[agent_id]
+                and source_dirty is False
+            )
+        )
         agents[agent_id] = {
             "adapter_defined": adapter_defined,
             "adapter_class": None if adapter_class is None else adapter_class.__name__,
             "native_entrypoint": None if adapter_class is None else adapter_class.native_entrypoint,
-            "launcher_smoke_ready": bool(report.ready),
+            "thin_adapter_classification": classification,
+            "registered_variants": sorted(
+                key
+                for key, variant in AGENT_VARIANTS.items()
+                if variant.base_agent == agent_id and "fml-bench" in variant.benchmarks
+            ),
+            "reviewed_original_source": reviewed_original_source,
+            "launcher_smoke_ready": bool(
+                report.ready and adapter_defined and reviewed_original_source
+            ),
             "installation": report.to_dict(),
             "formal_scored": False,
         }

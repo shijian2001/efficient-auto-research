@@ -10,9 +10,11 @@ from dataclasses import field
 from pathlib import Path
 from typing import Mapping
 
+from ...arbor_thin import write_arbor_config
 from ...contracts import AdapterError, CommandSpec
 from ...autonomous_optimization import task_contract
 from ...registry import AGENTS, ROOT
+from ...thin_registry import require_clean_upstream_source, require_thin_support
 
 
 @dataclass(frozen=True)
@@ -28,6 +30,8 @@ class NativeLaunchRequest:
     model_environment: Mapping[str, str] = field(default_factory=dict)
     native_step_limit: int | None = None
     runtime_executable: Path | None = None
+    agent_variant: str = "default"
+    sandboxed: bool = False
 
     @property
     def state_path(self) -> Path:
@@ -66,6 +70,20 @@ def instruction(request: NativeLaunchRequest) -> str:
         f"finishing, leave the chosen {contract.artifact_name} in "
         f"place and declare its evaluated revision with: {request.client_command('declare-current')}. "
         "Held-out seeds and final evaluation are unavailable during search."
+    )
+
+
+def arbor_instruction(request: NativeLaunchRequest) -> str:
+    contract = task_contract(request.model_environment)
+    canonical = request.model_environment.get(
+        "BENCHMARK_TASK_SPEC_TEXT", contract.task_instruction
+    )
+    return (
+        f"Optimize the frozen {contract.task_name} task in this repository. "
+        f"{canonical} The official project plugin injects the host-owned B_dev "
+        "evaluator into every executor worktree. Held-out evaluation is unavailable. "
+        "Use Arbor's native tree, merge, promotion, selection, and stop behavior, and "
+        f"leave the Agent-selected final {contract.artifact_name} on the trunk."
     )
 
 
@@ -161,6 +179,9 @@ def build_native_command(request: NativeLaunchRequest) -> CommandSpec:
         raise AdapterError("Autoresearch model parameters are invalid JSON") from exc
     if not isinstance(model_parameters, dict) or not model_parameters:
         raise AdapterError("Autoresearch model parameters must be a non-empty object")
+    variant = require_thin_support(
+        request.agent, "autoresearch-architecture", request.agent_variant
+    )
     if request.agent == "codex":
         executable = str(request.runtime_executable or shutil.which("codex") or "codex")
         argv = [
@@ -215,12 +236,70 @@ def build_native_command(request: NativeLaunchRequest) -> CommandSpec:
             label="Claude Code native repository loop",
         )
     if request.agent == "arbor":
+        if variant is None:
+            require_clean_upstream_source("arbor")
+            executable = request.runtime_executable or ROOT / "baselines/Arbor/.venv/bin/arbor"
+            contract = task_contract(request.model_environment)
+            socket_path = Path("/capability/dev.sock") if request.sandboxed else request.socket_path
+            eval_command = shlex.join(
+                (
+                    "/usr/bin/python3",
+                    str(request.runtime_root / "BenchmarkAdapters/AutoResearch/dev_client.py"),
+                    "evaluate-current",
+                    "--socket",
+                    str(socket_path),
+                    "--train",
+                    f"{{cwd}}/{contract.artifact_name}",
+                    "--state",
+                    "/tmp/benchmark-arbor-{node_id}.json",
+                )
+            ) + ' --token "$AUTORESEARCH_DEV_TOKEN"'
+            config_path = write_arbor_config(
+                request.runtime_root / "arbor-thin-config.yaml",
+                model=model,
+                base_url=request.model_environment.get("OPENAI_BASE_URL", ""),
+                model_parameters=model_parameters,
+                eval_command=eval_command,
+                metric_direction=contract.metric_direction,
+                artifact_name=contract.artifact_name,
+                protected_paths=(contract.program_name,),
+                required_outputs=(contract.artifact_name,),
+            )
+            argv = [
+                str(executable),
+                "run",
+                arbor_instruction(request),
+                "--cwd",
+                str(request.workspace),
+                "--yes",
+                "--yes-cwd",
+                str(request.workspace),
+                "--workspace-dir",
+                str(request.output_dir / "arbor-session"),
+                "--config",
+                str(config_path),
+                "--interaction-mode",
+                "auto",
+                "--no-followup",
+                "--no-webui",
+            ]
+            return CommandSpec(
+                argv=tuple(argv),
+                cwd=request.workspace,
+                env={
+                    **request.model_environment,
+                    "AUTORESEARCH_DEV_TOKEN": request.token,
+                    "PYTHONHASHSEED": str(request.outer_seed),
+                },
+                timeout_seconds=request.timeout_seconds,
+                label="Arbor official CLI Autoresearch loop",
+            )
         return _python_command(
             request,
             "BenchmarkAdapters.AutoResearch.launchers.arbor",
             request.runtime_executable
             or ROOT / "BenchmarkAdapters/environments/terminal/arbor/.venv/bin/python",
-            "Arbor native coordinator/executor loop",
+            "Arbor benchmark-patched coordinator/executor loop",
         )
     modules = {
         "ear": (
@@ -246,10 +325,28 @@ def build_native_command(request: NativeLaunchRequest) -> CommandSpec:
             "AiScientist native Subagent loop",
         ),
     }
+    if request.agent in {"ml-master-2", "ai-scientist"} and variant is None:
+        raise AdapterError(
+            f"unreachable original {request.agent} Autoresearch dispatch"
+        )
     module, python, label = modules[request.agent]
+    if variant is not None:
+        label = {
+            "ai-scientist-architecture-variant": (
+                "AiScientist architecture-design Subagent variant"
+            ),
+            "ml-master-autoresearch-variant": (
+                "ML-Master benchmark-defined staged workflow variant"
+            ),
+        }.get(variant.key, label)
     if request.runtime_executable is not None:
         python = request.runtime_executable
     return _python_command(request, module, python, label)
 
 
-__all__ = ["NativeLaunchRequest", "build_native_command", "instruction"]
+__all__ = [
+    "NativeLaunchRequest",
+    "arbor_instruction",
+    "build_native_command",
+    "instruction",
+]

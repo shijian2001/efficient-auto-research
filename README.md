@@ -35,7 +35,7 @@ MLEvolve 12-24 倍，G5 仍需独立验证。
 EAR / MLEvolve / Arbor
     │  OPENAI_BASE_URL → http://127.0.0.1:620X/v1   (端口 = 6200 + GPU_ID，每容器一个实例)
     ▼
-docker-eval/llm_relay_proxy.py
+BenchmarkAdapters/LLMRelay/server.py
     │  模型重写→gpt-5.5 · 强制 reasoning_effort=high · 剥 max_tokens 等参数
     │  重试20次 · 不限超时 · 非流式化+SSE合成 · tool-call JSON兜底 · system-only消息归一化
     │  token 独立记账 → run-logs/<TAG>_token_usage/<agent>_<comp>_gpu<N>.jsonl
@@ -149,7 +149,8 @@ mlsp(G2) 286万。
 ```
 efficient-agent-research/
 ├── README.md                    # 本文件 = 项目权威入口
-├── docker-eval/                 # 评测框架：run_in_docker.sh + llm_relay_proxy.py + grade.py
+├── BenchmarkAdapters/LLMRelay/  # 七 Agent、五 Benchmark 共用的 host-owned LLM 中继
+├── docker-eval/                 # MLE Docker 评测框架：run_in_docker.sh + grade.py
 ├── mle-bench/                   # OpenAI mlebench 框架 (pip editable)
 │   └── runs/mlevolve_group{1,2,3}/grading_report_group_*.json  # ★ MLEvolve 官方逐题 trace
 ├── mle-bench-data/              # 6 题 prepared 数据

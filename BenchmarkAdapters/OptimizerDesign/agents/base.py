@@ -7,6 +7,7 @@ from dataclasses import dataclass, replace
 from ...AutoResearch.launchers import NativeLaunchRequest, build_native_command
 from ...contracts import CommandSpec
 from ...task_specs import task_spec_digest, task_spec_text
+from ...thin_registry import backend_identity
 
 
 @dataclass(frozen=True)
@@ -14,7 +15,14 @@ class OptimizerDesignAgentAdapter:
     agent: str
     native_component: str
 
-    def task_environment(self, model_environment) -> dict[str, str]:
+    def task_environment(
+        self,
+        model_environment,
+        agent_variant: str = "default",
+    ) -> dict[str, str]:
+        native_component = backend_identity(
+            self.agent, "optimizer-design", agent_variant
+        )
         return {
             **model_environment,
             "OPTIMIZATION_TASK_NAME": "modded-NanoGPT Track 3 Optimizer Design",
@@ -23,7 +31,7 @@ class OptimizerDesignAgentAdapter:
             "OPTIMIZATION_STATE_NAME": ".optimizer-design-candidate.json",
             "OPTIMIZATION_METRIC_NAME": "score_steps",
             "OPTIMIZATION_METRIC_DIRECTION": "minimize",
-            "OPTIMIZATION_NATIVE_COMPONENT": self.native_component,
+            "OPTIMIZATION_NATIVE_COMPONENT": native_component,
             "OPTIMIZATION_TASK_INSTRUCTION": (
                 task_spec_text("optimizer-design")
             ),
@@ -31,7 +39,9 @@ class OptimizerDesignAgentAdapter:
         }
 
     def bind(self, request: NativeLaunchRequest) -> NativeLaunchRequest:
-        environment = self.task_environment(request.model_environment)
+        environment = self.task_environment(
+            request.model_environment, request.agent_variant
+        )
         return replace(request, agent=self.agent, model_environment=environment)
 
     def build_command(self, request: NativeLaunchRequest) -> CommandSpec:

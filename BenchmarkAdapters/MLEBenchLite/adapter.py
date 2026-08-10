@@ -27,9 +27,10 @@ from ..contracts import (
     require_file,
 )
 from ..process import DEFAULT_PROXY, relay_client_env, run_command
-from ..relay import RelayProcess
+from ..LLMRelay import RelayProcess
 from ..registry import AGENTS, ROOT
 from ..task_specs import task_spec_digest, task_spec_text
+from ..thin_registry import require_clean_upstream_source, require_thin_support, selected_variant
 
 
 @dataclass(frozen=True)
@@ -55,6 +56,7 @@ class MleLiteRequest:
     model_parameters: dict[str, object] = field(default_factory=dict)
     request_timeout_seconds: int | None = None
     retry_policy: dict[str, object] = field(default_factory=dict)
+    agent_variant: str = "default"
 
 
 @dataclass(frozen=True)
@@ -203,7 +205,7 @@ def _native_host_sandbox_argv(
         ROOT / "BenchmarkAdapters/sandbox_runner.py", "sandbox network runner"
     )
     relay_forwarder = require_file(
-        ROOT / "BenchmarkAdapters/unix_relay_forwarder.py", "sandbox relay forwarder"
+        ROOT / "BenchmarkAdapters/LLMRelay/forwarder.py", "sandbox relay forwarder"
     )
     adapter_venv = require_directory(ROOT / "BenchmarkAdapters/.venv", "adapter runtime")
     output_dir = request.output_dir.resolve()
@@ -336,7 +338,7 @@ def _workspace_sandbox_argv(
     benchmark_python_link = Path(os.readlink(benchmark_venv / "bin/python"))
     benchmark_python_link_home = benchmark_python_link.parents[1]
     relay_forwarder = require_file(
-        ROOT / "BenchmarkAdapters/unix_relay_forwarder.py",
+        ROOT / "BenchmarkAdapters/LLMRelay/forwarder.py",
         "sandbox relay forwarder",
     )
     sandbox_runner = require_file(
@@ -734,9 +736,65 @@ def _workspace_command(
 
 
 def _ai_scientist_command(request: MleLiteRequest) -> CommandSpec:
+    require_clean_upstream_source("ai-scientist")
     if not request.model:
         raise AdapterError("MLE launcher requires an explicit model")
     public_dir = public_task_dir(request)
+    profile_path = request.output_dir.resolve() / "ai-scientist-llm-profile.yaml"
+    profile_name = "benchmark-model"
+    if not request.dry_run:
+        max_tokens = request.model_parameters.get(
+            "max_completion_tokens",
+            request.model_parameters.get(
+                "max_output_tokens",
+                request.model_parameters.get("max_tokens", 32768),
+            ),
+        )
+        api_mode = (
+            "completions"
+            if request.model_parameters.get("use_completion_api") is True
+            or request.model_parameters.get("api_mode") == "completions"
+            else "responses"
+        )
+        profile: dict[str, object] = {
+            "version": 1,
+            "defaults": {"default": profile_name, "mle": profile_name},
+            "backends": {
+                "benchmark-relay": {
+                    "type": "openai",
+                    "env": {
+                        "api_key": {"var": "OPENAI_API_KEY", "required": True},
+                        "base_url": {"var": "OPENAI_BASE_URL", "required": True},
+                    },
+                }
+            },
+            "profiles": {
+                profile_name: {
+                    "backend": "benchmark-relay",
+                    "model": request.model,
+                    "api": api_mode,
+                    "limits": {"max_completion_tokens": int(max_tokens)},
+                }
+            },
+        }
+        configured = profile["profiles"][profile_name]
+        context_window = request.model_parameters.get("context_window")
+        reasoning_effort = request.model_parameters.get("reasoning_effort")
+        temperature = request.model_parameters.get("temperature")
+        if context_window is not None:
+            configured["limits"]["context_window"] = int(context_window)
+        if reasoning_effort is not None:
+            configured["reasoning"] = {"effort": str(reasoning_effort)}
+        if temperature is not None:
+            configured["sampling"] = {"temperature": float(temperature)}
+        try:
+            with profile_path.open("x", encoding="utf-8") as handle:
+                json.dump(profile, handle, sort_keys=True, indent=2)
+                handle.write("\n")
+        except FileExistsError as exc:
+            raise AdapterError(
+                f"refusing to overwrite AiScientist profile: {profile_path}"
+            ) from exc
     executable_path = AGENTS[request.agent].install_path / ".venv" / "bin" / "aisci"
     executable = executable_path.resolve() if request.dry_run else require_file(
         executable_path, "AiScientist executable"
@@ -745,12 +803,14 @@ def _ai_scientist_command(request: MleLiteRequest) -> CommandSpec:
             str(executable),
             "--output-root",
             str(request.output_dir.resolve()),
+            "--llm-profile-file",
+            str(profile_path),
             "mle",
             "run",
             "--data-dir",
             str(public_dir.resolve()),
             "--llm-profile",
-            request.model,
+            profile_name,
             "--gpu-ids",
             str(request.gpu_id),
             "--time-limit",
@@ -806,6 +866,7 @@ def _ai_scientist_command(request: MleLiteRequest) -> CommandSpec:
 
 
 def _ml_master_command(request: MleLiteRequest) -> CommandSpec:
+    require_clean_upstream_source("ml-master-2")
     if not request.model:
         raise AdapterError("MLE launcher requires an explicit model")
     if request.config_path is None:
@@ -819,7 +880,7 @@ def _ml_master_command(request: MleLiteRequest) -> CommandSpec:
         AGENTS[request.agent].install_path / ".venv" / "bin" / "python",
         "ML-Master 2 Python executable",
     )
-    workspace_dir = request.output_dir.resolve() / "ml-master-workspace"
+    workspace_dir = request.output_dir.resolve() / "workspace"
     native_argv = (
             str(executable),
             "run.py",
@@ -843,7 +904,6 @@ def _ml_master_command(request: MleLiteRequest) -> CommandSpec:
             "HOME": str(request.output_dir.resolve() / "home"),
             "OPENAI_API_KEY": "proxy",
             "ANTHROPIC_API_KEY": "proxy",
-            "ML_MASTER_RUN_TIMEOUT_SECONDS": str(request.timeout_seconds),
             "TMPDIR": str(request.output_dir.resolve() / "tmp"),
             "XDG_CACHE_HOME": str(request.output_dir.resolve() / "cache"),
             "XDG_CONFIG_HOME": str(request.output_dir.resolve() / "config"),
@@ -895,8 +955,24 @@ class MleLiteAdapter:
             raise AdapterError("request agent does not match adapter agent")
         public_dir = public_task_dir(request)
         protect_generated_output(request.output_dir, ROOT, create=not request.dry_run)
+        variant = require_thin_support(
+            self.agent, "mle-bench-lite", request.agent_variant
+        )
         mode = AGENTS[self.agent].mle_mode
+        if variant is not None:
+            if variant.key != "arbor-benchmark-patched":
+                raise UnsupportedAdapterError(
+                    f"{variant.key} has no MLE-Bench Lite implementation"
+                )
+            mode = "native-docker"
         if mode == "native-docker":
+            if self.agent == "arbor" and selected_variant(
+                self.agent, "mle-bench-lite", request.agent_variant
+            ) is None:
+                raise UnsupportedAdapterError(
+                    "original Arbor MLE is unsupported without a host development evaluator; "
+                    "the patched MLE runtime requires arbor-benchmark-patched"
+                )
             return _docker_command(request)
         if mode == "generic-mle-workspace":
             if request.dry_run:
@@ -921,7 +997,13 @@ class MleLiteAdapter:
         roots = submission_roots(request)
         previous = _submission_snapshot(*roots)
         forbidden_hashes = _sample_hashes(request)
-        if AGENTS[self.agent].mle_mode != "native-docker":
+        variant = selected_variant(
+            self.agent, "mle-bench-lite", request.agent_variant
+        )
+        native_docker = AGENTS[self.agent].mle_mode == "native-docker" or (
+            variant is not None and variant.key == "arbor-benchmark-patched"
+        )
+        if not native_docker:
             output_dir = protect_generated_output(request.output_dir, ROOT)
             with tempfile.TemporaryDirectory(prefix="mle-agent-relay-") as temporary:
                 socket_path = Path(temporary) / "relay.sock"

@@ -14,15 +14,16 @@ re-export。
   held-out test。
 - `terminal-direct-smoke`：89 题直接解题基础设施 smoke，明确
   `non_comparable_to_terminal_ao=true`，不得进入 AO 榜单。
-- `autoresearch`：冻结 reconstruction protocol、七个原生 Agent bridge、统一模型配置、
+- `autoresearch`：冻结 reconstruction protocol、统一模型配置、
   host evaluator、双 held-out gate、smoke/pilot、N=1/N=3 aggregate 和 scorecard CLI；
-  当前尚无七 Agent real smoke 或正式横向分数。
-- `optimizer-design`：冻结 modded-NanoGPT Track 3 commit、Benchmark 公共 Adapter、七个
-  小 Agent Adapter、四 H100 资源锁、双 held-out step score 和 N=1/N=3 scorecard；当前因
+  Arbor 原版使用官方 plugin evaluator contract；AiScientist 与 ML-Master 原版在该任务
+  unsupported。当前尚无 real smoke 或正式横向分数。
+- `optimizer-design`：冻结 modded-NanoGPT Track 3 commit、Benchmark 公共 Adapter、四 H100
+  资源锁、双 held-out step score 和 N=1/N=3 scorecard；当前因
   双 seed baseline 记录尚未晋级而 fail-closed，不发布正式排名。
-- `fml`：first-class pinned-upstream formal Adapter；shared host evaluator、七个 concrete
-  Agent Adapter、formal evidence 和双指标 aggregate 已实现。当前 upstream dirty、主指标
-  未人工冻结，ML-Master 2 runtime 还有 `mcp` import blocker，因此 formal preflight 继续
+- `fml`：first-class pinned-upstream formal Adapter；shared host evaluator、formal evidence
+  和双指标 aggregate 已实现。当前 upstream dirty、主指标
+  未人工冻结，因此 formal preflight 继续
   fail-closed。旧 `FLM-bench/` 路径只保留 `max_steps=1` 的 non-formal smoke 兼容层。
   详见 `BenchmarkAdapters/docs/FML_SEVEN_AGENT_ADAPTER.md`。
 
@@ -32,11 +33,15 @@ re-export。
 |---|---|---|---|
 | EAR | EAR Docker graph search | EAR KTS/Thompson repository backend | EAR KTS |
 | MLEvolve | MLEvolve Docker search/fusion | `AgentSearch`/`SearchNode` UCT repository backend | MLEvolve UCT |
-| Arbor | native Arbor MLE runner | native Arbor coordinator | Arbor coordinator |
+| Arbor | 原版 unsupported；显式 `arbor-benchmark-patched` | 官方 `arbor run` + plugin evaluator | 官方 `arbor run` + plugin evaluator |
 | Codex | `codex exec` public-only workspace | native `codex exec` repository loop | Codex CLI |
 | Claude Code | `claude --print` public-only workspace | native `claude --print` repository loop | Claude CLI |
-| ML-Master 2.0 | generated per-run config + native workflow | EvoMaster native Agent repository workflow | EvoMaster workflow |
-| AiScientist | native `aisci mle run` | native `TerminalTaskSubagent.run` | AiScientist subagent |
+| ML-Master 2.0 | 官方 `run.py --agent ml_master_2` 完整 workflow | 原版 unsupported；显式 staged variant | 原版 unsupported；显式 staged variant |
+| AiScientist | 官方 `aisci mle run` | 原版 unsupported；显式 terminal variant | 原版 unsupported；显式 architecture variant |
+
+原版 ID 与显式变体分离：`arbor-benchmark-patched`、
+`ai-scientist-terminal-variant`、`ai-scientist-architecture-variant`、
+`ml-master-autoresearch-variant` 不进入原版七 Agent registry，也不会被原版 ID 自动 fallback。
 
 ## 公平性与计分
 

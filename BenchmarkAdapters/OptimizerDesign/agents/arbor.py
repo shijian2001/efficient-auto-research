@@ -1,5 +1,5 @@
 from .base import OptimizerDesignAgentAdapter
 
-ADAPTER = OptimizerDesignAgentAdapter("arbor", "optimizer-design-arbor-coordinator")
+ADAPTER = OptimizerDesignAgentAdapter("arbor", "official-extension-thin-arbor-cli")
 
 __all__ = ["ADAPTER"]

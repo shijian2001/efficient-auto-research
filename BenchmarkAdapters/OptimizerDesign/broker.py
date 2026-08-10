@@ -122,6 +122,12 @@ class OptimizerDesignDevBroker:
         self._declared = revision_id
         return revision
 
+    def scored(self, revision_id: str) -> ScoredOptimizerCandidate | None:
+        return next(
+            (item for item in self._scored if item.revision.revision_id == revision_id),
+            None,
+        )
+
     @staticmethod
     def feedback(scored: ScoredOptimizerCandidate) -> dict[str, object]:
         evaluation = scored.evaluation

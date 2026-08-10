@@ -4,7 +4,7 @@
 >
 > **2026-07 重构说明**：早期版本曾对各 agent 做侵入式修改（Bedrock Converse 适配、token 记录、
 > 重试等，改动散落 10+ 文件）。现已全部废弃——agent 回到纯上游，LLM 适配集中到
-> `docker-eval/llm_relay_proxy.py`。历史修改如需考古：MLEvolve 看 `gpt55-local` 分支，
+> `BenchmarkAdapters/LLMRelay/server.py`。历史修改如需考古：MLEvolve 看 `gpt55-local` 分支，
 > 本文档旧版看 git history。
 >
 > **当前更新（2026-07-22）**：EAR 正式候选已切到 `ear/g5`。G5 的 run/attempt

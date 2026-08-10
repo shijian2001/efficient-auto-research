@@ -12,7 +12,7 @@ from pathlib import Path
 
 from .contracts import protect_generated_output
 from .registry import AGENTS, ROOT
-from .relay import RelayProcess
+from .LLMRelay import RelayProcess, relay_agent_environment
 
 
 PYTHON_CLIENTS = {
@@ -67,15 +67,11 @@ def _python_smoke(
         upstream_base_url=upstream_base_url,
         model_parameters=model_parameters,
     ) as relay:
-        environment = os.environ.copy()
-        environment.update(
-            {
-                "OPENAI_API_KEY": "proxy",
-                "OPENAI_BASE_URL": relay.base_url,
-                "SMOKE_MODEL_ID": model,
-                "NO_PROXY": "localhost,127.0.0.1",
-                "no_proxy": "localhost,127.0.0.1",
-            }
+        environment = relay_agent_environment(
+            base_url=relay.base_url,
+            model=model,
+            environment={"SMOKE_MODEL_ID": model},
+            inherit_environment=True,
         )
         result = subprocess.run(
             [str(executable), "-c", OPENAI_SMOKE],
@@ -112,15 +108,11 @@ def _codex_smoke(
             upstream_base_url=upstream_base_url,
             model_parameters=model_parameters,
         ) as relay:
-            environment = os.environ.copy()
-            environment.update(
-                {
-                    "CODEX_HOME": str(codex_home),
-                    "OPENAI_API_KEY": "proxy",
-                    "OPENAI_BASE_URL": relay.base_url,
-                    "NO_PROXY": "localhost,127.0.0.1",
-                    "no_proxy": "localhost,127.0.0.1",
-                }
+            environment = relay_agent_environment(
+                base_url=relay.base_url,
+                model=model,
+                environment={"CODEX_HOME": str(codex_home)},
+                inherit_environment=True,
             )
             command = [
                 "codex",
@@ -174,14 +166,10 @@ def _claude_smoke(
         upstream_base_url=upstream_base_url,
         model_parameters=model_parameters,
     ) as relay:
-        environment = os.environ.copy()
-        environment.update(
-            {
-                "ANTHROPIC_API_KEY": "proxy",
-                "ANTHROPIC_BASE_URL": relay.base_url.removesuffix("/v1"),
-                "NO_PROXY": "localhost,127.0.0.1",
-                "no_proxy": "localhost,127.0.0.1",
-            }
+        environment = relay_agent_environment(
+            base_url=relay.base_url,
+            model=model,
+            inherit_environment=True,
         )
         command = [
             "claude",

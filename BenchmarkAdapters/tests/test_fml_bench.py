@@ -102,7 +102,7 @@ def _write_fake_runtime(path: Path) -> Path:
                     "model": os.environ["FML_MODEL_ID"],
                     "messages": [{"role": "user", "content": args.task_input}],
                 }).encode(),
-                headers={"Content-Type": "application/json", "Authorization": "Bearer synthetic-secret"},
+                headers={"Content-Type": "application/json", "Authorization": "Bearer proxy"},
                 method="POST",
             )
             with urllib.request.urlopen(request, timeout=10) as response:
@@ -378,6 +378,7 @@ def test_each_adapter_builds_same_model_command(
         outer_run_id=0,
         timeout_seconds=60,
         credential_env_names=("SYNTHETIC_API_KEY",),
+        relay_base_url="http://127.0.0.1:9999/v1",
         runtime_executable=fake_runtime,
     )
     adapter = get_fml_agent_adapter(agent)
@@ -595,6 +596,7 @@ def test_formal_variant_requires_immutable_matching_commit(
         outer_run_id=0,
         timeout_seconds=60,
         credential_env_names=(),
+        relay_base_url="http://127.0.0.1:6200/v1",
         runtime_executable=None,
         formal=True,
     )

@@ -20,6 +20,7 @@ class SearchContext:
     baseline_train_path: Path
     output_dir: Path
     broker: CandidateDevBroker
+    agent_variant: str = "default"
 
 
 @dataclass(frozen=True)

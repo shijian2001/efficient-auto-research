@@ -19,7 +19,7 @@ from ..protocol import BenchmarkMode, sha256_file, write_json_exclusive
 from ..records import BenchmarkRunResult, RunManifest, RunStatus
 from ..registry import AGENTS, ROOT
 from ..task_specs import task_spec_digest
-from ..relay import RelayProcess
+from ..LLMRelay import RelayProcess, route_command_through_relay
 from .baseline import BaselineManifest, tree_digest
 from .dev_server import CandidateDevBroker
 from .evaluator import evaluate_harness
@@ -32,6 +32,7 @@ from .protocol import TerminalAOProtocol
 from .revisions import RevisionStore
 from .sealed import SealedTestGate
 from .split import FrozenSplit
+from ..thin_registry import selected_variant
 
 
 def _git_identity(path: Path) -> tuple[str, bool]:
@@ -317,39 +318,63 @@ def _run_terminal_ao_once(
         with broker:
             broker.evaluate_current()
             remaining_seconds = max(1, timeout_seconds - int(time.monotonic() - started))
-            request = NativeAOLaunchRequest(
-                agent=agent,
-                candidate_dir=candidate,
-                launcher_output_dir=output_dir / "launcher",
-                dev_client_path=Path(__file__).with_name("dev_client.py"),
-                dev_socket=broker.socket_path,
-                dev_token=broker.token,
-                model=model,
-                seed=seed,
-                timeout_seconds=remaining_seconds,
-                model_parameters=model_config.model_parameters,
-                request_timeout_seconds=model_config.request_timeout_seconds,
-                retry_policy=model_config.retry_policy,
-            )
-            command = build_native_ao_command(request)
             try:
-                if formal:
-                    relay_socket = Path(socket_directory) / "llm.sock"
-                    resolver_path = Path(socket_directory) / "resolv.conf"
-                    resolver_path.write_text("nameserver 10.0.2.3\n", encoding="utf-8")
-                    relay = RelayProcess(
+                relay_socket = (
+                    Path(socket_directory) / "llm.sock" if formal else None
+                )
+                relay = RelayProcess(
+                    agent=agent,
+                    log_path=output_dir / "launcher/relay.log",
+                    token_log_path=output_dir / "launcher/token_usage.jsonl",
+                    unix_socket=relay_socket,
+                    upstream_base_url=model_config.relay_base_url,
+                    upstream_proxy=proxy,
+                    model=model_config.outer_model_id,
+                    model_parameters=model_config.model_parameters,
+                    request_timeout_seconds=model_config.request_timeout_seconds,
+                    retry_policy=model_config.retry_policy,
+                )
+                with relay:
+                    local_base_url = (
+                        "http://127.0.0.1:6200/v1" if formal else relay.base_url
+                    )
+                    request = NativeAOLaunchRequest(
                         agent=agent,
-                        log_path=output_dir / "launcher/relay.log",
-                        token_log_path=output_dir / "launcher/token_usage.jsonl",
-                        unix_socket=relay_socket,
-                        upstream_base_url=model_config.relay_base_url,
-                        upstream_proxy=proxy,
-                        model=model_config.outer_model_id,
+                        candidate_dir=candidate,
+                        launcher_output_dir=output_dir / "launcher",
+                        dev_client_path=Path(__file__).with_name("dev_client.py"),
+                        dev_socket=broker.socket_path,
+                        dev_token=broker.token,
+                        model=model,
+                        seed=seed,
+                        timeout_seconds=remaining_seconds,
                         model_parameters=model_config.model_parameters,
                         request_timeout_seconds=model_config.request_timeout_seconds,
                         retry_policy=model_config.retry_policy,
+                        agent_variant=agent_variant,
+                        model_base_url=local_base_url,
+                        editable_paths=tuple(protocol.editable_paths),
+                        protected_paths=tuple(
+                            relative
+                            for relative in baseline.files
+                            if not any(
+                                relative == editable
+                                or relative.startswith(editable.rstrip("/") + "/")
+                                for editable in protocol.editable_paths
+                            )
+                        ),
+                        sandboxed=formal,
                     )
-                    with relay:
+                    command = route_command_through_relay(
+                        build_native_ao_command(request),
+                        base_url=local_base_url,
+                        model=model_config.outer_model_id,
+                    )
+                    if formal:
+                        resolver_path = Path(socket_directory) / "resolv.conf"
+                        resolver_path.write_text(
+                            "nameserver 10.0.2.3\n", encoding="utf-8"
+                        )
                         command = sandbox_native_ao_command(
                             agent=agent,
                             command=command,
@@ -359,10 +384,6 @@ def _run_terminal_ao_once(
                             host_relay_socket=relay_socket,
                             resolver_path=resolver_path,
                         )
-                        launcher_result = run_command(
-                            command, log_path=output_dir / "launcher/agent.log"
-                        )
-                else:
                     launcher_result = run_command(
                         command, log_path=output_dir / "launcher/agent.log"
                     )
@@ -372,12 +393,27 @@ def _run_terminal_ao_once(
                 else:
                     launcher_error = str(exc)
             try:
-                broker.evaluate_current()
+                if (
+                    agent == "arbor"
+                    and selected_variant(agent, "terminal-bench-ao", agent_variant)
+                    is None
+                ):
+                    broker.declare_current()
+                else:
+                    broker.evaluate_current()
             except AdapterError as exc:
                 launcher_error = f"{launcher_error}; {exc}" if launcher_error else str(exc)
-    best = broker.best
+    canonical_arbor = (
+        agent == "arbor"
+        and selected_variant(agent, "terminal-bench-ao", agent_variant) is None
+    )
+    best = broker.declared if canonical_arbor else broker.best
     if best is None:
-        raise AdapterError("Terminal AO search produced no valid dev-scored revision")
+        raise AdapterError(
+            "Terminal AO search produced no Agent-declared valid revision"
+            if canonical_arbor
+            else "Terminal AO search produced no valid dev-scored revision"
+        )
     final_harness = store.replay(best.revision.revision_id, output_dir / "final-harness")
     harness_digest = tree_digest(final_harness)
     if launcher_result is not None and launcher_result.return_code == 124:
@@ -392,6 +428,11 @@ def _run_terminal_ao_once(
             "launcher_return_code": launcher_result.return_code if launcher_result else None,
             "launcher_error": launcher_error,
             "launcher_timed_out": launcher_timed_out,
+            "selection_policy": (
+                "Agent-owned final trunk revision"
+                if canonical_arbor
+                else "maximum valid development pass rate"
+            ),
             "selection_uses_test": False,
         },
     )

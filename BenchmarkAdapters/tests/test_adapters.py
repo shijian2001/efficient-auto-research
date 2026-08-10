@@ -470,7 +470,7 @@ def test_repository_output_directory_is_self_ignored(tmp_path: Path) -> None:
 
 
 def test_responses_sse_synthesis_matches_codex_event_contract() -> None:
-    path = Path("docker-eval/llm_relay_proxy.py")
+    path = Path("BenchmarkAdapters/LLMRelay/server.py")
     spec = importlib.util.spec_from_file_location("relay_proxy_under_test", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)
@@ -492,8 +492,13 @@ def test_responses_sse_synthesis_matches_codex_event_contract() -> None:
     assert '"id": "resp-test"' in stream
 
 
-def test_relay_forces_registered_model_reasoning_and_temperature() -> None:
-    path = Path("docker-eval/llm_relay_proxy.py")
+def test_relay_forces_registered_model_reasoning_and_temperature(monkeypatch) -> None:
+    monkeypatch.setenv("LLM_FORCE_MODEL", "gpt-5.5")
+    monkeypatch.setenv(
+        "LLM_FORCE_PARAMETERS_JSON",
+        '{"reasoning_effort":"high","temperature":1.0}',
+    )
+    path = Path("BenchmarkAdapters/LLMRelay/server.py")
     spec = importlib.util.spec_from_file_location("relay_proxy_fairness_test", path)
     assert spec is not None and spec.loader is not None
     module = importlib.util.module_from_spec(spec)

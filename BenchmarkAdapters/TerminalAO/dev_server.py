@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import json
+import base64
 import secrets
+import shutil
 import socketserver
 import threading
 from dataclasses import asdict, dataclass
@@ -51,8 +53,10 @@ class CandidateDevBroker:
         self.token = secrets.token_hex(32)
         self._lock = threading.Lock()
         self._calls = 0
+        self._transport_calls = 0
         self._scored: list[ScoredRevision] = []
         self._by_digest: dict[str, ScoredRevision] = {}
+        self._declared: ScoredRevision | None = None
         self._server: socketserver.UnixStreamServer | None = None
         self._thread: threading.Thread | None = None
 
@@ -74,32 +78,80 @@ class CandidateDevBroker:
     def calls(self) -> tuple[ScoredRevision, ...]:
         return tuple(self._scored)
 
+    @property
+    def declared(self) -> ScoredRevision | None:
+        return self._declared
+
     def evaluate_current(self) -> ScoredRevision:
         with self._lock:
-            current_digest = tree_digest(self.candidate_dir)
-            existing = self._by_digest.get(current_digest)
-            if existing is not None:
-                return existing
-            self._calls += 1
-            revision_id = f"candidate-{self._calls:04d}"
-            revision = self.revision_store.commit(
+            return self._evaluate_workspace(self.candidate_dir)
+
+    def _evaluate_workspace(self, workspace: Path) -> ScoredRevision:
+        current_digest = tree_digest(workspace)
+        existing = self._by_digest.get(current_digest)
+        if existing is not None:
+            return existing
+        self._calls += 1
+        revision_id = f"candidate-{self._calls:04d}"
+        revision = self.revision_store.commit(
+            workspace,
+            parent_id="baseline",
+            revision_id=revision_id,
+        )
+        evaluation = evaluate_harness(
+            self.protocol,
+            split_name="dev",
+            harness_dir=revision.path,
+            evaluation_dir=self.output_dir / "dev-evaluations" / revision_id,
+            environment=self.environment,
+            model_config=self.model_config,
+            gpu_ids=self.gpu_ids,
+        )
+        scored = ScoredRevision(revision, evaluation)
+        self._scored.append(scored)
+        self._by_digest[revision.tree_digest] = scored
+        return scored
+
+    def evaluate_snapshot(self, files: object) -> ScoredRevision:
+        if not isinstance(files, dict):
+            raise AdapterError("Terminal AO candidate snapshot must be an object")
+        with self._lock:
+            self._transport_calls += 1
+            sequence = self._transport_calls
+            workspace = self.output_dir / "transport-snapshots" / f"request-{sequence:04d}"
+            if workspace.exists() or workspace.is_symlink():
+                raise AdapterError("Terminal AO candidate snapshot already exists")
+            shutil.copytree(
                 self.candidate_dir,
-                parent_id="baseline",
-                revision_id=revision_id,
+                workspace,
+                symlinks=False,
+                ignore=shutil.ignore_patterns(".git", "__pycache__", "*.pyc", "*.pyo"),
             )
-            evaluation = evaluate_harness(
-                self.protocol,
-                split_name="dev",
-                harness_dir=revision.path,
-                evaluation_dir=self.output_dir / "dev-evaluations" / revision_id,
-                environment=self.environment,
-                model_config=self.model_config,
-                gpu_ids=self.gpu_ids,
-            )
-            scored = ScoredRevision(revision, evaluation)
-            self._scored.append(scored)
-            self._by_digest[revision.tree_digest] = scored
-            return scored
+            for relative in self.revision_store.baseline_manifest.editable_paths:
+                target = workspace / relative
+                if target.is_dir():
+                    shutil.rmtree(target)
+                elif target.exists() or target.is_symlink():
+                    target.unlink()
+            for relative, encoded in files.items():
+                if not isinstance(relative, str) or not isinstance(encoded, str):
+                    raise AdapterError("Terminal AO candidate snapshot entries must be strings")
+                target = (workspace / relative).resolve()
+                try:
+                    target.relative_to(workspace.resolve())
+                except ValueError as exc:
+                    raise AdapterError("Terminal AO candidate snapshot path is unsafe") from exc
+                target.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    target.write_bytes(base64.b64decode(encoded, validate=True))
+                except ValueError as exc:
+                    raise AdapterError("Terminal AO candidate snapshot is not valid base64") from exc
+            return self._evaluate_workspace(workspace)
+
+    def declare_current(self) -> ScoredRevision:
+        scored = self.evaluate_current()
+        self._declared = scored
+        return scored
 
     def restricted_payload(self, scored: ScoredRevision) -> dict[str, object]:
         record = scored.evaluation
@@ -127,9 +179,14 @@ class CandidateDevBroker:
                     request = json.loads(self.rfile.readline().decode("utf-8"))
                     if request.get("token") != broker.token:
                         raise AdapterError("invalid dev broker capability token")
-                    if request.get("operation") != "evaluate-dev":
+                    operation = request.get("operation")
+                    if operation != "evaluate-dev":
                         raise AdapterError("unsupported dev broker operation")
-                    scored = broker.evaluate_current()
+                    scored = (
+                        broker.evaluate_snapshot(request.get("files"))
+                        if request.get("files") is not None
+                        else broker.evaluate_current()
+                    )
                     response = {"ok": True, "evaluation": broker.restricted_payload(scored)}
                 except Exception as exc:
                     response = {"ok": False, "error": f"{type(exc).__name__}: {exc}"}

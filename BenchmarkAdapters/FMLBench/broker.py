@@ -29,6 +29,7 @@ class _Server(socketserver.ThreadingUnixStreamServer):
     def __init__(self, socket_path: str, evaluator: FMLSharedEvaluator, token: str):
         self.evaluator = evaluator
         self.token = token
+        self.evaluation_lock = threading.Lock()
         super().__init__(socket_path, _Handler)
 
 
@@ -40,7 +41,10 @@ class _Handler(socketserver.StreamRequestHandler):
                 raise AdapterError("invalid FML development capability token")
             if payload.get("operation") != "evaluate-current":
                 raise AdapterError("unsupported FML development capability operation")
-            response = self.server.evaluator.evaluate_development()
+            with self.server.evaluation_lock:
+                response = self.server.evaluator.evaluate_development(
+                    files=payload.get("files")
+                )
         except Exception as exc:
             response = {"status": "error", "failure_reason": f"{type(exc).__name__}: {exc}"}
         self.wfile.write((json.dumps(response, sort_keys=True) + "\n").encode("utf-8"))

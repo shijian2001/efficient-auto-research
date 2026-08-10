@@ -10,7 +10,7 @@
 #   - HF 在线: 挂宿主 HF cache(可写) + HF_HUB_OFFLINE=0 + NO_PROXY 不含 HF,经 Clash 下模型(XLM-R 等多语言模型 chaii 必需)
 #   - 路径一致挂载（容器内路径 == 宿主路径），避免 pip editable 包路径错位
 #
-#   - LLM 走本地转发代理 (llm_relay_proxy.py)，agent 代码保持纯上游零侵入：
+#   - LLM 走仓库内统一中继 (BenchmarkAdapters/LLMRelay/server.py)：
 #       agent → http://127.0.0.1:$PROXY_PORT/v1 → explicitly configured relay/model track
 #     模型重写/reasoning_effort/参数清洗/重试/非流式化/tool兜底/token记录 全在代理内。
 #     端口按 GPU_ID 错开 (host 网络下多容器共享网络栈，不能撞)。
@@ -224,7 +224,7 @@ LLM_FORCE_MODEL=$MODEL LLM_FORCE_PARAMETERS_JSON=$LLM_FORCE_PARAMETERS_JSON \
 LLM_UPSTREAM_TIMEOUT=$LLM_UPSTREAM_TIMEOUT LLM_MAX_RETRIES=$LLM_MAX_RETRIES \
 LLM_TOKEN_LOG_PATH=$TOKEN_LOG_PATH LLM_PROXY_AGENT_NAME=$AGENT \
 LLM_PROXY_API_KEY=$RELAY_API_KEY \
-  "$RELAY_PYTHON" -u "$EAR/docker-eval/llm_relay_proxy.py" --host "$RELAY_BIND_HOST" --port "$PROXY_PORT" \
+  "$RELAY_PYTHON" -u "$EAR/BenchmarkAdapters/LLMRelay/server.py" --host "$RELAY_BIND_HOST" --port "$PROXY_PORT" \
   >"$HOST_RELAY_LOG" 2>&1 &
 HOST_RELAY_PID=$!
 for _ in $(seq 1 100); do
@@ -345,7 +345,7 @@ case "$AGENT" in
     EAR_OUTPUT_DIR=${EAR_OUTPUT_DIR:-$EAR_AGENT_DIR/docker_runs/${RUN_TAG}_$COMP}
     mkdir -p "$EAR_OUTPUT_DIR"
     LAUNCHER_SHA256=$(sha256sum "$SCRIPT_PATH" | awk '{print $1}')
-    RELAY_SHA256=$(sha256sum "${EAR}/docker-eval/llm_relay_proxy.py" | awk '{print $1}')
+    RELAY_SHA256=$(sha256sum "${EAR}/BenchmarkAdapters/LLMRelay/server.py" | awk '{print $1}')
     LAUNCH_MANIFEST=$EAR_OUTPUT_DIR/launch_manifest.json
     LAUNCH_MANIFEST_TMP=$(mktemp "${LAUNCH_MANIFEST}.tmp.XXXXXX")
     MANIFEST_COMP="$COMP" MANIFEST_RUN_ID="$RUN_TAG" MANIFEST_SEED="$SEED" \

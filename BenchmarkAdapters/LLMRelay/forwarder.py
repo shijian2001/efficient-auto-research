@@ -1,4 +1,4 @@
-"""Expose one host-mounted Unix HTTP socket on sandbox-local TCP loopback."""
+"""Expose one host-owned Unix relay socket on sandbox-local TCP loopback."""
 
 from __future__ import annotations
 

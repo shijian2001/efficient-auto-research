@@ -82,7 +82,7 @@ STARTED_AT=$(date --iso-8601=seconds)
 EXPECTED_END=$(date --iso-8601=seconds --date="+12 hours")
 LAUNCHER_SHA256=$(sha256sum "$0" | awk '{print $1}')
 RUNNER_SHA256=$(sha256sum "$DIR/run_in_docker.sh" | awk '{print $1}')
-RELAY_SHA256=$(sha256sum "$DIR/llm_relay_proxy.py" | awk '{print $1}')
+RELAY_SHA256=$(sha256sum "$DIR/../BenchmarkAdapters/LLMRelay/server.py" | awk '{print $1}')
 
 cat > "$MANIFEST" <<EOF
 run_id=$RUN_ID

@@ -22,6 +22,7 @@ from ..protocol import BenchmarkMode, FormalProtocol, canonical_json, sha256_fil
 from ..records import BenchmarkRunResult, RunManifest, RunStatus
 from ..registry import AGENTS, ROOT
 from ..task_specs import task_spec_digest
+from ..thin_registry import require_clean_upstream_source
 from .adapter import MleLiteAdapter, MleLiteRequest
 from .aggregate import aggregate_seeds, calculate_seed_metrics
 from .formal import FormalMleOutcome, run_formal_mle
@@ -132,6 +133,7 @@ def campaign_cells(
 def generate_ml_master_config(request: MleLiteRequest) -> MleLiteRequest:
     if request.agent != "ml-master-2" or request.config_path is not None:
         return request
+    require_clean_upstream_source("ml-master-2")
     source_root = AGENTS["ml-master-2"].install_path
     python = source_root / ".venv/bin/python"
     worker = Path(__file__).with_name("ml_master_config_worker.py")
@@ -151,11 +153,11 @@ def generate_ml_master_config(request: MleLiteRequest) -> MleLiteRequest:
             "--staged-data-root",
             str(request.output_dir / "public-data"),
             "--workspace-dir",
-            str(request.output_dir / "ml-master-workspace"),
+            str(request.output_dir / "workspace"),
             "--gpu-id",
             str(request.gpu_id),
-            "--timeout",
-            str(request.timeout_seconds),
+            "--model",
+            str(request.model),
             "--model-parameters-json",
             json.dumps(request.model_parameters, sort_keys=True),
         ],
@@ -315,6 +317,7 @@ def run_campaign_cell(
         model_parameters=dict(model_config.model_parameters),
         request_timeout_seconds=model_config.request_timeout_seconds,
         retry_policy=dict(model_config.retry_policy),
+        agent_variant=agent_variant,
     )
     started = time.monotonic()
     manifest = build_manifest(

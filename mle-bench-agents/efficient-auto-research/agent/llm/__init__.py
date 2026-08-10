@@ -1,8 +1,8 @@
 """LLM API: thin wrapper around OpenAI-compatible endpoints.
 
 All provider-specific concerns (model rewriting, reasoning effort, retries
-against the upstream, timeouts, token usage logging) live in the local relay
-proxy (docker-eval/llm_relay_proxy.py). Point OPENAI_BASE_URL at the proxy.
+against the upstream, timeouts, token usage logging) live in the repository
+relay (`BenchmarkAdapters/LLMRelay/server.py`). Point OPENAI_BASE_URL at it.
 """
 
 from __future__ import annotations
