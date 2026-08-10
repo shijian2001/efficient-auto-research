@@ -150,6 +150,34 @@ class UnifiedLLMRelayArchitectureTests(unittest.TestCase):
             {"type": "function", "function": {"name": "evaluate"}},
         )
 
+    def test_reasoning_model_strips_incompatible_sampling_parameters(self) -> None:
+        original_effort = self.server.REASONING_EFFORT
+        original_parameters = self.server.FORCE_PARAMETERS
+        try:
+            self.server.REASONING_EFFORT = "low"
+            self.server.FORCE_PARAMETERS = {
+                **original_parameters,
+                "logprobs": True,
+                "top_logprobs": 2,
+                "top_p": 0.9,
+            }
+            rewritten = self.server._rewrite_body(
+                {
+                    "model": "downstream-model",
+                    "messages": [{"role": "user", "content": "hello"}],
+                    "logprobs": True,
+                    "top_logprobs": 2,
+                    "top_p": 0.9,
+                },
+                "/v1/chat/completions",
+            )
+        finally:
+            self.server.REASONING_EFFORT = original_effort
+            self.server.FORCE_PARAMETERS = original_parameters
+        self.assertNotIn("logprobs", rewritten)
+        self.assertNotIn("top_logprobs", rewritten)
+        self.assertNotIn("top_p", rewritten)
+
     def test_chat_response_normalizes_for_responses_and_messages_clients(self) -> None:
         chat = {
             "id": "chatcmpl-1",

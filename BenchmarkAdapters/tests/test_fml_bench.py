@@ -294,7 +294,7 @@ def _run_cell(
         lambda _path: ("a" * 40, False),
     )
     monkeypatch.setenv("SYNTHETIC_API_KEY", "synthetic-secret")
-    variant = "g3@" + "a" * 40 if agent == "ear" else "synthetic@" + "a" * 40
+    variant = _synthetic_variant(agent)
     request = FMLRunRequest(
         agent=agent,
         protocol=protocol,
@@ -309,6 +309,16 @@ def _run_cell(
         runtime_executable=fake_runtime,
     )
     return run_fml_task(request, _hardware=_fake_hardware())
+
+
+def _synthetic_variant(agent: str) -> str:
+    names = {
+        "ear": "g3",
+        "arbor": "arbor-benchmark-patched",
+        "ml-master-2": "ml-master-autoresearch-variant",
+        "ai-scientist": "ai-scientist-terminal-variant",
+    }
+    return f"{names.get(agent, agent)}@{'a' * 40}"
 
 
 def test_all_seven_agents_have_concrete_adapter_classes() -> None:
@@ -338,9 +348,10 @@ def test_shared_runner_has_no_agent_specific_dispatch() -> None:
 
 @pytest.mark.parametrize("agent", tuple(AGENTS))
 def test_each_adapter_installation_probe_is_explicit(agent: str) -> None:
-    report = get_fml_agent_adapter(agent).validate_installation()
+    adapter = get_fml_agent_adapter(agent, _synthetic_variant(agent))
+    report = adapter.validate_installation()
     assert report.agent_id == agent
-    assert report.native_entrypoint == FML_AGENT_ADAPTERS[agent].native_entrypoint
+    assert report.native_entrypoint == adapter.native_entrypoint
     assert isinstance(report.ready, bool)
     if report.ready:
         assert report.executable_path
@@ -367,7 +378,7 @@ def test_each_adapter_builds_same_model_command(
     monkeypatch.setenv("SYNTHETIC_API_KEY", "synthetic-secret")
     context = FMLAgentLaunchContext(
         agent_id=agent,
-        agent_variant=("g3@" if agent == "ear" else "synthetic@") + "a" * 40,
+        agent_variant=_synthetic_variant(agent),
         task=task,
         workspace=workspace,
         output_dir=tmp_path / "agent-output",
@@ -381,7 +392,7 @@ def test_each_adapter_builds_same_model_command(
         relay_base_url="http://127.0.0.1:9999/v1",
         runtime_executable=fake_runtime,
     )
-    adapter = get_fml_agent_adapter(agent)
+    adapter = get_fml_agent_adapter(agent, context.agent_variant)
     command, digest = adapter.build_launch_command(context)
     prompt = adapter.render_task_input(context)
     auditable_prompt = adapter.render_auditable_task_input(context)
@@ -429,7 +440,7 @@ def test_seven_adapter_fake_relay_synthetic_e2e(
             assert aggregate["metrics"]["average_improvement"]["mean"] == pytest.approx(0.1)
             assert aggregate["metrics"]["average_improvement"]["standard_deviation"] is None
             assert aggregate["metrics"]["win_rate"]["mean"] == pytest.approx(1.0)
-    assert len(relay.requests) == 7
+    assert len(relay.requests) == 14
     assert {request.model for request in relay.requests} == {"synthetic-model-id"}
     serialized = "\n".join(
         path.read_text(encoding="utf-8", errors="replace")
@@ -610,7 +621,13 @@ def test_formal_variant_requires_immutable_matching_commit(
 
 def test_readiness_is_honest_and_never_claims_scored() -> None:
     readiness = collect_fml_readiness()
-    assert readiness["adapter_defined"] == {"count": 7, "total": 7, "complete": True}
+    assert readiness["adapter_defined"] == {"count": 5, "total": 7, "complete": False}
+    assert readiness["agents"]["ml-master-2"]["registered_variants"] == [
+        "ml-master-autoresearch-variant"
+    ]
+    assert readiness["agents"]["ai-scientist"]["registered_variants"] == [
+        "ai-scientist-terminal-variant"
+    ]
     assert readiness["formal_scored"] is False
     assert readiness["formal_preflight_ready"] is False
 

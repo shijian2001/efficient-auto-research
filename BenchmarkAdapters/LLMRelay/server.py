@@ -208,9 +208,19 @@ def _rewrite_body(body: dict, path: str) -> dict:
         "reasoning",
     ):
         body.pop(param, None)
+    incompatible_sampling_parameters = (
+        {"logprobs", "top_logprobs", "top_p"}
+        if REASONING_EFFORT and REASONING_EFFORT != "none"
+        else set()
+    )
+    for param in incompatible_sampling_parameters:
+        body.pop(param, None)
 
     for name, value in FORCE_PARAMETERS.items():
-        if name not in _CONTROL_PARAMETERS | {"reasoning_effort", "temperature"}:
+        if (
+            name not in _CONTROL_PARAMETERS | {"reasoning_effort", "temperature"}
+            and name not in incompatible_sampling_parameters
+        ):
             body[name] = value
     output_tokens = FORCE_PARAMETERS.get(
         "max_output_tokens",

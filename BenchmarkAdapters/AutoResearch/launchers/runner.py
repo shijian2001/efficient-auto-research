@@ -133,6 +133,11 @@ def collect_model_usage(
 
 
 def execute_native_command(command: CommandSpec) -> CommandResult:
+    def output_text(value: str | bytes | None) -> str:
+        if isinstance(value, bytes):
+            return value.decode("utf-8", errors="replace")
+        return value or ""
+
     try:
         process = subprocess.Popen(
             command.argv,
@@ -149,7 +154,7 @@ def execute_native_command(command: CommandSpec) -> CommandResult:
         except subprocess.TimeoutExpired as exc:
             os.killpg(process.pid, signal.SIGKILL)
             remaining, _ = process.communicate()
-            stdout = (exc.stdout or "") + remaining
+            stdout = output_text(exc.stdout) + output_text(remaining)
             return_code = 124
     except FileNotFoundError as exc:
         raise AdapterError(f"native Agent executable not found: {command.argv[0]}") from exc

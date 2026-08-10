@@ -9,8 +9,6 @@ from dataclasses import asdict, dataclass
 from pathlib import Path, PurePosixPath
 from typing import Any, Mapping
 
-import yaml
-
 from ..contracts import AdapterError
 from ..protocol import canonical_json, sha256_file
 
@@ -169,6 +167,8 @@ def display_metric(task_name: str, value: float) -> float:
 
 
 def load_fml_task(protocol: Any, task_config: Path, *, upstream_root: Path | None = None) -> FMLTaskSpec:
+    import yaml
+
     root = (upstream_root or protocol.upstream_root).resolve()
     task_config = task_config.resolve()
     try:

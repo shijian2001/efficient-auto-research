@@ -7,6 +7,16 @@ import json
 import os
 from pathlib import Path
 
+try:
+    from mcp.client import streamable_http as _mcp_streamable_http
+
+    if not hasattr(_mcp_streamable_http, "streamablehttp_client"):
+        _mcp_streamable_http.streamablehttp_client = (
+            _mcp_streamable_http.streamable_http_client
+        )
+except ImportError:
+    pass
+
 from ...contracts import CommandSpec
 from ...protocol import write_json_exclusive
 from ...registry import ROOT
@@ -74,7 +84,7 @@ def run_native_loop(
     if retries is None and retry_policy.get("max_attempts") is not None:
         retries = max(0, int(retry_policy["max_attempts"]) - 1)
     if retries is not None:
-        llm_options["max_retries"] = int(retries)
+        llm_options["max_retries"] = int(retries) + 1
     output_dir.mkdir(parents=True, exist_ok=True)
     session = LocalSession(
         LocalSessionConfig(

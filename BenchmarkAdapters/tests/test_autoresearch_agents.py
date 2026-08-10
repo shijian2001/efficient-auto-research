@@ -16,6 +16,7 @@ from BenchmarkAdapters.AutoResearch.launchers import (
     NativeLaunchRequest,
     build_native_command,
 )
+from BenchmarkAdapters.AutoResearch.launchers.runner import execute_native_command
 from BenchmarkAdapters.AutoResearch.launchers.sandbox import sandbox_native_command
 from BenchmarkAdapters.AutoResearch.model_adapters import model_identity
 from BenchmarkAdapters.AutoResearch.protocol import build_protocol
@@ -46,6 +47,22 @@ EXPECTED_NATIVE_MARKERS = {
     "ml-master-2": "BenchmarkAdapters.AutoResearch.launchers.ml_master_2",
     "ai-scientist": "BenchmarkAdapters.AutoResearch.launchers.ai_scientist",
 }
+
+
+def test_native_timeout_normalizes_bytes_output(tmp_path: Path) -> None:
+    command = CommandSpec(
+        argv=(
+            sys.executable,
+            "-c",
+            "import sys, time; sys.stdout.write('started\\n'); sys.stdout.flush(); time.sleep(5)",
+        ),
+        cwd=tmp_path,
+        timeout_seconds=1,
+        label="native timeout output normalization",
+    )
+    result = execute_native_command(command)
+    assert result.return_code == 124
+    assert "started" in result.stdout
 
 
 def _synthetic_train(score: float) -> str:

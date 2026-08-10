@@ -193,7 +193,7 @@ def evomaster_llm(**_kwargs: object) -> object:
     if timeout is not None:
         config_options["timeout"] = timeout
     if retries is not None:
-        config_options["max_retries"] = retries
+        config_options["max_retries"] = retries + 1
     delegate = create_llm(
         LLMConfig(
             provider="openai",
