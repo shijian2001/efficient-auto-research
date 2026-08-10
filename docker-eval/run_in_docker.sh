@@ -109,7 +109,7 @@ fi
 MLE_EXEC_TIMEOUT=${MLE_EXEC_TIMEOUT:-}
 
 CLASH_PROXY=${CLASH_PROXY:-http://127.0.0.1:17892}
-LLM_UPSTREAM_PROXY=${LLM_UPSTREAM_PROXY:-$CLASH_PROXY}
+LLM_UPSTREAM_PROXY=${LLM_UPSTREAM_PROXY-$CLASH_PROXY}
 EAR=${EAR_ROOT:-$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)}
 ROOT=${HOST_ROOT:-$(dirname "$EAR")}
 ALIGNED_KNOWLEDGE_ROOT=${ALIGNED_KNOWLEDGE_ROOT:-${EAR}/ear-worktrees/g3-mlevolve-knowledge-aligned/configs/mlevolve_coldstart}
@@ -140,6 +140,8 @@ if [ -z "$LLM_FORCE_PARAMETERS_JSON" ]; then
 fi
 LLM_UPSTREAM_TIMEOUT=${LLM_UPSTREAM_TIMEOUT:-}   # 空 = 不限
 LLM_MAX_RETRIES=${LLM_MAX_RETRIES:-0}
+LLM_MAX_UPSTREAM_CALLS=${LLM_MAX_UPSTREAM_CALLS:-}
+LLM_SKIP_UPSTREAM_READY=${LLM_SKIP_UPSTREAM_READY:-0}
 
 # --- 本地转发代理 ---
 PROXY_PORT=$((6200 + GPU_ID))
@@ -222,6 +224,7 @@ UPSTREAM_BASE_URL=$UPSTREAM_BASE_URL UPSTREAM_API_KEY=$UPSTREAM_API_KEY \
 LLM_UPSTREAM_PROXY=$LLM_UPSTREAM_PROXY \
 LLM_FORCE_MODEL=$MODEL LLM_FORCE_PARAMETERS_JSON=$LLM_FORCE_PARAMETERS_JSON \
 LLM_UPSTREAM_TIMEOUT=$LLM_UPSTREAM_TIMEOUT LLM_MAX_RETRIES=$LLM_MAX_RETRIES \
+LLM_MAX_UPSTREAM_CALLS=$LLM_MAX_UPSTREAM_CALLS \
 LLM_TOKEN_LOG_PATH=$TOKEN_LOG_PATH LLM_PROXY_AGENT_NAME=$AGENT \
 LLM_PROXY_API_KEY=$RELAY_API_KEY \
   "$RELAY_PYTHON" -u "$EAR/BenchmarkAdapters/LLMRelay/server.py" --host "$RELAY_BIND_HOST" --port "$PROXY_PORT" \
@@ -235,9 +238,10 @@ for _ in $(seq 1 100); do
   "$RELAY_PYTHON" -c "import urllib.request; opener=urllib.request.build_opener(urllib.request.ProxyHandler({})); opener.open('http://$RELAY_BIND_HOST:$PROXY_PORT/health', timeout=1)" 2>/dev/null && break
   sleep 0.1
 done
-RELAY_PROBE_HOST=$RELAY_BIND_HOST RELAY_PROBE_PORT=$PROXY_PORT \
-RELAY_PROBE_MODEL=$MODEL RELAY_PROBE_KEY=$RELAY_API_KEY \
-"$RELAY_PYTHON" - <<'PY' || { echo "LLM upstream unavailable; see $HOST_RELAY_LOG" >&2; exit 1; }
+if [ "$LLM_SKIP_UPSTREAM_READY" != "1" ]; then
+  RELAY_PROBE_HOST=$RELAY_BIND_HOST RELAY_PROBE_PORT=$PROXY_PORT \
+  RELAY_PROBE_MODEL=$MODEL RELAY_PROBE_KEY=$RELAY_API_KEY \
+  "$RELAY_PYTHON" - <<'PY' || { echo "LLM upstream unavailable; see $HOST_RELAY_LOG" >&2; exit 1; }
 import json
 import os
 import urllib.request
@@ -258,6 +262,7 @@ with opener.open(request, timeout=120) as response:
     if response.status != 200:
         raise SystemExit(response.status)
 PY
+fi
 
 # 各 agent 在容器内的启动命令
 case "$AGENT" in
@@ -713,7 +718,7 @@ $INNER_CMD"
       SEARCH_STATUS=\$?
       set -e
       if [ \$SEARCH_STATUS -ne 0 ] && [ \$SEARCH_STATUS -ne 124 ]; then
-        echo "MLEvolve search exited with status \$SEARCH_STATUS" >&2
+        echo \"MLEvolve search exited with status \$SEARCH_STATUS\" >&2
         exit \$SEARCH_STATUS
       fi
       echo '--- submission fusion (官方后处理) ---'

@@ -57,6 +57,9 @@ class MleLiteRequest:
     request_timeout_seconds: int | None = None
     retry_policy: dict[str, object] = field(default_factory=dict)
     agent_variant: str = "default"
+    runtime_image: str | None = None
+    image_pull_policy: str | None = None
+    official_llm_profile: str | None = None
 
 
 @dataclass(frozen=True)
@@ -184,11 +187,22 @@ def _host_relay_environment(request: MleLiteRequest) -> dict[str, str]:
 
 def _mount_parent_directories(argv: list[str], path: Path, created: set[Path]) -> None:
     current = Path("/")
-    for part in path.resolve().parent.parts[1:]:
+    for part in path.absolute().parent.parts[1:]:
         current /= part
         if current not in created:
             argv.extend(["--dir", str(current)])
             created.add(current)
+
+
+def _python_runtime_roots(executable: Path) -> tuple[Path, ...]:
+    roots: list[Path] = []
+    if executable.is_symlink():
+        link = Path(os.readlink(executable))
+        if not link.is_absolute():
+            link = executable.parent / link
+        roots.append(link.absolute().parent.parent)
+    roots.append(executable.resolve().parents[1])
+    return tuple(dict.fromkeys(roots))
 
 
 def _native_host_sandbox_argv(
@@ -197,6 +211,7 @@ def _native_host_sandbox_argv(
     wrapper_argv: tuple[str, ...],
     source_root: Path,
     public_dir: Path,
+    docker_socket: Path | None = None,
 ) -> tuple[str, ...]:
     if request.relay_socket is None:
         raise AdapterError("native MLE sandbox requires a host-owned Unix relay socket")
@@ -218,6 +233,10 @@ def _native_host_sandbox_argv(
         (output_dir, True),
         ((ROOT / "BenchmarkAdapters").resolve(), False),
         (adapter_venv.resolve(), False),
+        *tuple(
+            (runtime_root, False)
+            for runtime_root in _python_runtime_roots(adapter_venv / "bin/python")
+        ),
     )
     argv = [
         str(adapter_venv / "bin/python"),
@@ -263,18 +282,53 @@ def _native_host_sandbox_argv(
     runtime_paths: set[Path] = set()
     for value in wrapper_argv:
         executable = Path(value)
-        if not executable.is_absolute() or not executable.is_file():
+        if (
+            not executable.is_absolute()
+            or not executable.is_file()
+            or not os.access(executable, os.X_OK)
+        ):
             continue
+        venv_root = next(
+            (parent for parent in executable.parents if parent.name == ".venv"),
+            None,
+        )
+        if venv_root is not None:
+            resolved_venv = venv_root.resolve()
+            if (
+                resolved_venv not in runtime_paths
+                and not resolved_venv.is_relative_to(source_root.resolve())
+            ):
+                _mount_parent_directories(argv, resolved_venv, created)
+                argv.extend(["--ro-bind", str(resolved_venv), str(resolved_venv)])
+                runtime_paths.add(resolved_venv)
+            for python_name in ("python", "python3"):
+                python_executable = resolved_venv / "bin" / python_name
+                if not python_executable.exists():
+                    continue
+                for runtime_root in _python_runtime_roots(python_executable):
+                    if runtime_root in runtime_paths:
+                        continue
+                    _mount_parent_directories(argv, runtime_root, created)
+                    argv.extend(["--ro-bind", str(runtime_root), str(runtime_root)])
+                    runtime_paths.add(runtime_root)
         resolved = executable.resolve()
-        runtime_root = resolved.parents[1]
-        if runtime_root in runtime_paths or runtime_root.is_relative_to(source_root.resolve()):
-            continue
-        _mount_parent_directories(argv, runtime_root, created)
-        argv.extend(["--ro-bind", str(runtime_root), str(runtime_root)])
-        runtime_paths.add(runtime_root)
+        for runtime_root in _python_runtime_roots(executable):
+            if runtime_root in runtime_paths or runtime_root.is_relative_to(
+                source_root.resolve()
+            ):
+                continue
+            _mount_parent_directories(argv, runtime_root, created)
+            argv.extend(["--ro-bind", str(runtime_root), str(runtime_root)])
+            runtime_paths.add(runtime_root)
     relay_socket = request.relay_socket.resolve()
     _mount_parent_directories(argv, relay_socket, created)
     argv.extend(["--ro-bind", str(relay_socket), str(relay_socket)])
+    if docker_socket is not None:
+        docker_socket = docker_socket.resolve()
+        if not docker_socket.exists():
+            raise AdapterError(f"Docker socket does not exist: {docker_socket}")
+        _mount_parent_directories(argv, docker_socket, created)
+        argv.extend(["--bind", str(docker_socket), str(docker_socket)])
     minor_result = subprocess.run(
         ["nvidia-smi", "-q", "-i", str(request.gpu_id)],
         capture_output=True,
@@ -354,6 +408,12 @@ def _workspace_sandbox_argv(
         raise AdapterError(f"sandbox relay socket does not exist: {relay_socket}")
     resolver_path = relay_socket.parent / "resolv.conf"
     resolver_path.write_text("nameserver 10.0.2.3\n", encoding="utf-8")
+    codex_home = workspace.workspace_dir.parent / "codex-home"
+    codex_home.mkdir(parents=True, exist_ok=True)
+    auth_path = codex_home / "auth.json"
+    if not auth_path.exists():
+        auth_path.write_text('{"OPENAI_API_KEY":"proxy"}\n', encoding="utf-8")
+        auth_path.chmod(0o600)
     sandbox_executable = f"/agent-bin/{executable.name}"
     argv = [
         str(benchmark_venv / "bin/python"),
@@ -431,6 +491,9 @@ def _workspace_sandbox_argv(
         "--ro-bind",
         str(relay_socket),
         "/relay/agent.sock",
+        "--bind",
+        str(codex_home),
+        "/tmp/codex-home",
     ]
     current = Path("/")
     for part in benchmark_python_home.parent.parts[1:]:
@@ -590,6 +653,7 @@ def _docker_command(request: MleLiteRequest) -> CommandSpec:
     run_tag = request.run_tag or f"adapter_{request.agent}_{request.competition_id}"
     return CommandSpec(
         argv=(
+            "bash",
             str(ROOT / "docker-eval" / "run_in_docker.sh"),
             agent_name,
             request.competition_id,
@@ -693,6 +757,16 @@ def _workspace_command(
             "workspace-write",
             "--model",
             request.model,
+            "-c",
+            'model_provider="benchmark_relay"',
+            "-c",
+            'model_providers.benchmark_relay.name="Benchmark relay"',
+            "-c",
+            'model_providers.benchmark_relay.base_url="http://127.0.0.1:6200/v1"',
+            "-c",
+            'model_providers.benchmark_relay.wire_api="responses"',
+            "-c",
+            "model_providers.benchmark_relay.requires_openai_auth=true",
             instruction,
         )
     elif request.agent == "claude-code":
@@ -741,8 +815,8 @@ def _ai_scientist_command(request: MleLiteRequest) -> CommandSpec:
         raise AdapterError("MLE launcher requires an explicit model")
     public_dir = public_task_dir(request)
     profile_path = request.output_dir.resolve() / "ai-scientist-llm-profile.yaml"
-    profile_name = "benchmark-model"
-    if not request.dry_run:
+    profile_name = request.official_llm_profile or "benchmark-model"
+    if not request.dry_run and request.official_llm_profile is None:
         max_tokens = request.model_parameters.get(
             "max_completion_tokens",
             request.model_parameters.get(
@@ -795,16 +869,22 @@ def _ai_scientist_command(request: MleLiteRequest) -> CommandSpec:
             raise AdapterError(
                 f"refusing to overwrite AiScientist profile: {profile_path}"
             ) from exc
-    executable_path = AGENTS[request.agent].install_path / ".venv" / "bin" / "aisci"
-    executable = executable_path.resolve() if request.dry_run else require_file(
-        executable_path, "AiScientist executable"
+    executable_path = (
+        AGENTS[request.agent].execution_path / ".venv" / "bin" / "aisci"
     )
-    native_argv = (
+    if request.dry_run:
+        executable = executable_path
+    else:
+        require_file(executable_path, "AiScientist executable")
+        executable = executable_path
+    native_argv = [
             str(executable),
             "--output-root",
             str(request.output_dir.resolve()),
-            "--llm-profile-file",
-            str(profile_path),
+    ]
+    if request.official_llm_profile is None:
+        native_argv.extend(["--llm-profile-file", str(profile_path)])
+    native_argv.extend([
             "mle",
             "run",
             "--data-dir",
@@ -817,7 +897,11 @@ def _ai_scientist_command(request: MleLiteRequest) -> CommandSpec:
             f"{request.timeout_seconds}s",
             "--wait",
             "--skip-final-validation",
-    )
+    ])
+    if request.runtime_image:
+        native_argv.extend(["--image", request.runtime_image])
+    if request.image_pull_policy:
+        native_argv.extend(["--pull-policy", request.image_pull_policy])
     wrapper_argv = (
              str(ROOT / "BenchmarkAdapters/.venv/bin/python"),
             str(Path(__file__).with_name("native_wrappers.py")),
@@ -838,10 +922,12 @@ def _ai_scientist_command(request: MleLiteRequest) -> CommandSpec:
             "HOME": str(request.output_dir.resolve() / "home"),
             "OPENAI_API_KEY": "proxy",
             "ANTHROPIC_API_KEY": "proxy",
+            "PYTHONPATH": str(AGENTS[request.agent].install_path / "src"),
             "TMPDIR": str(request.output_dir.resolve() / "tmp"),
             "XDG_CACHE_HOME": str(request.output_dir.resolve() / "cache"),
             "XDG_CONFIG_HOME": str(request.output_dir.resolve() / "config"),
             "BENCHMARK_TASK_SPEC_SHA256": task_spec_digest("mle-bench-lite"),
+            "DOCKER_HOST": "unix:///run/docker.sock",
         }
     )
     argv = (
@@ -852,6 +938,7 @@ def _ai_scientist_command(request: MleLiteRequest) -> CommandSpec:
             wrapper_argv=wrapper_argv,
             source_root=AGENTS[request.agent].install_path,
             public_dir=public_dir,
+            docker_socket=Path("/run/docker.sock"),
         )
     )
     return CommandSpec(
@@ -876,10 +963,8 @@ def _ml_master_command(request: MleLiteRequest) -> CommandSpec:
         )
     config_path = require_file(request.config_path, "ML-Master 2 config")
     description = public_task_dir(request) / "description.md"
-    executable = require_file(
-        AGENTS[request.agent].install_path / ".venv" / "bin" / "python",
-        "ML-Master 2 Python executable",
-    )
+    executable = AGENTS[request.agent].execution_path / ".venv" / "bin" / "python"
+    require_file(executable, "ML-Master 2 Python executable")
     workspace_dir = request.output_dir.resolve() / "workspace"
     native_argv = (
             str(executable),

@@ -76,6 +76,16 @@ def _codex(request: NativeAOLaunchRequest) -> CommandSpec:
             "workspace-write",
             "--model",
             request.model,
+            "-c",
+            'model_provider="benchmark_relay"',
+            "-c",
+            'model_providers.benchmark_relay.name="Benchmark relay"',
+            "-c",
+            f'model_providers.benchmark_relay.base_url="{request.model_base_url}"',
+            "-c",
+            'model_providers.benchmark_relay.wire_api="responses"',
+            "-c",
+            "model_providers.benchmark_relay.requires_openai_auth=true",
             _instruction(request),
         ),
         cwd=request.candidate_dir,
@@ -112,7 +122,7 @@ def _arbor(
 ) -> CommandSpec:
     if require_upstream:
         require_clean_upstream_source("arbor")
-    executable = require_file(AGENTS["arbor"].install_path / ".venv/bin/arbor", "Arbor CLI")
+    executable = require_file(AGENTS["arbor"].execution_path / ".venv/bin/arbor", "Arbor CLI")
     socket_path = Path("/capability/dev.sock") if request.sandboxed else request.dev_socket
     eval_argv = [
         "/usr/bin/python3",
@@ -159,7 +169,11 @@ def _arbor(
     return CommandSpec(
         argv=tuple(argv),
         cwd=request.candidate_dir,
-        env={"SEED": str(request.seed), "TERMINAL_AO_DEV_TOKEN": request.dev_token},
+        env={
+            "PYTHONPATH": str(AGENTS["arbor"].install_path / "src"),
+            "SEED": str(request.seed),
+            "TERMINAL_AO_DEV_TOKEN": request.dev_token,
+        },
         timeout_seconds=request.timeout_seconds,
         label="Arbor native coordinator Terminal AO loop",
     )
@@ -173,9 +187,10 @@ def _python_native(request: NativeAOLaunchRequest, module: str, python: Path, la
         "ai-scientist": AGENTS["ai-scientist"].install_path / "src",
     }
     python_path = f"{ROOT}:{source_roots[request.agent]}"
+    require_file(python, f"{label} Python")
     return CommandSpec(
         argv=(
-            str(require_file(python, f"{label} Python")),
+            str(python),
             "-m",
             module,
             "--workspace",

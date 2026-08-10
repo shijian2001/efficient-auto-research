@@ -40,6 +40,8 @@ class RelayProcess:
     request_timeout_seconds: int | None = None
     retry_policy: Mapping[str, Any] | None = None
     upstream_api: str | None = None
+    check_upstream_ready: bool = True
+    max_upstream_calls: int | None = None
     process: subprocess.Popen | None = None
 
     def _resolved_upstream_api(self) -> str:
@@ -145,6 +147,8 @@ class RelayProcess:
             raise RuntimeError("relay model parameters must be configured explicitly")
         if self.request_timeout_seconds is not None and self.request_timeout_seconds < 1:
             raise RuntimeError("relay request timeout must be positive")
+        if self.max_upstream_calls is not None and self.max_upstream_calls < 1:
+            raise RuntimeError("relay max upstream calls must be positive")
         upstream_key = (
             self.upstream_api_key
             or os.environ.get("UPSTREAM_API_KEY")
@@ -202,6 +206,9 @@ class RelayProcess:
         if retries is not None and int(retries) < 0:
             raise RuntimeError("relay max retries must be non-negative")
         environment["LLM_MAX_RETRIES"] = "0" if retries is None else str(int(retries))
+        environment["LLM_MAX_UPSTREAM_CALLS"] = (
+            "" if self.max_upstream_calls is None else str(self.max_upstream_calls)
+        )
         if "reasoning_effort" in parameters:
             environment["LLM_REASONING_EFFORT"] = str(parameters["reasoning_effort"])
         if "temperature" in parameters:
@@ -244,7 +251,8 @@ class RelayProcess:
                     time.sleep(0.1)
             else:
                 raise RuntimeError(f"relay did not become ready; see {self.log_path}")
-            self._check_upstream_ready()
+            if self.check_upstream_ready:
+                self._check_upstream_ready()
             return self
         except Exception:
             self._stop()

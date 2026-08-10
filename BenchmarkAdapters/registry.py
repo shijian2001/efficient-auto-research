@@ -22,6 +22,7 @@ class AgentSpec:
     terminal_direct_smoke_backend: str | None
     terminal_direct_smoke_status: str
     terminal_project: Path | None = None
+    runtime_path: Path | None = None
 
     @property
     def mle_mode(self) -> str:
@@ -38,6 +39,10 @@ class AgentSpec:
     @property
     def terminal_status(self) -> str:
         return self.terminal_direct_smoke_status
+
+    @property
+    def execution_path(self) -> Path:
+        return self.runtime_path or self.install_path
 
 
 AGENTS = {

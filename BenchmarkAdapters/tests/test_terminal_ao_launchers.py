@@ -442,3 +442,50 @@ def test_python_launchers_import_their_native_control_loop(
     assert completed.returncode == 0, completed.stderr
     assert "native-import-ok" in completed.stdout
     assert native_symbol.rsplit(".", 2)[-2] in source or native_symbol.rsplit(".", 1)[-1] in source
+
+
+@pytest.mark.parametrize(
+    ("agent", "expected_python", "variant"),
+    [
+        ("ear", ROOT / "BenchmarkAdapters/environments/mle/ear/.venv/bin/python", "default"),
+        (
+            "mlevolve",
+            ROOT / "BenchmarkAdapters/environments/agents/mlevolve/.venv/bin/python",
+            "default",
+        ),
+        (
+            "ml-master-2",
+            ROOT / "baselines/EvoMaster/.venv/bin/python",
+            "ml-master-autoresearch-variant",
+        ),
+        (
+            "ai-scientist",
+            ROOT / "baselines/AiScientist/.venv/bin/python",
+            "ai-scientist-terminal-variant",
+        ),
+    ],
+)
+def test_python_launchers_preserve_virtual_environment_entrypoint(
+    agent: str,
+    expected_python: Path,
+    variant: str,
+    tmp_path: Path,
+) -> None:
+    command = build_native_ao_command(
+        NativeAOLaunchRequest(
+            agent=agent,
+            candidate_dir=tmp_path,
+            launcher_output_dir=tmp_path / "launcher",
+            dev_client_path=ROOT / "BenchmarkAdapters/TerminalAO/dev_client.py",
+            dev_socket=tmp_path / "dev.sock",
+            dev_token="capability-token",
+            model="gpt-5.5",
+            seed=0,
+            timeout_seconds=60,
+            model_parameters={},
+            request_timeout_seconds=60,
+            retry_policy={},
+            agent_variant=variant,
+        )
+    )
+    assert command.argv[0] == str(expected_python)

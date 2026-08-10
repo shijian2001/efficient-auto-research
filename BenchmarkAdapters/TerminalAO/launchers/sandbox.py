@@ -18,6 +18,16 @@ def _resolved_python_root(python: Path) -> Path:
     return executable.parents[1]
 
 
+def _python_runtime_mounts(python: Path) -> tuple[Path, ...]:
+    mounts = [python.parent.parent, _resolved_python_root(python)]
+    if python.is_symlink():
+        target = Path(os.readlink(python))
+        if not target.is_absolute():
+            target = python.parent / target
+        mounts.append(target.absolute().parent.parent)
+    return tuple(dict.fromkeys(path.absolute() for path in mounts))
+
+
 def _mount_parent_dirs(argv: list[str], target: Path, created: set[Path]) -> None:
     current = Path("/")
     for part in target.parent.parts[1:]:
@@ -42,17 +52,17 @@ def _bind(argv: list[str], source: Path, target: Path, created: set[Path]) -> No
 
 def _runtime_mounts(agent: str) -> tuple[Path, ...]:
     adapter_venv = require_directory(ROOT / "BenchmarkAdapters/.venv", "adapter environment")
-    mounts = [ROOT / "BenchmarkAdapters", adapter_venv, _resolved_python_root(adapter_venv / "bin/python")]
+    mounts = [ROOT / "BenchmarkAdapters", *_python_runtime_mounts(adapter_venv / "bin/python")]
     if agent == "ear":
         venv = ROOT / "BenchmarkAdapters/environments/mle/ear/.venv"
-        mounts.extend((AGENTS[agent].install_path, venv, _resolved_python_root(venv / "bin/python")))
+        mounts.extend((AGENTS[agent].install_path, *_python_runtime_mounts(venv / "bin/python")))
     elif agent == "mlevolve":
         venv = ROOT / "BenchmarkAdapters/environments/agents/mlevolve/.venv"
-        mounts.extend((AGENTS[agent].install_path, venv, _resolved_python_root(venv / "bin/python")))
+        mounts.extend((AGENTS[agent].install_path, *_python_runtime_mounts(venv / "bin/python")))
     elif agent in {"ml-master-2", "ai-scientist", "arbor"}:
-        venv = AGENTS[agent].install_path / ".venv"
-        mounts.extend((AGENTS[agent].install_path, venv, _resolved_python_root(venv / "bin/python")))
-    return tuple(dict.fromkeys(path.resolve() for path in mounts))
+        venv = AGENTS[agent].execution_path / ".venv"
+        mounts.extend((AGENTS[agent].install_path, *_python_runtime_mounts(venv / "bin/python")))
+    return tuple(dict.fromkeys(path.absolute() for path in mounts))
 
 
 def _require_socket(path: Path, description: str) -> Path:
@@ -86,6 +96,12 @@ def sandbox_native_ao_command(
     host_dev_socket = _require_socket(host_dev_socket, "dev broker socket")
     host_relay_socket = _require_socket(host_relay_socket, "LLM relay socket")
     resolver_path = require_file(resolver_path, "sandbox resolver")
+    codex_home = launcher_output_dir / "codex-home"
+    codex_home.mkdir(parents=True, exist_ok=True)
+    auth_path = codex_home / "auth.json"
+    if not auth_path.exists():
+        auth_path.write_text('{"OPENAI_API_KEY":"proxy"}\n', encoding="utf-8")
+        auth_path.chmod(0o600)
 
     argv = [
         str(bwrap),
@@ -150,12 +166,17 @@ def sandbox_native_ao_command(
         Path("/capability"),
         Path("/relay"),
     }
+    source_path = AGENTS[agent].install_path.absolute()
+    execution_path = AGENTS[agent].execution_path.absolute()
     for mount in _runtime_mounts(agent):
         _ro_bind(argv, mount, mount, created)
+        if mount == source_path and execution_path != source_path:
+            _ro_bind(argv, source_path, execution_path, created)
     _bind(argv, candidate_dir, candidate_dir, created)
     _bind(argv, launcher_output_dir, launcher_output_dir.resolve(), created)
     _bind(argv, host_dev_socket, Path("/capability/dev.sock"), created)
     _bind(argv, host_relay_socket, Path("/relay/llm.sock"), created)
+    _bind(argv, codex_home, Path("/tmp/codex-home"), created)
 
     child_argv = [
         argument.replace(str(host_dev_socket), "/capability/dev.sock")

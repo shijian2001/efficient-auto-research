@@ -82,6 +82,12 @@ UPSTREAM_TIMEOUT: float | None = float(_timeout_raw) if _timeout_raw else None
 UPSTREAM_PROXY = os.environ.get("LLM_UPSTREAM_PROXY", "").strip() or None
 _max_retries_raw = os.environ.get("LLM_MAX_RETRIES")
 MAX_RETRIES = int(_max_retries_raw) + 1 if _max_retries_raw is not None else 0
+_max_upstream_calls_raw = os.environ.get("LLM_MAX_UPSTREAM_CALLS", "").strip()
+MAX_UPSTREAM_CALLS: int | None = (
+    int(_max_upstream_calls_raw) if _max_upstream_calls_raw else None
+)
+if MAX_UPSTREAM_CALLS is not None and MAX_UPSTREAM_CALLS < 1:
+    raise RuntimeError("LLM_MAX_UPSTREAM_CALLS must be positive")
 AGENT_NAME = os.environ.get("LLM_PROXY_AGENT_NAME", "unknown")
 INBOUND_API_KEY = os.environ.get("LLM_PROXY_API_KEY", "proxy")
 _configured_upstream_api = os.environ.get("LLM_UPSTREAM_API", "").strip().lower()
@@ -104,6 +110,8 @@ _CONTROL_PARAMETERS = {
 }
 
 _token_log_lock = threading.Lock()
+_upstream_call_lock = threading.Lock()
+_upstream_calls = 0
 
 # 每线程一个 httpx client（trust_env=False: relay 直连，不走容器代理变量）
 _thread_local = threading.local()
@@ -772,6 +780,16 @@ def _post_upstream(path: str, body: dict, call_type: str) -> tuple[dict, float, 
     t0 = time.time()
     for attempt in range(MAX_RETRIES):
         try:
+            global _upstream_calls
+            with _upstream_call_lock:
+                if (
+                    MAX_UPSTREAM_CALLS is not None
+                    and _upstream_calls >= MAX_UPSTREAM_CALLS
+                ):
+                    raise _UpstreamCallLimitError(
+                        f"relay upstream call limit reached: {MAX_UPSTREAM_CALLS}"
+                    )
+                _upstream_calls += 1
             resp = _client().post(url, json=body, headers=headers)
             if _is_retryable_status(resp.status_code):
                 raise RuntimeError(f"upstream {resp.status_code}: {resp.text[:300]}")
@@ -782,6 +800,8 @@ def _post_upstream(path: str, body: dict, call_type: str) -> tuple[dict, float, 
             _validate_response(data, body)
             return data, time.time() - t0, attempt
         except _UpstreamHTTPError:
+            raise
+        except _UpstreamCallLimitError:
             raise
         except Exception as exc:
             last_error = exc
@@ -800,6 +820,10 @@ class _UpstreamHTTPError(Exception):
         super().__init__(f"upstream {status}: {text[:300]}")
         self.status = status
         self.text = text
+
+
+class _UpstreamCallLimitError(Exception):
+    pass
 
 
 def _validate_response(data: dict, request_body: dict) -> None:

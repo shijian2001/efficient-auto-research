@@ -6,6 +6,7 @@ import sys
 import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -190,6 +191,46 @@ class UnifiedLLMRelayArchitectureTests(unittest.TestCase):
         self.assertEqual(source.count("_client().post("), 1)
         self.assertNotIn('path == "/completions"', source)
         self.assertNotIn('path == "/embeddings"', source)
+
+    def test_relay_hard_upstream_call_limit_blocks_second_post(self) -> None:
+        class Response:
+            status_code = 200
+            text = ""
+
+            @staticmethod
+            def json() -> dict[str, object]:
+                return {
+                    "choices": [
+                        {"message": {"role": "assistant", "content": "ok"}}
+                    ]
+                }
+
+        client = mock.Mock()
+        client.post.return_value = Response()
+        original_limit = self.server.MAX_UPSTREAM_CALLS
+        original_calls = self.server._upstream_calls
+        original_retries = self.server.MAX_RETRIES
+        try:
+            self.server.MAX_UPSTREAM_CALLS = 1
+            self.server._upstream_calls = 0
+            self.server.MAX_RETRIES = 1
+            with mock.patch.object(self.server, "_client", return_value=client):
+                self.server._post_upstream(
+                    "/chat/completions",
+                    {"messages": [{"role": "user", "content": "hello"}]},
+                    "unit-test",
+                )
+                with self.assertRaises(self.server._UpstreamCallLimitError):
+                    self.server._post_upstream(
+                        "/chat/completions",
+                        {"messages": [{"role": "user", "content": "again"}]},
+                        "unit-test",
+                    )
+            self.assertEqual(client.post.call_count, 1)
+        finally:
+            self.server.MAX_UPSTREAM_CALLS = original_limit
+            self.server._upstream_calls = original_calls
+            self.server.MAX_RETRIES = original_retries
 
     def test_agent_environment_is_fail_closed_to_local_relay(self) -> None:
         environment = self.client.relay_agent_environment(

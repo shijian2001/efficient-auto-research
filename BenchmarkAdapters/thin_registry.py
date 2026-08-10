@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import os
 import subprocess
 from dataclasses import dataclass
 from pathlib import Path
@@ -211,14 +212,26 @@ def backend_identity(agent: str, benchmark_id: str, agent_variant: str | None) -
 
 
 def git_source_state(path: Path) -> tuple[str | None, bool | None]:
+    git_config: list[str] = []
+    excludes_file = os.environ.get("BENCHMARK_ADAPTERS_GIT_EXCLUDES_FILE")
+    if excludes_file:
+        git_config.extend(("-c", f"core.excludesFile={excludes_file}"))
     commit = subprocess.run(
-        ["git", "-C", str(path.resolve()), "rev-parse", "HEAD"],
+        ["git", *git_config, "-C", str(path.resolve()), "rev-parse", "HEAD"],
         capture_output=True,
         text=True,
         check=False,
     )
     dirty = subprocess.run(
-        ["git", "-C", str(path.resolve()), "status", "--porcelain", "--untracked-files=normal"],
+        [
+            "git",
+            *git_config,
+            "-C",
+            str(path.resolve()),
+            "status",
+            "--porcelain",
+            "--untracked-files=normal",
+        ],
         capture_output=True,
         text=True,
         check=False,
