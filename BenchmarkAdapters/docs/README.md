@@ -3,6 +3,24 @@
 The canonical implementation and capability matrix are documented in
 `BenchmarkAdapters/README.md`.
 
+## Current State
+
+The adapter code, native launcher definitions, host-owned graders, and scorecard
+logic are present. This does not mean that all fourteen Agent x Benchmark cells
+can currently produce formal scores. The current checkout still needs:
+
+- an MLE-Bench Lite schema-v2 data manifest with prepared public/private hashes;
+- a schema-v2 Terminal AO protocol with an immutable benchmark source commit;
+- a real, shared model-track configuration instead of the placeholder file;
+- a complete `BenchmarkAdapters/.venv` (the current environment is missing
+  PyYAML); and
+- clean, pinned Agent source checkouts plus one real end-to-end smoke per cell.
+
+Arbor MLE uses `arbor-benchmark-patched`; Terminal AO uses
+`ml-master-autoresearch-variant` for ML-Master 2.0 and
+`ai-scientist-terminal-variant` for AiScientist. The 89-task direct Terminal
+path is a smoke path and its scores must not be compared with Terminal AO.
+
 The implemented repair checklist, scoring protocol, remaining real-run gates,
 and evidence requirements for all seven Agents on MLE-Bench Lite and
 Terminal-Bench 36/53 AO are defined in
@@ -45,6 +63,8 @@ host-owned; outer Agent processes receive only an aggregate dev capability and
 cannot see the test split or test endpoint.
 
 ```bash
+# Run these only after the adapter environment and model/protocol files have
+# been prepared. A dry-run only checks command construction; it is not a score.
 BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters status
 BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters preflight
 BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters terminal-ao \

@@ -1,12 +1,13 @@
 # EAR — Terminal-Bench
 
-Status: **fail-closed; not a completed adapter**.
+Status: **legacy direct path disabled; current AO backend is elsewhere**.
 
-The registered import path is `agent_adapters.ear:EARTerminalAgent`, but
-canonical command construction is disabled. Running graph candidates directly
-in the formal Harbor task environment would make sibling branches contaminate
-one another and would leave cumulative state for the verifier.
+The registered import path `agent_adapters.ear:EARTerminalAgent` is a legacy
+direct-solving guard and is intentionally disabled. The current formal Terminal
+AO path uses EAR's native KTS repository backend in
+`BenchmarkAdapters/TerminalAO/`. It still requires the shared AO protocol,
+clean source, model configuration and a real end-to-end smoke before formal
+scoring.
 
-Readiness requires clean sibling candidate environments, a meaningful public
-candidate observation, and replay of only EAR's selected best candidate into
-the formal task environment.
+The direct Harbor path must not be used for an AO score; only the shared AO
+supervisor may select and replay EAR's best candidate.

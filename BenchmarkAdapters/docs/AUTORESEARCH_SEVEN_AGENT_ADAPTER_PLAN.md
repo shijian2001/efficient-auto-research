@@ -6,12 +6,10 @@
   Definition of Done。
 - 当前实现状态：冻结 protocol、`train.py`-only revision store、断网 candidate evaluator、
   dev broker、双 held-out final gate、七个原生 Agent 入口、三 seed aggregate 和 scorecard CLI
-  已实现，并通过不调用模型 API 的定向 contract/synthetic 测试。七个 Agent 已通过各自原生
-  边界连接冻结的 GPT-5.5/high/temperature 1.0 模型 Adapter；五个 Python Agent 使用锁定
-  专用运行时和只读 source snapshot，Codex/Claude Code 使用版本探针。当前服务器七路原生
-  import/CLI probe、外部 benchmark Python、prepared assets 和 kernel cache 已使完整 preflight
-  达到 `command_ready`。本次仍没有调用模型 API、执行七 Agent 真实 scored smoke 或运行
-  7×3×48h 正式 campaign。
+  已实现，并有不调用模型 API 的定向 contract/synthetic 测试记录。当前本机共享
+  `BenchmarkAdapters/.venv` 缺少 PyYAML，顶层 adapter preflight 还不能完整执行；七个 Agent
+  的原生 import/CLI、prepared assets、模型配置和 clean source 需要在环境补齐后重新检查。
+  本次仍没有调用模型 API、执行七 Agent 真实 scored smoke 或运行 7×3×48h 正式 campaign。
 - 目标 Agent：EAR、MLEvolve、Arbor、Codex、Claude Code、ML-Master 2.0、AiScientist。
 - 目标结果：七个 Agent 都能从同一冻结 baseline 出发，在相同硬件和预算下优化
   `train.py`，产出可复测、可审计的最终 artifact，并得到可直接横向比较的
@@ -183,7 +181,7 @@ seed-hook 覆盖和 `evaluate_bpb` 调用边界检查。
 - seed injection 对七个 Agent 完全相同；
 - 注入后的运行脚本可由原始 final artifact + evaluator version 确定性重建。
 
-上述机制已通过无 API contract 测试，但这只解除 seed-policy 的实现阻塞。只有完成相同
+上述机制已通过无 API contract 测试，但这只说明 seed-policy 的代码检查已经完成。只有完成相同
 协议下的三个 48 小时 outer runs、每个 artifact 的两次 held-out 复测和正式聚合后，才可
 发布可横向比较的最终分。
 
@@ -210,7 +208,7 @@ seed-hook 覆盖和 `evaluate_bpb` 调用边界检查。
 | 最终复测 | 每个 final artifact 两个 sealed seeds |
 | 失败政策 | 失败保留在分母，不做 best-of-retry 替换 |
 
-模型统一由各 Agent 模型 Adapter 和 formal manifest 门禁共同保证。
+模型统一由各 Agent 模型 Adapter 和 formal manifest 检查共同保证。
 
 ### 3.2 H100 调度
 
@@ -609,7 +607,7 @@ BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters autoresearch-scorecard \
 ```
 
 以上命令已经接入真实 `python -m BenchmarkAdapters` 入口。正式 `autoresearch` 运行会
-fail-closed 校验 source、UV lock、prepared manifest、冻结 FlashAttention kernel cache、
+在启动前检查 source、UV lock、prepared manifest、冻结 FlashAttention kernel cache、
 evaluator implementation、seed policy、H100 80GB、
 clean source 和不可覆盖输出；`--dry-run` 只输出命令与冻结协议，不启动 Agent、GPU、模型
 API 或 candidate evaluator，也不能作为有效分数证据。
@@ -694,16 +692,15 @@ Pilot 用于验证调度、失败处理、token 统计和 final seed gate。
 5. `formal_protocol_ready`：有完整 48 小时 outer run、两个 held-out seed、不可变结果和
    聚合证据。
 
-当前仓库实现已通过 `command_ready` 所需的离线 contract/synthetic 测试，但 readiness
+当前仓库实现有 `command_ready` 所需的离线 contract/synthetic 测试记录，但 readiness
 仍由 `preflight` 按每个 Agent 的真实 runtime、prepared assets、clean source 和 durable
 evidence 单独判断。`preflight` 现在实际 import 原生 Python 组件，而不是只检查 executable；
 smoke/formal readiness evidence 还必须回溯到 artifact、manifest、双 held-out records 或有效
-Avg@3 aggregate。当前服务器的外部 UV Python 3.10 环境、prepared data/tokenizer 和冻结
-FlashAttention cache 已通过不训练、不调用 API 的资产验证；五个 Python Agent 的锁定 profile
-及只读 source snapshot 已安装，Codex/Claude Code CLI 版本探针也已通过。完整 preflight 的
-七个 Autoresearch cell 当前均为 `command_ready`；dirty worktree 仍会阻止正式 launch。
-`baseline_score_record.json` 当前明确为 `pending`，因此正式 48 小时入口还会 fail-closed；
-smoke/pilot 不受该门禁影响，完成最终数据范围上的 clean H100 baseline 后才能将记录冻结为
+Avg@3 aggregate。当前共享 adapter 环境缺少 PyYAML，七个 Autoresearch cell 的实际状态需要
+补依赖后重新生成，不能沿用旧的 `command_ready` 记录；dirty worktree 也会直接退出正式
+launch。
+`baseline_score_record.json` 当前明确为 `pending`，因此正式 48 小时入口会直接退出并说明原因；
+smoke/pilot 不受该检查影响，完成最终数据范围上的 clean H100 baseline 后才能将记录冻结为
 `completed`。
 由于仍没有七 Agent 的真实 300 秒 scored smoke，
 不得把任一 Agent 声称为 `real_smoke_ready` 或 `formal_protocol_ready`。

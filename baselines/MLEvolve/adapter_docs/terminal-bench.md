@@ -1,11 +1,13 @@
 # MLEvolve — Terminal-Bench
 
-Status: **fail-closed; not a completed adapter**.
+Status: **legacy direct path disabled; current AO backend is elsewhere**.
 
-The registered import path is
-`agent_adapters.mlevolve:MLEvolveTerminalAgent`, but canonical command
-construction is disabled. The native search currently assumes host-visible
-Kaggle workspaces, submission CSV grading, and non-isolated candidate state.
+The registered import path
+`agent_adapters.mlevolve:MLEvolveTerminalAgent` is a legacy direct-solving
+guard and is intentionally disabled. The current formal Terminal AO path uses
+the native MLEvolve UCT repository backend in `BenchmarkAdapters/TerminalAO/`.
+It still requires the shared AO protocol, clean source, model configuration and
+a real end-to-end smoke before formal scoring.
 
-Readiness requires a domain-neutral Harbor candidate backend, clean sibling
-environments, and replay of only the selected best candidate.
+The direct Harbor path must not be used for an AO score; only the shared AO
+supervisor may select and replay the best candidate.

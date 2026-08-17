@@ -1,22 +1,28 @@
 # Docker Evaluation Harness
 
-This directory launches one agent per container with a fixed GPU/CPU allocation
-and an in-container LLM relay. It supports EAR, MLEvolve, and Arbor. The host
-harness is outside the EAR Git worktree, so every formal run records launcher and
-relay SHA-256 values in `launch_manifest.json`.
+This directory is the historical MLE Docker runner. It launches one Agent per
+container with a fixed GPU/CPU allocation and an in-container LLM relay, and it
+supports the older EAR, MLEvolve, and Arbor experiments. It is not the canonical
+entry point for the current seven-Agent x two-Benchmark comparison; use
+`BenchmarkAdapters/` with `mle-cell` and `terminal-ao` for that work. The host
+harness is outside the EAR Git worktree, so every historical run records launcher
+and relay SHA-256 values in `launch_manifest.json`.
 
 ## EAR Generation
 
-The current EAR implementation candidate is `ear/g7`, developed in:
+The canonical EAR source selected by the current adapters is G3:
+`mle-bench-agents/efficient-auto-research@7cd9ed5`.
+The G5 worktree below is retained for historical infrastructure experiments and
+is not a completed seven-Agent benchmark result.
 
 ```text
-/mnt/sdc/shijianwang/efficient-agent-research/ear-worktrees/g7-converged
+/mnt/sdc/shijianwang/efficient-agent-research/mle-bench-agents/efficient-auto-research
 ```
 
-G7 follows the G3 reward path: candidate-reported local `METRIC` drives the
-search, while the final outer submission is graded by the official MLE-bench
-grader after the run. G6 remains available as a separate historical controlled-
-evaluator experiment and is not part of this launcher path.
+The G3 code uses candidate-reported local `METRIC` to drive the search, while
+the final outer submission is graded by the official MLE-Bench grader after the
+run. G4-G7 remain available as historical experiments and are not the current
+canonical adapter source.
 
 ## Quick Start
 
@@ -24,7 +30,7 @@ evaluator experiment and is not part of this launcher path.
 cd /mnt/sdc/shijianwang/efficient-agent-research/docker-eval
 
 export OPENAI_API_KEY="<server-provided-key>"
-export EAR_AGENT_DIR=/mnt/sdc/shijianwang/efficient-agent-research/ear-worktrees/g7-converged
+export EAR_AGENT_DIR=/mnt/sdc/shijianwang/efficient-agent-research/mle-bench-agents/efficient-auto-research
 export RUN_TAG=<unique-run-id>
 export SEED=0
 
@@ -41,8 +47,10 @@ Launcher arguments:
 | 4 | maximum steps | `2` |
 | 5 | wall-clock timeout in seconds | `900` |
 
-Use a high step cap plus wall-clock timeout for a time-budgeted run. Do not use a
-smoke result in a formal table.
+Use a high step cap plus wall-clock timeout for a time-budgeted historical run.
+Do not use a smoke result in a formal table. A formal seven-Agent comparison
+must use the frozen protocol, model track, source commits, and scorecard under
+`BenchmarkAdapters/`.
 
 ## EAR-Specific Environment
 

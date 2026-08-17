@@ -33,14 +33,19 @@ def sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
-def parse_metric(output: str) -> float:
+def parse_metric_with_text(output: str) -> tuple[str, float]:
     matches = _METRIC_RE.findall(output)
     if not matches:
         raise AdapterError("solution.py must print a final line in the form METRIC=<finite-float>")
-    metric = float(matches[-1])
+    raw_text = matches[-1]
+    metric = float(raw_text)
     if not math.isfinite(metric):
         raise AdapterError("METRIC must be finite")
-    return metric
+    return raw_text, metric
+
+
+def parse_metric(output: str) -> float:
+    return parse_metric_with_text(output)[1]
 
 
 def infer_data_root(public_dir: Path, competition_id: str) -> Path:

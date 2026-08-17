@@ -3,6 +3,12 @@
 > 承接[文档六](06_stagnation_heated_ts_and_full_six_tasks.md)。文档六结束于 G3，并用不同
 > 版本的每题历史最好成绩构成诊断性六题汇总。本文记录 G4 的失败、为什么不能继续靠行为过滤
 > 提升稳定性，以及 G5 如何在不改变 G3 搜索行为的前提下加固实验可信链。
+>
+> **当前状态（2026-08-16）**：本文仍是 G4/G5 历史基础设施记录。当前七 Agent × 两个目标
+> Benchmark 的 Adapter 代码大体已写，但 MLE schema-v2 manifest、Terminal AO schema-v2
+> protocol、真实 model-track 配置、Adapter Python 依赖、干净 Agent source 和真实 scored
+> smoke 尚未全部准备好，因此没有正式横向分数。以
+> `BenchmarkAdapters/docs/SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md` 的清单为准。
 
 ## 1. 代际定位
 

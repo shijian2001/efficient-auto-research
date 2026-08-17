@@ -1,5 +1,13 @@
 # FML-Bench 七 Agent Formal Adapter
 
+## 当前状态
+
+FML 的共享层、七个原生 Adapter 和 contract/synthetic 测试已经写入仓库，但这不等于
+正式评测已经可以发布。当前 upstream worktree 仍有未提交变化，主指标和 EAR variant
+尚未冻结，ML-Master 2.0 还有 runtime API 兼容问题，七个 Agent 也都没有完成真实 relay
+smoke；因此当前没有正式 FML 分数。这个状态与 MLE-Bench Lite、Terminal AO 的统一
+Adapter 状态相互独立，不能把 FML 的 dry-run 或 synthetic 结果当成正式成绩。
+
 ## 两层架构
 
 ```text
@@ -34,10 +42,10 @@ CLI/API、模型配置、运行时和轨迹，不生成 proposal、不修复代�
 
 ## Agent Matrix
 
-| Agent | Adapter class | Native entrypoint | Installation probe | Task / artifact | Fake relay + synthetic E2E | 当前 blocker |
+| Agent | Adapter class | Native entrypoint | Installation probe | Task / artifact | Fake relay + synthetic E2E | 当前还缺的条件 |
 |---|---|---|---|---|---|---|
 | EAR | `EARFMLAdapter` | `agent.engine.thompson.select_parent` | Python + native import | canonical task；editable-path tar | 通过 | 正式 variant 仍需选择 `g3` 或 `full` |
-| MLEvolve | `MLEvolveFMLAdapter` | `AgentSearch` + UCT selector | Python + native import | canonical task；editable-path tar | 通过 | 无 Adapter blocker |
+| MLEvolve | `MLEvolveFMLAdapter` | `AgentSearch` + UCT selector | Python + native import | canonical task；editable-path tar | 通过 | 尚未真实 relay smoke |
 | Arbor | `ArborFMLAdapter` | `arbor run` coordinator | exact CLI/version/hash | canonical task；editable-path tar | 通过 | 尚未真实 relay smoke |
 | Codex | `CodexFMLAdapter` | `codex exec` | exact CLI/version/hash | canonical task；editable-path tar | 通过 | 尚未真实 relay smoke |
 | Claude Code | `ClaudeCodeFMLAdapter` | `claude --print` | exact binary/version/hash | canonical task；editable-path tar | 通过 | 尚未真实 relay smoke |
@@ -70,7 +78,7 @@ metric 重算 upstream normalized improvement 与 win rate。
 - task set：完整 18 题；
 - evaluator identity：upstream runner/executor/utils/metrics implementation digest；
 - score：逐题 baseline fallback/range 和 normalized improvement 公式已映射；win rate 同时输出；
-- upstream repository 当前 dirty，因此 formal preflight 必须失败；
+- upstream repository 当前有未提交变化，因此 formal preflight 会直接退出并记录失败；
 - upstream registry 的 baseline Agents 与本项目七 Agent 不同，正式路径使用本项目 concrete Adapter registry；
 - 当前未人工决定主榜使用 average improvement 还是 win rate。
 

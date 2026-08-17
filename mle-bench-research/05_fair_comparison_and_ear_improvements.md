@@ -6,6 +6,9 @@
 >
 > **历史范围**：本文记录到 G1。G2/G3 见[文档六](06_stagnation_heated_ts_and_full_six_tasks.md)，
 > G4/G5 见[文档七](07_g4_failure_and_g5_infrastructure.md)。
+>
+> 本文记录的是历史实验，不代表当前 7 Agent × 2 Benchmark 正式评测已经完成；当前状态以
+> `BenchmarkAdapters/docs/SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md` 为准。
 
 ---
 

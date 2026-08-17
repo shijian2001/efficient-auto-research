@@ -6,6 +6,9 @@
 > （code extraction / compile gate / submission validation）已落地 EAR `proxy-based-eval` 分支。
 > G5 已进一步完成 attempt/run 隔离和 artifact 可信链；当前状态见
 > [文档七](07_g4_failure_and_g5_infrastructure.md)。本文中的问题清单保留为历史归因。
+>
+> 本文记录的是历史实验，不代表当前 7 Agent × 2 Benchmark 正式评测已经完成；当前状态以
+> `BenchmarkAdapters/docs/SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md` 为准。
 
 ---
 

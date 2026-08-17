@@ -12,7 +12,14 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .common import AdapterError, parse_metric, sha256_file, validate_submission_remote, write_json
+from .common import (
+    AdapterError,
+    parse_metric_with_text,
+    sha256_file,
+    validate_submission_remote,
+    write_json,
+)
+from .state_store import find_bound_record, run_id_from_environment, state_root_from_environment
 
 
 def _load_metadata(workspace: Path) -> dict:
@@ -21,6 +28,16 @@ def _load_metadata(workspace: Path) -> dict:
         return json.loads(path.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as exc:
         raise AdapterError(f"invalid adapter metadata: {path}") from exc
+
+
+def _receipt_path(workspace: Path, metadata: dict) -> Path:
+    relative = str(metadata.get("evaluation_receipt_path", "results/mle_eval_receipt.json"))
+    path = workspace / relative
+    try:
+        path.resolve().relative_to(workspace.resolve())
+    except ValueError as exc:
+        raise AdapterError("evaluation receipt path must remain inside the workspace") from exc
+    return path
 
 
 def _check_immutable(workspace: Path, metadata: dict) -> None:
@@ -58,7 +75,7 @@ def run_candidate(workspace: Path) -> float:
     _check_immutable(workspace, metadata)
     solution = workspace / metadata.get("solution_path", "solution.py")
     submission = workspace / metadata.get("submission_path", "submission.csv")
-    state_path = workspace / "results" / "mle_eval_state.json"
+    receipt_path = _receipt_path(workspace, metadata)
     if not solution.is_file():
         raise AdapterError(f"candidate entrypoint is missing: {solution.name}")
     if solution.is_symlink():
@@ -72,7 +89,7 @@ def run_candidate(workspace: Path) -> float:
         if preexisting and submission.is_file() and not submission.is_symlink()
         else None
     )
-    _remove_file(state_path, label="evaluation state")
+    _remove_file(receipt_path, label="evaluation receipt")
     _remove_file(submission, label="submission")
 
     solution_hash = sha256_file(solution)
@@ -111,7 +128,7 @@ def run_candidate(workspace: Path) -> float:
     execution_seconds = time.perf_counter() - started_monotonic
     if return_code != 0:
         raise AdapterError(f"solution.py exited with code {return_code}")
-    metric = parse_metric("".join(metric_lines))
+    raw_metric_text, metric = parse_metric_with_text("".join(metric_lines))
     if not submission.is_file() or submission.is_symlink():
         raise AdapterError("solution.py did not create a regular submission.csv file")
     if sha256_file(solution) != solution_hash:
@@ -121,11 +138,13 @@ def run_candidate(workspace: Path) -> float:
     submission_stat = submission.stat()
     solution_stat = solution.stat()
     write_json(
-        state_path,
+        receipt_path,
         {
-            "schema_version": 2,
+            "schema_version": 3,
             "competition_id": metadata["competition_id"],
             "metric": metric,
+            "raw_metric_text": raw_metric_text,
+            "raw_metric_numeric": metric,
             "metric_direction": metadata["metric_direction"],
             "evaluation_status": "verified",
             "evaluation_semantics": "candidate_local_metric_plus_format_validation",
@@ -152,33 +171,24 @@ def run_candidate(workspace: Path) -> float:
 def verify_candidate(workspace: Path) -> float:
     metadata = _load_metadata(workspace)
     _check_immutable(workspace, metadata)
-    state_path = workspace / "results" / "mle_eval_state.json"
-    try:
-        state = json.loads(state_path.read_text(encoding="utf-8"))
-    except (OSError, json.JSONDecodeError) as exc:
-        raise AdapterError("no verified evaluation state exists; run bash eval.sh run first") from exc
-    if state.get("schema_version") != 2:
-        raise AdapterError("evaluation state schema is unsupported; rerun bash eval.sh run")
-    if state.get("competition_id") != metadata.get("competition_id"):
-        raise AdapterError("evaluation state belongs to a different competition")
-    if state.get("metric_direction") != metadata.get("metric_direction"):
-        raise AdapterError("evaluation state metric direction does not match the adapter")
-    if state.get("evaluation_status") != "verified" or state.get("format_validated") is not True:
-        raise AdapterError("evaluation state is not verified")
-    try:
-        metric = float(state["metric"])
-    except (KeyError, TypeError, ValueError) as exc:
-        raise AdapterError("evaluation state metric is invalid") from exc
-    if not math.isfinite(metric):
-        raise AdapterError("evaluation state metric must be finite")
-
     solution = workspace / metadata.get("solution_path", "solution.py")
     submission = workspace / metadata.get("submission_path", "submission.csv")
-    if solution.is_symlink() or not solution.is_file() or sha256_file(solution) != state.get("solution_sha256"):
-        raise AdapterError("solution.py changed after the recorded evaluation")
-    if submission.is_symlink() or not submission.is_file() or sha256_file(submission) != state.get("submission_sha256"):
-        raise AdapterError("submission.csv changed after the recorded evaluation")
-    _validate(workspace, metadata, submission)
+    record = find_bound_record(
+        root=state_root_from_environment(),
+        run_id=run_id_from_environment(),
+        competition_id=str(metadata["competition_id"]),
+        solution=solution,
+        submission=submission,
+        node_id=os.environ.get("ARBOR_MLE_NODE_ID") or None,
+    )
+    if record.get("metric_direction") != metadata.get("metric_direction"):
+        raise AdapterError("host-owned MLE record metric direction does not match the adapter")
+    try:
+        metric = float(record["raw_metric_numeric"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise AdapterError("host-owned MLE record local metric is invalid") from exc
+    if not math.isfinite(metric):
+        raise AdapterError("host-owned MLE record local metric must be finite")
     return metric
 
 
@@ -186,8 +196,11 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=("run", "verify"), nargs="?", default="run")
     parser.add_argument("--workspace", type=Path, default=Path.cwd())
+    parser.add_argument("--node-id")
     args = parser.parse_args(argv)
     try:
+        if args.node_id:
+            os.environ["ARBOR_MLE_NODE_ID"] = args.node_id
         metric = (
             run_candidate(args.workspace.resolve())
             if args.mode == "run"

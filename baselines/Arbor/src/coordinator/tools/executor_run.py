@@ -176,14 +176,16 @@ async def _run_after_executor_hook(
     config: "CoordinatorConfig",
     worktree_path: Path,
     node_id: str,
+    attempt_id: str = "1",
 ) -> None:
     """Run the after_executor lifecycle hook and snapshot a bound submission.
 
     Plugins may set ``require_verified_state`` on the hook and provide
-    ``evaluation_state_path`` / ``solution_path`` in ``eval_contract``. In that
-    mode, the controller snapshots only when the recorded solution and
-    submission hashes match the current worktree. This prevents stale or
-    post-evaluation artifacts from entering final recovery.
+    ``evaluation_receipt_path`` / ``solution_path`` in ``eval_contract``. In
+    that mode, the controller publishes a host-owned record only when the
+    receipt hashes match the current worktree, then snapshots the bound
+    submission. This prevents stale or post-evaluation artifacts from being
+    treated as verified.
     """
     plugin = config.plugin
     if not plugin or not plugin.lifecycle_hooks:
@@ -207,33 +209,65 @@ async def _run_after_executor_hook(
 
     verified_state: dict[str, Any] | None = None
     require_verified = isinstance(hook, dict) and bool(hook.get("require_verified_state"))
-    state_rel = plugin.eval_contract.get("evaluation_state_path")
+    receipt_rel = plugin.eval_contract.get(
+        "evaluation_receipt_path", plugin.eval_contract.get("evaluation_state_path")
+    )
     if require_verified:
-        if not state_rel:
-            log.warning("after_executor: verified state required but no state path is configured")
+        if not receipt_rel:
+            log.warning("after_executor: verified state required but no receipt path is configured")
             return
-        state_path = worktree_path / str(state_rel)
+        receipt_path = worktree_path / str(receipt_rel)
         try:
-            verified_state = json.loads(state_path.read_text(encoding="utf-8"))
+            receipt = json.loads(receipt_path.read_text(encoding="utf-8"))
         except (OSError, json.JSONDecodeError) as exc:
-            log.info("after_executor: skip %s; verified state is unavailable: %s", node_id, exc)
+            log.info("after_executor: skip %s; evaluation receipt is unavailable: %s", node_id, exc)
+            return
+        if not isinstance(receipt, dict):
+            log.info("after_executor: skip %s; evaluation receipt is invalid", node_id)
             return
         if (
-            verified_state.get("evaluation_status") != "verified"
-            or verified_state.get("format_validated") is not True
-            or verified_state.get("submission_sha256") != _sha256(submission)
+            receipt.get("evaluation_status") != "verified"
+            or receipt.get("format_validated") is not True
+            or receipt.get("submission_sha256") != _sha256(submission)
         ):
-            log.info("after_executor: skip %s; submission is not bound to verified state", node_id)
+            log.info("after_executor: skip %s; submission is not bound to evaluation receipt", node_id)
             return
         solution_rel = plugin.eval_contract.get("solution_path", "solution.py")
         solution = worktree_path / str(solution_rel)
         if (
             not solution.is_file()
             or solution.is_symlink()
-            or verified_state.get("solution_sha256") != _sha256(solution)
+            or receipt.get("solution_sha256") != _sha256(solution)
         ):
-            log.info("after_executor: skip %s; solution is not bound to verified state", node_id)
+            log.info("after_executor: skip %s; solution is not bound to evaluation receipt", node_id)
             return
+        state_root_env = str(plugin.eval_contract.get("host_state_root_env", "")).strip()
+        run_id_env = str(plugin.eval_contract.get("host_run_id_env", "")).strip()
+        if state_root_env and run_id_env:
+            state_root = os.environ.get(state_root_env, "").strip()
+            run_id = os.environ.get(run_id_env, "").strip()
+            if not state_root or not run_id:
+                log.info("after_executor: skip %s; host-owned MLE state context is unavailable", node_id)
+                return
+            try:
+                from ...mle.state_store import publish_receipt
+
+                verified_state = publish_receipt(
+                    root=Path(state_root),
+                    run_id=run_id,
+                    competition_id=str(receipt.get("competition_id", "")),
+                    node_id=node_id,
+                    attempt_id=str(attempt_id),
+                    workspace=worktree_path,
+                    receipt_path=receipt_path,
+                    solution_relative_path=str(solution_rel),
+                    submission_relative_path=str(submission_rel),
+                )
+            except Exception as exc:
+                log.info("after_executor: skip %s; host-owned state publication failed: %s", node_id, exc)
+                return
+        else:
+            verified_state = receipt
 
     workspace_root = Path(config.workspace_dir) if config.workspace_dir else Path(config.cwd)
     snapshot_dir = workspace_root / "submissions"
@@ -253,9 +287,12 @@ async def _run_after_executor_hook(
             "submission": snapshot_name,
             "submission_sha256": _sha256(destination),
             "solution_sha256": verified_state.get("solution_sha256"),
-            "metric": verified_state.get("metric"),
+            "raw_metric_text": verified_state.get("raw_metric_text"),
+            "raw_metric_numeric": verified_state.get(
+                "raw_metric_numeric", verified_state.get("metric")
+            ),
             "metric_direction": verified_state.get("metric_direction"),
-            "evaluation_semantics": verified_state.get("evaluation_semantics"),
+            "evaluation_role": "local_only",
             "official_grading": False,
         }
         manifest_path = snapshot_dir / f"{node_id}.json"
@@ -630,7 +667,7 @@ async def _run_single_executor(
 
         # ── 7b. after_executor lifecycle hook ─────────────────────────
         try:
-            await _run_after_executor_hook(config, worktree_path, node_id)
+            await _run_after_executor_hook(config, worktree_path, node_id, str(attempt))
         except Exception as e:
             log.warning("after_executor hook failed for %s: %s", node_id, e)
 

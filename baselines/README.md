@@ -13,6 +13,13 @@ Terminal-Bench 2.0
 MLRC-Bench需要单卡48GB的服务器  
 NanoGPT-Bench需要4*A100的服务器  
 
+> **当前统一评测状态（2026-08-16）**：本页前面的成绩、论文结果和上游能力描述都是
+> 历史或上游资料，不能当作本仓库当前七 Agent × 两个正式 Benchmark 的成绩。当前统一
+> 入口是 `BenchmarkAdapters/`；MLE-Bench Lite 22 题和 Terminal AO 36/53 的协议、数据
+> manifest、模型配置、运行环境和真实 smoke 尚未全部准备完成，因此目前没有可发布的
+> 横向分数。逐项状态见
+> [`BenchmarkAdapters/docs/SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md`](../BenchmarkAdapters/docs/SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md)。
+
 
 # Benchmark 与 Baseline
 只有数据、计分方式、模型、运行时间和硬件都相同，分数才能直接比较。
@@ -571,7 +578,7 @@ harbor run --dataset terminal-bench@2.0 --agent claude-code ...
 
 它们可用于确认 Codex/Claude Code adapter 在 Harbor 中能启动，也可形成另一组“直接解题”实验，但不能与 Arbor AO 的 77.36% 放在同一列直接比较。
 
-### 严格复现前的阻塞项
+### 严格复现前还缺的条件
 
 Arbor 论文公开了 36/53 数量、难度分层原则、baseline、允许修改范围、8 workers 和指标，但公开 Arbor/Harbor 仓库没有直接给出一键启动的完整 AO 包。严格复现还需要：
 
@@ -920,7 +927,7 @@ uv run aisci --env-file .env mle run \
 6. 测试集只在协议规定的最终阶段调用，并保存只读审计日志。
 
 
-benchmark适配情况（原本）
+benchmark 适配情况（历史/上游能力，不等于当前统一 Adapter 已完成）
 
 | Agent | MLE-Bench Lite | Autoresearch：Architecture Design | modded-NanoGPT：Optimizer Design | Terminal-Bench：Arbor AO | FML-Bench 当前版 |
 | --- | --- | --- | --- | --- | --- |
@@ -934,32 +941,32 @@ benchmark适配情况（原本）
 
 
 
-部署情况
+部署情况（当前统一 Adapter）
 
 | Benchmark | 部署位置 | 部署情况 |
 | --- | --- | --- |
-| MLEBenchLite | 4090 | MLEvolve和EAR测试已经通过 |
-| TerminalBench | 4090 | <font style="background-color:#FBDE28;">等待决定baseline数量后适配</font> |
-| AutoResearch | H100 | <font style="background-color:#FBDE28;">等待决定baseline数量后适配</font> |
-| NanoGPT Optimizer Design | H100 | <font style="background-color:#FBDE28;">等待决定baseline数量后适配</font> |
-| FML-Bench | H100 | <font style="background-color:#FBDE28;">等待决定baseline数量后适配</font> |
+| MLEBenchLite | 4090 | Adapter 代码和 contract 检查已完成；schema-v2 data manifest、真实 scored smoke 和正式 campaign 尚未完成 |
+| TerminalBench AO | 4090 | AO Adapter 代码和 contract 检查已完成；schema-v2 protocol、真实 scored smoke 和正式 campaign 尚未完成 |
+| AutoResearch | H100 | Adapter 代码和 contract 已写；真实 smoke 与正式 campaign 尚未完成 |
+| NanoGPT Optimizer Design | H100 | Adapter 代码和 dry-run 已写；双 seed baseline 尚未晋级，不能正式运行 |
+| FML-Bench | H100 | Adapter 代码已写；upstream 尚未 clean，真实 relay smoke 与正式分数尚未完成 |
 
 
 
 
-Benchmark适配情况
+Benchmark 适配情况（当前七 Agent × 两个目标 Benchmark）
 
 | Agent | MLE-Bench Lite | Autoresearch：Architecture Design | modded-NanoGPT：Optimizer Design | Terminal-Bench：Arbor AO | FML-Bench 当前版 |
 | --- | --- | --- | --- | --- | --- |
-| **Efficient Agent Research** | **✅**已经适配 |  |  |  |  |
-| **MLEvolve** | **✅**** Agent 官方原生适配**。项目直接面向 MLE-Bench，官方榜单 Lite 成绩为 80.30%。 |  | **** |  |  |
-| **Arbor** | **✅**** 官方适配**。公开了 `mle_kaggle`<br/> 插件及 `mle_bench_lite`<br/> profile；论文也报告了结果。 |  |  |  |  |
-| **Codex** |  |  |  |  |  |
-| **Claude Code** |  |  |  |  |  |
-| **ML-Master 2.0** | **✅**** Agent 官方原生适配**。主要评测目标就是 MLE-Bench；Arbor 表中引用 Lite 成绩 75.76%。 |  |  |  |  |
-| **AiScientist（Arbor 表中的 AweAI 系统）** | **✅**** Agent 官方适配**。官方仓库包含 MLE-Bench integration，论文报告 Lite 81.82%。 |  |  |  |  |
+| **EAR** | 代码入口已写；需固定 clean source、真实 smoke 和正式资产 | AO 代码入口已写；需 schema-v2 protocol、clean source、真实 smoke |
+| **MLEvolve** | 代码入口已写；需固定 clean source、真实 smoke 和正式资产 | AO 代码入口已写；需 schema-v2 protocol、clean source、真实 smoke |
+| **Arbor** | 需显式 `arbor-benchmark-patched` variant；其他正式条件未齐 | 原生 launcher 已写；正式条件未齐 |
+| **Codex** | launcher 已写；正式条件未齐 | launcher 已写；正式条件未齐 |
+| **Claude Code** | launcher 已写；正式条件未齐 | launcher 已写；正式条件未齐 |
+| **ML-Master 2.0** | launcher 已写；正式条件未齐 | 需显式 `ml-master-autoresearch-variant`；正式条件未齐 |
+| **AiScientist** | launcher 已写；正式条件未齐 | 需显式 `ai-scientist-terminal-variant`；正式条件未齐 |
 
 
 
 
-## 
+## Appendix

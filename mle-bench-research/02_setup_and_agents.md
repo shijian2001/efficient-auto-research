@@ -7,8 +7,11 @@
 > `BenchmarkAdapters/LLMRelay/server.py`。历史修改如需考古：MLEvolve 看 `gpt55-local` 分支，
 > 本文档旧版看 git history。
 >
-> **当前更新（2026-07-22）**：EAR 正式候选已切到 `ear/g5`。G5 的 run/attempt
-> 隔离、manifest/report/hash 契约见[文档七](07_g4_failure_and_g5_infrastructure.md)。
+> **历史设置说明（2026-07-22）**：本文记录过 G5 的 run/attempt 隔离、manifest/report/hash
+> 契约，详情见[文档七](07_g4_failure_and_g5_infrastructure.md)。当前七 Agent × 两个目标
+> Benchmark 的统一 Adapter 以 `mle-bench-agents/efficient-auto-research@7cd9ed5`
+>（G3）和 `BenchmarkAdapters/` 的正式 registry 为准；G5 是历史基础设施分支，不代表
+> 当前已经可以正式评分。
 
 ---
 
@@ -98,7 +101,7 @@ reasoning_effort 注入、参数清洗、重试、非流式化、tool-call 兜�
 
 - 当前活跃开源 baseline，保持原版代码，不纳入 EAR/MLEvolve 的历史对比结果表。
 
-### efficient-auto-research（自研 KTS）— `ear/g5`
+### efficient-auto-research（自研 KTS）— 历史 G5 / 当前 Adapter G3
 
 - 方法：Kernel Thompson Sampling。搜索树建模为 GP Regression（cosine kernel on
   plan+code embedding），精确后验 Thompson Sampling 选父节点；每步仅 2 次 LLM 调用

@@ -1,18 +1,20 @@
 # MLE-Bench Agent 调研与评测
 
 本目录记录 EAR（Kernel Thompson Sampling）与开源 baseline 在 MLE-Bench 上的
-选题、环境、公平性、历史实验、失败归因和 G5 实验基础设施。
+选题、环境、公平性、历史实验、失败归因和 G5 实验基础设施。它是研究档案，不是当前
+七 Agent × 两个目标 Benchmark 的正式成绩表。
 
 ## 当前状态
 
 | 项目 | 当前值 |
 |---|---|
-| EAR generation | G5 |
-| 分支 | `ear/g5` |
+| 研究档案记录到 | G5 |
+| 历史基础设施分支 | `ear/g5` |
+| 当前统一 Adapter 的 EAR source | `mle-bench-agents/efficient-auto-research@7cd9ed5`（G3） |
 | 行为基线 | `a6acc90` |
 | 搜索策略 | G3-compatible KTS；G4 行为过滤已撤销 |
 | 基础设施 | attempt/run 隔离、artifact 完整性、provenance、只读 telemetry |
-| G5 官方结果 | 暂无；尚未运行正式 benchmark |
+| 当前七 Agent × 两个目标 Benchmark 正式结果 | 暂无；协议资产、依赖、clean source 和真实 scored smoke 尚未全部完成 |
 
 历史 G0–G3 分数不能写成 G5 分数。G5 正式比较必须使用同一 frozen commit 完整运行，
 再对最终 submission 做官方 mlebench grading。
@@ -37,7 +39,7 @@ Baseline：
 
 | Agent | 方法 | 本地代码状态 |
 |---|---|---|
-| EAR | Exact GP + Kernel Thompson Sampling | `ear/g5` |
+| EAR | Exact GP + Kernel Thompson Sampling | 当前 Adapter：G3 `7cd9ed5`；G5 仅为历史基础设施 |
 | MLEvolve | Monte Carlo Graph Search + UCT | `main` 纯上游 @ `fe92521`；`coldstart=False` |
 | Arbor | 开源 baseline | `baselines/Arbor` |
 

@@ -8,14 +8,13 @@ Agent 侧只需把 OPENAI_BASE_URL 指到本代理 (http://127.0.0.1:<port>/v1)�
   - 上游协议:      只发送 OpenAI-compatible Chat 或 Responses
   - 模型重写:      请求里的任何 model 统一改写为必填 LLM_FORCE_MODEL
   - 推理参数:      仅注入 LLM_FORCE_PARAMETERS_JSON 中明确配置的参数
-  - 参数清洗:      剥掉 max_tokens / max_completion_tokens / web_search_options 等
-                   relay 不支持或不应限制的参数 (LLM_STRIP_PARAMS 可配)
+  - 参数清洗:      只保留协议载荷，模型生成参数由冻结 model track 注入
   - 超时:          上游请求默认不设超时 (LLM_UPSTREAM_TIMEOUT 可配秒数)
   - 重试:          连接错误 / 429 / 5xx / 空响应按显式 LLM_MAX_RETRIES 配置重试
   - 非流式化:      agent 请求 stream=True 时，上游走非流式，拿到完整结果后
                    以 SSE 格式一次性回给 agent (规避 relay 掉 chunk 问题)
-  - tool 调用兜底: 请求带 tools 但上游没返回 tool_calls 时，自动改写为
-                   JSON 文本模式重试，把解析出的 JSON 伪装成 tool_call 响应
+  - tool 调用:     auto 文本原样返回；required/function 缺少 tool_calls 时
+                   返回协议错误，绝不伪造工具调用
   - token 记录:    每次上游调用的 usage 追加写入 LLM_TOKEN_LOG_PATH (jsonl)
 
 用法:
@@ -26,7 +25,6 @@ Agent 侧只需把 OPENAI_BASE_URL 指到本代理 (http://127.0.0.1:<port>/v1)�
   UPSTREAM_API_KEY      上游 API key (必填, 或复用 OPENAI_API_KEY)
   LLM_FORCE_MODEL       统一改写的模型名（必填）
   LLM_FORCE_PARAMETERS_JSON  统一模型参数 JSON 对象（必填且不可为空）
-  LLM_STRIP_PARAMS      逗号分隔的待剥参数 (默认 max_tokens,max_completion_tokens,web_search_options)
   LLM_UPSTREAM_TIMEOUT  上游超时秒数 (默认空 = 不限)
   LLM_UPSTREAM_PROXY    上游 HTTP(S) 代理 (默认空 = 直连)
   LLM_MAX_RETRIES       上游重试次数（必需由 launcher/model track 显式注入）
@@ -38,6 +36,7 @@ Agent 侧只需把 OPENAI_BASE_URL 指到本代理 (http://127.0.0.1:<port>/v1)�
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import logging
 import os
@@ -70,13 +69,6 @@ if not isinstance(FORCE_PARAMETERS, dict):
     raise RuntimeError("LLM_FORCE_PARAMETERS_JSON must be an object")
 REASONING_EFFORT = str(FORCE_PARAMETERS.get("reasoning_effort", ""))
 TEMPERATURE = str(FORCE_PARAMETERS.get("temperature", "")).strip()
-STRIP_PARAMS = [
-    p.strip()
-    for p in os.environ.get(
-        "LLM_STRIP_PARAMS", "max_tokens,max_completion_tokens,web_search_options"
-    ).split(",")
-    if p.strip()
-]
 _timeout_raw = os.environ.get("LLM_UPSTREAM_TIMEOUT", "").strip()
 UPSTREAM_TIMEOUT: float | None = float(_timeout_raw) if _timeout_raw else None
 UPSTREAM_PROXY = os.environ.get("LLM_UPSTREAM_PROXY", "").strip() or None
@@ -108,6 +100,57 @@ _CONTROL_PARAMETERS = {
     "max_tokens",
     "use_completion_api",
 }
+
+# Only protocol fields supplied by a client are preserved. Every other
+# top-level request field is a model-generation/control parameter and must be
+# supplied by the frozen model track, not by one particular Agent.
+_PROTOCOL_FIELDS = {
+    "/chat/completions": frozenset({"messages", "tools", "tool_choice"}),
+    "/responses": frozenset(
+        {
+            "input",
+            "instructions",
+            "tools",
+            "tool_choice",
+            "previous_response_id",
+            "conversation",
+            "include",
+        }
+    ),
+}
+_TRACK_FORBIDDEN_FIELDS = frozenset(
+    {
+        "messages",
+        "input",
+        "instructions",
+        "tools",
+        "tool_choice",
+        "previous_response_id",
+        "conversation",
+        "include",
+        "model",
+    }
+)
+_invalid_track_fields = _TRACK_FORBIDDEN_FIELDS.intersection(FORCE_PARAMETERS)
+if _invalid_track_fields:
+    invalid = ", ".join(sorted(_invalid_track_fields))
+    raise RuntimeError(f"LLM_FORCE_PARAMETERS_JSON must not contain protocol fields: {invalid}")
+
+
+def _model_track_digest() -> str:
+    payload = {
+        "model": FORCE_MODEL,
+        "parameters": FORCE_PARAMETERS,
+        "upstream_api": UPSTREAM_API,
+        "upstream_timeout": UPSTREAM_TIMEOUT,
+        "max_retries": MAX_RETRIES,
+    }
+    return hashlib.sha256(
+        json.dumps(payload, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+MODEL_TRACK_DIGEST = _model_track_digest()
 
 _token_log_lock = threading.Lock()
 _upstream_call_lock = threading.Lock()
@@ -146,7 +189,16 @@ def _usage_get(usage: dict, *keys, default=None):
     return default
 
 
-def _append_token_log(model: str, call_type: str, usage: dict | None, duration: float, retries: int) -> None:
+def _append_token_log(
+    model: str,
+    call_type: str,
+    usage: dict | None,
+    duration: float,
+    retries: int,
+    *,
+    stripped_params: tuple[str, ...] = (),
+    response_kind: str | None = None,
+) -> None:
     usage_available = isinstance(usage, dict)
     usage = usage or {}
     prompt_details = usage.get("prompt_tokens_details") or {}
@@ -161,6 +213,10 @@ def _append_token_log(model: str, call_type: str, usage: dict | None, duration: 
         "duration_seconds": duration,
         "retries": retries,
         "reasoning_effort": REASONING_EFFORT or None,
+        "model_track_digest": MODEL_TRACK_DIGEST,
+        "effective_request_param_digest": MODEL_TRACK_DIGEST,
+        "stripped_params": list(stripped_params),
+        "response_kind": response_kind,
         "input_tokens": _usage_get(usage, "prompt_tokens", "input_tokens"),
         "output_tokens": _usage_get(usage, "completion_tokens", "output_tokens"),
         "cache_read_tokens": _usage_get(usage, "cache_read_input_tokens"),
@@ -203,19 +259,16 @@ def _append_token_log(model: str, call_type: str, usage: dict | None, duration: 
 # ---------------------------------------------------------------------------
 
 def _rewrite_body(body: dict, path: str) -> dict:
-    """模型重写 + 推理参数注入 + 参数清洗 + 消息归一化。"""
-    body = dict(body)
-    if FORCE_MODEL:
-        body["model"] = FORCE_MODEL
-
-    for param in (
-        *STRIP_PARAMS,
-        *_CONTROL_PARAMETERS,
-        "temperature",
-        "reasoning_effort",
-        "reasoning",
-    ):
-        body.pop(param, None)
+    """Preserve protocol fields and inject only the frozen model track."""
+    try:
+        protocol_fields = _PROTOCOL_FIELDS[path]
+    except KeyError as exc:
+        raise RuntimeError(f"unsupported relay upstream path: {path}") from exc
+    source = dict(body)
+    body = {name: source[name] for name in protocol_fields if name in source}
+    stripped = set(source).difference(protocol_fields | {"model"})
+    _thread_local.stripped_params = tuple(sorted(stripped))
+    body["model"] = FORCE_MODEL
 
     for name, value in FORCE_PARAMETERS.items():
         if name not in _CONTROL_PARAMETERS | {"reasoning_effort", "temperature"}:
@@ -260,6 +313,11 @@ def _rewrite_body(body: dict, path: str) -> dict:
         body["temperature"] = float(TEMPERATURE)
 
     return body
+
+
+def _request_telemetry() -> tuple[str, ...]:
+    value = getattr(_thread_local, "stripped_params", ())
+    return tuple(value) if isinstance(value, tuple) else ()
 
 
 def _text_content(value: object) -> str:
@@ -838,73 +896,17 @@ def _validate_response(data: dict, request_body: dict) -> None:
         raise RuntimeError("upstream returned empty message (no content, no tool_calls)")
 
 
-# ---------------------------------------------------------------------------
-# tool 调用兜底
-# ---------------------------------------------------------------------------
-
-def _parse_json_object(text: str) -> dict:
-    """从模型文本里尽力解析出一个 JSON 对象。"""
-    text = (text or "").strip()
-    candidates = [text]
-    fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, flags=re.DOTALL)
-    if fenced:
-        candidates.append(fenced.group(1))
-    start, end = text.find("{"), text.rfind("}")
-    if 0 <= start < end:
-        candidates.append(text[start:end + 1])
-    last_error: Exception | None = None
-    for candidate in candidates:
-        try:
-            parsed = json.loads(candidate)
-            if isinstance(parsed, dict):
-                return parsed
-        except Exception as exc:
-            last_error = exc
-    raise ValueError(f"cannot parse JSON from model text: {text[:300]!r}") from last_error
+def _tool_choice_requires_call(value: object) -> bool:
+    """Whether the downstream protocol explicitly required a tool call."""
+    if value == "required":
+        return True
+    if not isinstance(value, dict):
+        return False
+    return value.get("type") in {"function", "tool", "required", "any"}
 
 
-def _tool_call_fallback(body: dict) -> tuple[dict, float, int]:
-    """tools 请求没拿到 tool_calls 时：改写成 JSON 文本模式重试，再合成 tool_call 响应。"""
-    tools = body.get("tools") or []
-    func = (tools[0].get("function") or {}) if tools else {}
-    name = func.get("name", "structured_output")
-    schema = json.dumps(func.get("parameters") or {}, ensure_ascii=False)
-
-    fallback = {k: v for k, v in body.items() if k not in ("tools", "tool_choice", "stream", "stream_options")}
-    messages = list(fallback.get("messages") or [])
-    instruction = (
-        f"\n\nReturn ONLY one valid JSON object for `{name}`. "
-        "No markdown, no explanations, no code fences. "
-        f"It must satisfy this JSON schema:\n{schema}"
-    )
-    if messages and messages[-1].get("role") == "user":
-        messages[-1] = {**messages[-1], "content": str(messages[-1].get("content") or "") + instruction}
-    else:
-        messages.append({"role": "user", "content": instruction.strip()})
-    fallback["messages"] = messages
-
-    data, duration, retries = _post_canonical_chat(
-        fallback, "chat.tool_json_fallback"
-    )
-    content = ((data.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
-    parsed = _parse_json_object(content)
-
-    # 合成 OpenAI tool_call 格式响应
-    synthesized = dict(data)
-    synthesized["choices"] = [{
-        "index": 0,
-        "message": {
-            "role": "assistant",
-            "content": None,
-            "tool_calls": [{
-                "id": f"call_{uuid.uuid4().hex[:24]}",
-                "type": "function",
-                "function": {"name": name, "arguments": json.dumps(parsed, ensure_ascii=False)},
-            }],
-        },
-        "finish_reason": "tool_calls",
-    }]
-    return synthesized, duration, retries
+class _ToolCallProtocolError(Exception):
+    """The upstream ignored an explicitly required function call."""
 
 
 # ---------------------------------------------------------------------------
@@ -1113,6 +1115,16 @@ class ProxyHandler(BaseHTTPRequestHandler):
                 self._handle_messages(body)
             else:
                 raise ValueError(f"unsupported downstream endpoint: {path}")
+        except _ToolCallProtocolError as exc:
+            self._send_json(
+                502,
+                {
+                    "error": {
+                        "type": "tool_call_protocol_error",
+                        "message": str(exc),
+                    }
+                },
+            )
         except _UpstreamHTTPError as exc:
             logger.error("upstream 4xx passthrough: %s", exc)
             try:
@@ -1134,17 +1146,33 @@ class ProxyHandler(BaseHTTPRequestHandler):
 
         data, duration, retries = _post_canonical_chat(body, "chat.completions")
 
-        call_type = "chat.completions"
         message = ((data.get("choices") or [{}])[0].get("message")) or {}
-        if has_tools and not message.get("tool_calls"):
-            logger.warning("tools requested but no tool_calls returned; using JSON fallback")
-            # 第一次调用的 token 也真实消耗了，单独记账再走兜底
-            _append_token_log(model, "chat.completions.discarded", data.get("usage"), duration, retries)
-            data, duration, retries = _tool_call_fallback(body)
-            call_type = "chat.tool_json_fallback"
+        tool_calls = message.get("tool_calls") or []
+        response_kind = "tool_call" if tool_calls else "text"
+        stripped_params = _request_telemetry()
+        if has_tools and _tool_choice_requires_call(body.get("tool_choice")) and not tool_calls:
+            _append_token_log(
+                model,
+                "chat.completions.protocol_error",
+                data.get("usage"),
+                duration,
+                retries,
+                stripped_params=stripped_params,
+                response_kind="text_required_tool_call_missing",
+            )
+            raise _ToolCallProtocolError(
+                "upstream returned text without tool_calls for an explicitly required tool call"
+            )
 
-        _append_token_log(model, call_type + (".stream" if client_wants_stream else ""),
-                          data.get("usage"), duration, retries)
+        _append_token_log(
+            model,
+            "chat.completions" + (".stream" if client_wants_stream else ""),
+            data.get("usage"),
+            duration,
+            retries,
+            stripped_params=stripped_params,
+            response_kind=response_kind,
+        )
 
         if client_wants_stream:
             self._send_json(200, _synthesize_sse(data), content_type="text/event-stream")
@@ -1172,6 +1200,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             data.get("usage"),
             duration,
             retries,
+            stripped_params=_request_telemetry(),
+            response_kind="responses",
         )
         if client_wants_stream:
             self._send_json(
@@ -1195,6 +1225,8 @@ class ProxyHandler(BaseHTTPRequestHandler):
             data.get("usage"),
             duration,
             retries,
+            stripped_params=_request_telemetry(),
+            response_kind="messages",
         )
         if client_wants_stream:
             self._send_json(
@@ -1235,9 +1267,10 @@ def main() -> None:
         server = ThreadingUnixHTTPServer(str(args.unix_socket), ProxyHandler)
         listen_address = str(args.unix_socket)
     logger.info(
-        "listening on %s → %s | model=%s effort=%s strip=%s timeout=%s retries=%s agent=%s",
+        "listening on %s → %s | model=%s track=%s effort=%s timeout=%s retries=%s agent=%s",
         listen_address, UPSTREAM_BASE_URL, FORCE_MODEL or "(passthrough)",
-        REASONING_EFFORT or "(none)", ",".join(STRIP_PARAMS), UPSTREAM_TIMEOUT, MAX_RETRIES, AGENT_NAME,
+        MODEL_TRACK_DIGEST[:16], REASONING_EFFORT or "(none)", UPSTREAM_TIMEOUT,
+        MAX_RETRIES, AGENT_NAME,
     )
     try:
         server.serve_forever()

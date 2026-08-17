@@ -1,12 +1,18 @@
 # Efficient Agent Research
 
-研究自研 **EAR（efficient-auto-research，Kernel Thompson Sampling）** agent，与开源 baseline
-（**MLEvolve**）在 **MLE-Bench** 6 题上对比**效率**与**效果**。
+本仓库包含 EAR 的历史研究，以及七个 Agent 的统一 Benchmark Adapter。
 
-一句话现状：当前正式 EAR 已明确回到 **G3**，主 checkout 为
-`mle-bench-agents/efficient-auto-research@ear/g3@7cd9ed5`。G4–G7 只保留为历史实验分支，
-不进入当前 Benchmark Adapter。历史 G0-G3 实验中，EAR 用约 4-12% 的 token，在 6 题上
-逐步逼近或反超同条件复现的 MLEvolve。
+当前正式评测目标是 **MLE-Bench Lite 22 题**和
+`terminal-bench-ao-reconstruction-v1` 的 **36 dev / 53 held-out** AO 评测，覆盖 EAR、
+MLEvolve、Arbor、Codex、Claude Code、ML-Master 2.0 和 AiScientist。Adapter 的代码入口、
+原生 launcher、评分器和聚合器已经写入仓库，但当前还没有完成正式运行所需的协议文件、
+模型配置、运行环境整理和真实 scored smoke，因此不能把当前状态写成“已经有七 Agent
+正式横向分数”。准确状态见
+[`BenchmarkAdapters/docs/SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md`](BenchmarkAdapters/docs/SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md)。
+
+下面的 EAR/MLEvolve 六题内容属于历史研究，不是当前 22 题 × 7 Agent 的正式结果。
+当前 EAR 代码基准为 `mle-bench-agents/efficient-auto-research@ear/g3@7cd9ed5`；G4-G7
+实验分支仍保留作历史记录。
 
 - **LLM：** gpt-5.5（relay 端点，reasoning_effort=high），经本地转发代理统一接入
 - **硬件：** 256 vCPU / 251GB RAM / 8× RTX 4090
@@ -29,7 +35,9 @@ MLEvolve 12-24 倍，G5 仍需独立验证。
 
 ## 2. 架构：纯上游零侵入 + 本地转发代理
 
-当前活跃 Agent 为 **EAR、纯原版 MLEvolve、Arbor**；三者全部保持**纯上游 / 自有分支零 LLM 侵入**，所有适配集中在一个本地转发代理：
+历史 MLE 实验主要使用 **EAR、纯原版 MLEvolve、Arbor**。当前七 Agent 正式 Adapter
+统一通过本地转发代理接入模型；各 Agent 的源码版本、variant 和运行状态必须以
+`BenchmarkAdapters/registry.py` 与正式 preflight 输出为准：
 
 ```
 EAR / MLEvolve / Arbor
@@ -46,7 +54,7 @@ relay 上游 (gpt-5.5)
 价值：换模型只改环境变量；token 记账覆盖各 Agent 的调用；代理重试在全部实验中兜住上游抖动
 （合计 60+ 次重试，零 agent 层失败）。详见 [docker-eval/README.md](docker-eval/README.md)。
 
-### 当前活跃 Agent 的代码状态
+### 历史三 Agent 的代码状态
 
 | Agent | 分支 / 位置 | 说明 |
 |-------|------------|------|
@@ -56,7 +64,7 @@ relay 上游 (gpt-5.5)
 
 ---
 
-## 3. 六题选型
+## 3. 历史六题选型
 
 Low 3 + Medium 3（区分梯度 8/8 → 3/8，选题依据见
 [mle-bench-research/01](mle-bench-research/01_benchmark_and_selection.md)）：
@@ -153,12 +161,10 @@ efficient-agent-research/
 ├── docker-eval/                 # MLE Docker 评测框架：run_in_docker.sh + grade.py
 ├── mle-bench/                   # OpenAI mlebench 框架 (pip editable)
 │   └── runs/mlevolve_group{1,2,3}/grading_report_group_*.json  # ★ MLEvolve 官方逐题 trace
-├── mle-bench-data/              # 6 题 prepared 数据
-├── mle-bench-agents/            # 仅 EAR
-│   └── efficient-auto-research/ # EAR 历史主仓库（proxy-based-eval 分支）
-├── baselines/
-│   ├── Arbor/                   # 当前活跃开源 baseline
-│   └── MLEvolve/                # #4，main=纯上游 @ fe92521；coldstart=False；runs/=我们跑的
+├── mle-bench-data/              # MLE-Bench Lite prepared 数据
+├── mle-bench-agents/            # EAR 源码
+│   └── efficient-auto-research/ # 当前 Adapter 使用的 EAR G3 checkout
+├── baselines/                   # Arbor、MLEvolve、Codex、Claude、ML-Master、AiScientist
 ├── ear-worktrees/
 │   ├── stagnation-cache/        # 历史 G2/G3 benchmark 产物
 │   └── attempt-isolation-telemetry-v2/ # ★ G5（ear/g5；尚未正式 benchmark）
@@ -172,10 +178,10 @@ efficient-agent-research/
 └── cache/                       # HF 模型缓存
 ```
 
-**当前代码**：`ear-worktrees/attempt-isolation-telemetry-v2`，分支 `ear/g5`。G5 行为基线
-`a6acc90` 从 `212870f`（撤销 G4 行为过滤）出发，只增加 attempt/run 隔离、artifact 完整性和
-telemetry；`thompson.py` 保持 G3 byte-identical。
-下面列出的分数仍是历史版本结果，不能视作这个未跑 benchmark 底座的新结果。
+**历史基础设施代码**：`ear-worktrees/attempt-isolation-telemetry-v2`，分支 `ear/g5`。G5
+行为基线 `a6acc90` 从 `212870f`（撤销 G4 行为过滤）出发，只增加 attempt/run 隔离、artifact
+完整性和 telemetry；`thompson.py` 保持 G3 byte-identical。当前统一 Adapter 选用的 EAR
+source 是上面的 G3 checkout；下面列出的分数仍是历史版本结果，不能视作当前 Adapter 的新结果。
 
 **最新已完成的历史结果产物**（都在 `ear-worktrees/stagnation-cache/docker_runs/`）：
 
@@ -247,25 +253,25 @@ Adapter 和可复现的 UV 配置放在同一个集成树中。Adapter 的唯一
 此外，`autoresearch/` 保存了 Architecture Design Benchmark 的固定上游源码快照
 `karpathy/autoresearch@228791f`、原始 `uv.lock` 和本项目部署脚本。共享 Benchmark
 Adapter、七 Agent 原生 bridge、held-out evaluator 和聚合命令已经实现；真实 smoke 与
-`7×3×48h` 正式 campaign 仍是独立验收门槛，因此不应把“命令就绪”写成“Arbor 论文
-48 小时协议已复现”。架构、评分有效性、held-out 复测、测试矩阵和完成条件见
+`7×3×48h` 正式 campaign 仍是独立验收门槛，因此不能把“命令可以构造”写成“正式协议
+已经跑通”。架构、评分有效性、held-out 复测、测试矩阵和完成条件见
 [`AUTORESEARCH_SEVEN_AGENT_ADAPTER_PLAN.md`](BenchmarkAdapters/docs/AUTORESEARCH_SEVEN_AGENT_ADAPTER_PLAN.md)。
 
 `optimizer-design/` 进一步复用上述架构，冻结
 `modded-nanogpt@bc1b58e` 的 Track 3 Optimizer Design，并采用“Benchmark 公共层 + 七个
-Agent 小 Adapter”的两层结构。当前命令和 contract 已就绪，但正式运行仍被双 held-out
-baseline 晋级 gate 阻断；详见
+Agent 小 Adapter”的两层结构。当前命令和 contract 已写入，但正式运行仍需要先完成双
+held-out baseline 记录；详见
 [`OPTIMIZER_DESIGN_SEVEN_AGENT_ADAPTER.md`](BenchmarkAdapters/docs/OPTIMIZER_DESIGN_SEVEN_AGENT_ADAPTER.md)。
 
-Terminal-Bench 现在统一使用标准 Harbor `0.20.0` per-task 协议和本地 89 题数据集，
-不再使用项目自定义 AO evaluator。Codex、Claude Code 使用 Harbor 内置 Agent；Arbor
-复用原生 `arbor.core.agent.Agent.run`，AiScientist 复用原生 `Subagent.run`，两者只
-共享 Harbor 命令/文件桥。
+Terminal-Bench 现在有两条不同路径：`terminal-direct-smoke` 是 89 题直接解题路径，
+只能做基础设施检查；正式横向比较使用
+`terminal-bench-ao-reconstruction-v1`，由外层 Agent 在 36 个 dev task 上优化同一份
+`terminus-2`，最后只评测一次 53 个 held-out task。两条路径的分数不能混用。
 
-当前 Terminal-Bench 命令就绪的是 Codex、Claude Code、Arbor、AiScientist。EAR、
-MLEvolve、ML-Master 2.0 的注册层会 fail-closed：EAR/MLEvolve 尚缺干净 sibling
-candidate 与 best replay，ML-Master 2.0 尚未把全部阶段从宿主 MLE workspace 迁移到
-Harbor workspace。这里不会把“可以 import”描述成“已经完成适配”。
+当前 registry 已登记七个 Agent，但默认入口并不等于每个 Agent 都已经可以正式评分：
+Arbor 的 MLE 需要 `arbor-benchmark-patched`，Terminal AO 的 ML-Master 2.0 和
+AiScientist 需要各自的显式 variant。模型配置、协议资产、Python 依赖、clean source
+和真实 smoke 全部完成后，才可以开始正式 campaign。
 
 每个 Agent 的差异说明位于对应目录的 `adapter_docs/`；环境安装清单与一键脚本位于
 [`BenchmarkAdapters/environments/`](BenchmarkAdapters/environments/)：

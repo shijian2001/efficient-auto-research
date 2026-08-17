@@ -6,6 +6,7 @@ import argparse
 import json
 import math
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -13,7 +14,8 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .adapter import AdapterError, WorkspaceSpec, prepare_workspace
-from .common import sha256_file, validate_submission_remote, write_json
+from .common import sha256_file, write_json
+from .state_store import find_bound_record, run_id_from_environment, state_root_from_environment
 
 
 def _arbor_command() -> list[str]:
@@ -21,6 +23,11 @@ def _arbor_command() -> list[str]:
     if executable:
         return [executable]
     return [sys.executable, "-c", "from arbor.cli.app import main; main()"]
+
+
+def _trunk_branch_for_run(run_id: str) -> str:
+    component = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(run_id)).strip(".-")
+    return f"arbor/mle/{component or 'run'}/trunk"
 
 
 @dataclass(frozen=True)
@@ -40,91 +47,24 @@ def _read_json(path: Path) -> dict | None:
     return payload if isinstance(payload, dict) else None
 
 
-def _snapshot_candidates(spec: WorkspaceSpec) -> list[RecoveryCandidate]:
-    # Normal Arbor sessions store controller state below `.coordinator/`.
-    # Keep the direct path as a compatibility fallback for early adapter
-    # prototypes, but never merge their contents: the first valid tree wins.
-    tree = None
-    for tree_path in (
-        spec.session_dir / ".coordinator" / "idea_tree.json",
-        spec.session_dir / "idea_tree.json",
-    ):
-        tree = _read_json(tree_path)
-        if tree is not None:
-            break
-    if tree is None:
-        return []
-    direction = str(tree.get("meta", {}).get("metric_direction") or spec.metric_direction)
-    scored: list[tuple[float, str]] = []
-    for node_id, node in tree.get("nodes", {}).items():
-        if node.get("status") not in {"done", "merged"} or node.get("score") is None:
-            continue
-        try:
-            score = float(node["score"])
-        except (TypeError, ValueError):
-            continue
-        if math.isfinite(score):
-            scored.append((score, str(node_id)))
-    scored.sort(key=lambda item: item[0], reverse=direction != "minimize")
-
-    candidates: list[RecoveryCandidate] = []
-    snapshot_dir = spec.session_dir / "submissions"
-    for score, node_id in scored:
-        submission = snapshot_dir / f"{node_id}.csv"
-        manifest = _read_json(snapshot_dir / f"{node_id}.json")
-        if not submission.is_file() or submission.is_symlink() or manifest is None:
-            continue
-        expected = manifest.get("submission_sha256")
-        try:
-            manifest_metric = float(manifest["metric"])
-        except (KeyError, TypeError, ValueError):
-            continue
-        if (
-            manifest.get("node_id") != node_id
-            or manifest.get("competition_id") != spec.competition_id
-            or manifest.get("metric_direction") != direction
-            or manifest.get("official_grading") is not False
-            or not isinstance(expected, str)
-            or not math.isfinite(manifest_metric)
-            or not math.isclose(manifest_metric, score, rel_tol=1e-9, abs_tol=1e-12)
-            or sha256_file(submission) != expected
-        ):
-            continue
-        candidates.append(
-            RecoveryCandidate(
-                path=submission,
-                source="verified_snapshot",
-                expected_sha256=expected,
-                node_id=node_id,
-                metric=score,
-            )
-        )
-    return candidates
-
-
 def _workspace_candidate(spec: WorkspaceSpec) -> RecoveryCandidate | None:
-    state = _read_json(spec.workspace / "results" / "mle_eval_state.json")
     submission = spec.workspace / "submission.csv"
     solution = spec.workspace / "solution.py"
-    if state is None or not submission.is_file() or submission.is_symlink():
-        return None
-    if not solution.is_file() or solution.is_symlink():
-        return None
-    expected_submission = state.get("submission_sha256")
-    expected_solution = state.get("solution_sha256")
-    if (
-        state.get("schema_version") != 2
-        or state.get("competition_id") != spec.competition_id
-        or state.get("evaluation_status") != "verified"
-        or state.get("format_validated") is not True
-        or not isinstance(expected_submission, str)
-        or not isinstance(expected_solution, str)
-        or sha256_file(submission) != expected_submission
-        or sha256_file(solution) != expected_solution
-    ):
+    if not submission.is_file() or submission.is_symlink():
         return None
     try:
-        metric = float(state["metric"])
+        run_id = run_id_from_environment()
+        record = find_bound_record(
+            root=state_root_from_environment(),
+            run_id=run_id,
+            competition_id=spec.competition_id,
+            solution=solution,
+            submission=submission,
+        )
+    except Exception:
+        return None
+    try:
+        metric = float(record["raw_metric_numeric"])
     except (KeyError, TypeError, ValueError):
         return None
     if not math.isfinite(metric):
@@ -132,52 +72,51 @@ def _workspace_candidate(spec: WorkspaceSpec) -> RecoveryCandidate | None:
     return RecoveryCandidate(
         path=submission,
         source="verified_trunk",
-        expected_sha256=expected_submission,
+        expected_sha256=str(record["submission_sha256"]),
+        node_id=str(record["node_id"]),
         metric=metric,
     )
 
 
 def _candidate_paths(spec: WorkspaceSpec) -> list[RecoveryCandidate]:
-    candidates = _snapshot_candidates(spec)
     workspace_candidate = _workspace_candidate(spec)
-    if workspace_candidate is not None and all(
-        candidate.expected_sha256 != workspace_candidate.expected_sha256 for candidate in candidates
-    ):
-        candidates.append(workspace_candidate)
-    return candidates
+    return [workspace_candidate] if workspace_candidate is not None else []
 
 
 def recover_submission(spec: WorkspaceSpec) -> Path:
     errors: list[str] = []
     for candidate in _candidate_paths(spec):
-        try:
-            valid, message = validate_submission_remote(
-                spec.validation_url, spec.competition_id, candidate.path
-            )
-        except AdapterError as exc:
-            errors.append(f"{candidate.path}: {exc}")
-            continue
-        if not valid:
-            errors.append(f"{candidate.path}: {message}")
-            continue
-        output = spec.run_dir / "submission.csv"
-        temporary = spec.run_dir / ".submission.csv.tmp"
+        final_dir = spec.run_dir / "final"
+        final_dir.mkdir(parents=True, exist_ok=True)
+        output = final_dir / "submission.csv"
+        temporary = final_dir / ".submission.csv.tmp"
         shutil.copyfile(candidate.path, temporary)
         os.replace(temporary, output)
+        published = spec.run_dir / "submission.csv"
+        published_temporary = spec.run_dir / ".submission.csv.tmp"
+        shutil.copyfile(output, published_temporary)
+        os.replace(published_temporary, published)
         write_json(
             spec.run_dir / "submission_manifest.json",
             {
-                "schema_version": 2,
+                "schema_version": 3,
+                "run_id": run_id_from_environment(),
+                "agent": "arbor",
+                "agent_variant": os.environ.get(
+                    "ARBOR_AGENT_VARIANT", "arbor-mle-adapter"
+                ),
                 "competition_id": spec.competition_id,
                 "source": str(candidate.path),
-                "source_kind": candidate.source,
+                "source_kind": "arbor_declared_trunk",
                 "source_node_id": candidate.node_id,
                 "local_metric": candidate.metric,
                 "submission": str(output),
+                "published_submission": str(published),
                 "sha256": sha256_file(output),
                 "fallback": False,
-                "format_validated": True,
-                "official_grading": "external_mlebench",
+                "format_validated": "attested_by_local_run",
+                "evaluation_role": "local_only",
+                "official_grading": "pending_external_mlebench",
             },
         )
         return output
@@ -220,6 +159,8 @@ def main(argv: list[str] | None = None) -> int:
         argv = argv[:split]
     args = _build_parser().parse_args(argv)
     description = args.desc_file or args.data_dir / "description.md"
+    run_id = args.run_name or f"mle_{args.competition_id}"
+    trunk_branch = _trunk_branch_for_run(run_id)
     try:
         spec = prepare_workspace(
             competition_id=args.competition_id,
@@ -232,6 +173,7 @@ def main(argv: list[str] | None = None) -> int:
             model=args.model,
             base_url=args.base_url,
             time_budget=args.time_budget,
+            trunk_branch=trunk_branch,
             force=args.force,
         )
     except AdapterError as exc:
@@ -251,6 +193,11 @@ def main(argv: list[str] | None = None) -> int:
     if args.prepare_only:
         return 0
 
+    state_root = spec.session_dir / "host-state"
+    state_root.mkdir(parents=True, exist_ok=True)
+    os.environ["ARBOR_MLE_STATE_ROOT"] = str(state_root)
+    os.environ["ARBOR_MLE_RUN_ID"] = run_id
+
     instruction = args.instruction or (
         f"Develop the strongest reproducible solution for MLE-Bench competition {args.competition_id}. "
         "Use only public data, optimize the configured local validation metric, and leave a format-valid submission.csv."
@@ -266,7 +213,7 @@ def main(argv: list[str] | None = None) -> int:
         "--workspace-dir",
         str(spec.session_dir),
         "--run-name",
-        args.run_name or f"mle_{args.competition_id}",
+        run_id,
         "--interaction-mode",
         "auto",
         "--no-dashboard-input",

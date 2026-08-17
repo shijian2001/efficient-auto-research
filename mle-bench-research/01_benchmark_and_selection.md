@@ -4,6 +4,12 @@
 >
 > **时效说明（2026-07-22）**：六题选型继续使用；排行榜是文档采集时的历史快照，
 > 不是实时榜单。当前 EAR 状态和实验口径见[文档七](07_g4_failure_and_g5_infrastructure.md)。
+>
+> **当前评测边界（2026-08-16）**：本文记录的是历史六题选型，不代表当前
+> 22 题 × 7 Agent 的 MLE-Bench Lite 正式 campaign 已完成。统一 Adapter 的协议、资产、
+> 依赖和真实 smoke 状态以
+> [`BenchmarkAdapters/docs/SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md`](../BenchmarkAdapters/docs/SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md)
+> 为准。
 
 ---
 

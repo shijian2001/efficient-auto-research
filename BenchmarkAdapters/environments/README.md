@@ -48,8 +48,8 @@ Current combined MLE profile:
 | `mle/ear` | packaged EAR + shared MLE training stack | removes the launcher's legacy Conda dependency |
 
 EAR, MLEvolve, and ML-Master 2 still install their standalone Agent and common
-Terminal environments, but their Terminal commands remain fail-closed until
-the required candidate/workspace backends are complete.
+Terminal environments, but their Terminal commands currently exit with a clear
+readiness error until the required candidate/workspace backends are complete.
 
 ## One-Click Commands
 

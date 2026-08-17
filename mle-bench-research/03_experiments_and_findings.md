@@ -5,6 +5,9 @@
 > 📜 **历史存档**（Claude Sonnet 4.6 / Bedrock 时代）。分数与归因结论仍有效；文中涉及的
 > Bedrock 适配、agent 侵入式修改均已被转发代理架构取代（见 docker-eval/README）。
 > G4/G5 的后续状态见[文档七](07_g4_failure_and_g5_infrastructure.md)。
+>
+> 本文记录的是历史实验，不代表当前 7 Agent × 2 Benchmark 正式评测已经完成；当前状态以
+> `BenchmarkAdapters/docs/SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md` 为准。
 
 ---
 

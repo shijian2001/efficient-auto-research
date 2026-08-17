@@ -44,5 +44,17 @@ split、Harbor result parser、candidate 隔离、非法 diff/symlink、dev-only
 定向回归为 35 passed。本轮验证未实际调用收费模型 API。
 
 两次 MLE 和两次 Terminal AO 正式入口已验证会在 dirty source 上输出结构化失败。真实
-`formal_protocol_ready` 仍要求干净 commit、API、Docker、GPU、完整预算和归档的真实
-scored evidence；当前七 Agent 均只能声明 `command_ready`，不能声明已有正式比分。
+正式运行还需要干净 commit、API、Docker、GPU、完整预算和归档的真实 scored evidence。
+当前状态不是“七个 Agent 都已经可以评分”：
+
+| 项目 | 当前状态 |
+|---|---|
+| Adapter 类、Agent launcher、artifact 和 scorecard 代码 | 已写入，可做 contract/synthetic 检查 |
+| MLE-Bench Lite 正式资产 | `data_manifest.json` 仍是 schema 1，缺 prepared public/private hashes |
+| Terminal AO 正式协议 | 当前 `protocol.json` 仍是 schema 1，缺 benchmark source commit |
+| 模型配置 | 仍是 placeholder，不能用于正式运行 |
+| Adapter Python 环境 | `BenchmarkAdapters/.venv` 缺 PyYAML，当前不能直接导入顶层包 |
+| Agent 源码 | EAR、MLEvolve、Arbor、ML-Master 2.0、AiScientist 当前有未提交变化 |
+| 真实 scored smoke 和完整 campaign | 尚未完成 |
+
+因此，当前最多能说明“部分命令可以构造”，不能说明已经产生正式横向分数。

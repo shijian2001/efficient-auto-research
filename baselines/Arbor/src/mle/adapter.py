@@ -32,6 +32,7 @@ class WorkspaceSpec:
     metric_direction: str
     sample_submission: Path
     research_config: Path
+    trunk_branch: str | None = None
 
 
 def _built_in_plugin_path() -> Path:
@@ -48,8 +49,10 @@ def _write_project_plugin(spec: WorkspaceSpec) -> None:
     plugin["eval_contract"] = {
         "metric_direction": spec.metric_direction,
         "eval_cmd": "bash {cwd}/eval.sh run",
-        "eval_cmd_test": "bash {cwd}/eval.sh verify",
-        "evaluation_state_path": "results/mle_eval_state.json",
+        "eval_cmd_test": "bash {cwd}/eval.sh verify --node-id {node_id}",
+        "evaluation_receipt_path": "results/mle_eval_receipt.json",
+        "host_state_root_env": "ARBOR_MLE_STATE_ROOT",
+        "host_run_id_env": "ARBOR_MLE_RUN_ID",
         "solution_path": "solution.py",
         "evaluation_semantics": "candidate_local_metric_plus_format_validation",
         "test_semantics": "artifact_verification_only",
@@ -92,7 +95,7 @@ def _write_project_plugin(spec: WorkspaceSpec) -> None:
 - Every evaluation must create `submission.csv` and print exactly one final `METRIC=<finite-float>` line.
 - `METRIC` is a local validation metric computed from public training data. The optimization direction is `{spec.metric_direction}`.
 - Run `bash eval.sh run` after changes. Format validity is checked remotely without exposing private scores or labels.
-- `bash eval.sh verify` only verifies the recorded code/submission hashes and format. It is not an independent holdout or the official MLE-Bench score.
+    - `bash eval.sh verify` only verifies the host-owned record bound to the current code and submission hashes. It is not an independent holdout or the official MLE-Bench score.
 - Do not edit `eval.sh`, `.mle/`, `input`, `description.md`, the project config, or the adapter plugin.
 - The seed submission is only an emergency format-valid fallback; its placeholder metric is not experimental evidence.
 """
@@ -140,8 +143,10 @@ def _write_workspace_files(
     (spec.workspace / "eval.sh").write_text(
         "#!/usr/bin/env bash\n"
         "set -euo pipefail\n"
-        "exec python -m arbor.mle.eval_runner \"${1:-run}\" "
-        "--workspace \"$(cd \"$(dirname \"$0\")\" && pwd)\"\n",
+        "mode=${1:-run}\n"
+        "if [ $# -gt 0 ]; then shift; fi\n"
+        "exec python -m arbor.mle.eval_runner \"$mode\" "
+        "--workspace \"$(cd \"$(dirname \"$0\")\" && pwd)\" \"$@\"\n",
         encoding="utf-8",
     )
     (spec.workspace / "eval.sh").chmod(0o755)
@@ -160,6 +165,8 @@ def _write_workspace_files(
         config["llm"] = llm
     if time_budget is not None:
         config["time_budget"] = time_budget
+    if spec.trunk_branch:
+        config["trunk_branch"] = spec.trunk_branch
     spec.research_config.write_text(
         yaml.safe_dump(config, sort_keys=False, allow_unicode=True), encoding="utf-8"
     )
@@ -180,7 +187,7 @@ The validation service checks submission format only. `eval.sh verify` is artifa
         encoding="utf-8",
     )
     (spec.workspace / ".gitignore").write_text(
-        ".arbor/\n__pycache__/\n*.pyc\n",
+        ".arbor/\nresults/\n__pycache__/\n*.pyc\n",
         encoding="utf-8",
     )
 
@@ -198,12 +205,13 @@ The validation service checks submission format only. `eval.sh verify` is artifa
             "metric_direction": spec.metric_direction,
             "submission_path": "submission.csv",
             "solution_path": "solution.py",
+            "evaluation_receipt_path": "results/mle_eval_receipt.json",
             "immutable": immutable,
         },
     )
 
 
-def _init_git(workspace: Path) -> None:
+def _init_git(workspace: Path, *, trunk_branch: str | None = None) -> None:
     try:
         subprocess.run(
             ["git", "init"],
@@ -236,6 +244,14 @@ def _init_git(workspace: Path) -> None:
             capture_output=True,
             text=True,
         )
+        if trunk_branch:
+            subprocess.run(
+                ["git", "branch", trunk_branch],
+                cwd=workspace,
+                check=True,
+                capture_output=True,
+                text=True,
+            )
     except (OSError, subprocess.CalledProcessError) as exc:
         raise AdapterError(f"could not initialize adapter Git workspace: {exc}") from exc
 
@@ -252,6 +268,7 @@ def prepare_workspace(
     model: str | None = None,
     base_url: str | None = None,
     time_budget: int | None = None,
+    trunk_branch: str | None = None,
     force: bool = False,
 ) -> WorkspaceSpec:
     public_dir = public_dir.resolve()
@@ -285,6 +302,7 @@ def prepare_workspace(
         metric_direction=direction,
         sample_submission=sample,
         research_config=workspace / "research_config.yaml",
+        trunk_branch=trunk_branch,
     )
     _write_workspace_files(
         spec,
@@ -307,5 +325,5 @@ def prepare_workspace(
             "official_grading": "external_mlebench",
         },
     )
-    _init_git(workspace)
+    _init_git(workspace, trunk_branch=trunk_branch)
     return spec

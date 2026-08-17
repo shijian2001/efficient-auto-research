@@ -1,5 +1,9 @@
 # Installation Log
 
+> This is a dated installation record, not a current seven-Agent benchmark readiness report.
+> The current unified MLE-Bench Lite status, including the schema-v2 manifest and real-smoke
+> requirements, is maintained in `BenchmarkAdapters/docs/SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md`.
+
 ## 2026-08-01
 
 ### Source and Existing Assets

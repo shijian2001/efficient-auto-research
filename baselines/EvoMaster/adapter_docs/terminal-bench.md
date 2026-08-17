@@ -1,11 +1,14 @@
 # ML-Master 2.0 — Terminal-Bench
 
-Status: **fail-closed; not a completed adapter**.
+Status: **legacy direct path disabled; current AO backend is elsewhere**.
 
-The registered import path is
-`agent_adapters.ml_master_2:MLMaster2Agent`, but canonical command construction
-is disabled. ML-Master 2's prefetch, draft, research, improve, and promotion
-stages still use host filesystem paths and MLE-specific grading assumptions.
+The registered import path
+`agent_adapters.ml_master_2:MLMaster2Agent` is a legacy direct-solving guard
+and is intentionally disabled. The current formal Terminal AO path uses the
+explicit `ml-master-autoresearch-variant` staged repository backend in
+`BenchmarkAdapters/TerminalAO/`. It still requires the shared AO protocol,
+clean source, model configuration and a real end-to-end smoke before formal
+scoring.
 
-Readiness requires every stage to use Harbor workspace APIs and a finalization
-path that applies only the selected solution to the formal task environment.
+The direct Harbor path must not be used for an AO score; only the shared AO
+supervisor may finalize the selected solution.

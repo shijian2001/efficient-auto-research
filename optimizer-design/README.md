@@ -32,10 +32,11 @@ They do not implement scoring, evaluation, resource, or protocol policy.
 ## Current Gate
 
 The implementation and all seven dry-run contracts are command-ready. Formal
-runs remain fail-closed because `protocol/baseline_score_record.json` is still
-`pending`. Generate the protected two-seed baseline on an idle four-H100 host,
-promote its evidence, regenerate `protocol.json`, and commit a clean adapter
-tree before starting the 21 formal Agent-by-seed cells.
+runs currently exit before launch because
+`protocol/baseline_score_record.json` is still `pending`. Generate the protected
+two-seed baseline on an idle four-H100 host, promote its evidence, regenerate
+`protocol.json`, and commit a clean adapter tree before starting the 21 formal
+Agent-by-seed cells.
 
 ```bash
 BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters \

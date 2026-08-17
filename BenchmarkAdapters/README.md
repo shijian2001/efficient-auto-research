@@ -19,12 +19,12 @@ re-export。
   Arbor 原版使用官方 plugin evaluator contract；AiScientist 与 ML-Master 原版在该任务
   unsupported。当前尚无 real smoke 或正式横向分数。
 - `optimizer-design`：冻结 modded-NanoGPT Track 3 commit、Benchmark 公共 Adapter、四 H100
-  资源锁、双 held-out step score 和 N=1/N=3 scorecard；当前因
-  双 seed baseline 记录尚未晋级而 fail-closed，不发布正式排名。
+  资源锁、双 held-out step score 和 N=1/N=3 scorecard；当前双 seed baseline 记录尚未晋级，
+  正式入口会直接退出，也不发布正式排名。
 - `fml`：first-class pinned-upstream formal Adapter；shared host evaluator、formal evidence
   和双指标 aggregate 已实现。当前 upstream dirty、主指标
-  未人工冻结，因此 formal preflight 继续
-  fail-closed。旧 `FLM-bench/` 路径只保留 `max_steps=1` 的 non-formal smoke 兼容层。
+  未人工冻结，因此 formal preflight 会直接退出。旧 `FLM-bench/` 路径只保留
+  `max_steps=1` 的 non-formal smoke 兼容层。
   详见 `BenchmarkAdapters/docs/FML_SEVEN_AGENT_ADAPTER.md`。
 
 ## 七 Agent
@@ -104,7 +104,7 @@ BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters optimizer-design \
   --output-dir /tmp/optimizer-design-ear --seed 0 --dry-run \
   --model-config /secure-config/model-track.json --agent-variant g3@FULL_COMMIT
 
-# 所有正式 run 先执行结构化 fail-closed preflight
+# 所有正式 run 先执行结构化 preflight；条件不满足时直接退出并记录原因
 BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters formal-preflight \
   --benchmark autoresearch-architecture --agent ear --agent-variant g3@FULL_COMMIT \
   --protocol autoresearch/protocol/protocol.json \

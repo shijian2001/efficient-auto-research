@@ -22,16 +22,19 @@ algorithm.
 
 | Import path | Native loop | State |
 |---|---|---|
-| Harbor built-in `codex` | Codex CLI | ready |
-| Harbor built-in `claude-code` | Claude Code | ready |
-| `agent_adapters.arbor:ArborTerminalAgent` | `arbor.core.agent.Agent.run` | ready |
-| `agent_adapters.ai_scientist:AiScientistTerminalAgent` | AiScientist `Subagent.run` | ready |
-| `agent_adapters.ear:EARTerminalAgent` | EAR graph search | fail-closed |
-| `agent_adapters.mlevolve:MLEvolveTerminalAgent` | MLEvolve search | fail-closed |
-| `agent_adapters.ml_master_2:MLMaster2Agent` | ML-Master 2 workflow | fail-closed |
+| Harbor built-in `codex` | Codex CLI | legacy direct smoke |
+| Harbor built-in `claude-code` | Claude Code | legacy direct smoke |
+| `agent_adapters.arbor:ArborTerminalAgent` | `arbor.core.agent.Agent.run` | legacy direct smoke |
+| `agent_adapters.ai_scientist:AiScientistTerminalAgent` | AiScientist `Subagent.run` | legacy direct smoke |
+| `agent_adapters.ear:EARTerminalAgent` | EAR graph search | legacy direct path disabled |
+| `agent_adapters.mlevolve:MLEvolveTerminalAgent` | MLEvolve search | legacy direct path disabled |
+| `agent_adapters.ml_master_2:MLMaster2Agent` | ML-Master 2 workflow | legacy direct path disabled |
 
-The three search/workflow adapters remain blocked until their candidate or
-workspace semantics are correct. Importability is not treated as readiness.
+These three Harbor registrations are retained as explicit non-comparable direct
+path guards. The current Terminal AO comparison uses the native repository
+backends under `BenchmarkAdapters/TerminalAO/`; importability alone is not
+formal readiness, and the shared AO protocol, model track, clean source and
+real smoke are still required.
 
 ## Launch
 

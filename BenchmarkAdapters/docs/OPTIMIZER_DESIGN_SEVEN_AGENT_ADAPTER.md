@@ -13,7 +13,7 @@ Optimizer Design 已按 Autoresearch 的外层搜索架构完成两层 Adapter�
 七个 Agent 是 EAR、MLEvolve、Arbor、Codex、Claude Code、ML-Master 2.0 和
 AiScientist。公共层不允许小适配器覆盖 evaluator、分数、seed、硬件或资源策略。
 
-当前状态是 **command-ready，但 formal-blocked**。原因不是 Adapter 缺失，而是冻结的双
+当前状态是 **command-ready，但还不能正式运行**。原因不是 Adapter 缺失，而是冻结的双
 held-out baseline 记录仍是 `pending`。在该记录晋级、Adapter 提交并保持 clean、且完成
 `7 × 3 = 21` 个正式 cell 之前，不得声称已有七 Agent 公平正式排名。
 
