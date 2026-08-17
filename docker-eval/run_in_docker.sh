@@ -517,23 +517,33 @@ $INNER_CMD"
     # Arbor follows MLEvolve's low-intrusion integration model: MLE-Bench is
     # unchanged and supplies prepared data plus an external format validator.
     # The agent container sees only the public task directory.
-    ARBOR_DIR=${ARBOR_DIR:-${EAR}/baselines/Arbor}
+    # Arbor is vendored beneath this benchmark repository and may itself have
+    # a nested .git directory. Freeze the outer benchmark commit explicitly so
+    # that the adapter source cannot be shadowed by that inner repository.
+    ARBOR_SOURCE_REPO=${ARBOR_SOURCE_REPO:-$EAR}
+    ARBOR_SOURCE_SUBTREE=${ARBOR_SOURCE_SUBTREE:-baselines/Arbor}
+    ARBOR_SOURCE_DIR=${ARBOR_SOURCE_REPO}/${ARBOR_SOURCE_SUBTREE}
     ARBOR_OUTPUT_DIR=${ARBOR_OUTPUT_DIR:-${EAR}/run-logs/${RUN_TAG}_Arbor_${COMP}_gpu${GPU_ID}}
     mkdir -p "$ARBOR_OUTPUT_DIR"
-    if ! git -C "$ARBOR_DIR" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
-      echo "Arbor repository not found: $ARBOR_DIR" >&2
+    if ! git -C "$ARBOR_SOURCE_REPO" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+      echo "Arbor source repository not found: $ARBOR_SOURCE_REPO" >&2
       exit 2
     fi
-    if [ -n "$(git -C "$ARBOR_DIR" status --porcelain --untracked-files=no -- .)" ]; then
-      echo "Arbor isolation requires a clean source tree: $ARBOR_DIR" >&2
+    if [ ! -d "$ARBOR_SOURCE_DIR" ]; then
+      echo "Arbor source subtree not found: $ARBOR_SOURCE_DIR" >&2
       exit 2
     fi
-    ARBOR_SOURCE_COMMIT=$(git -C "$ARBOR_DIR" rev-parse HEAD)
+    if [ -n "$(git -C "$ARBOR_SOURCE_REPO" status --porcelain -- "$ARBOR_SOURCE_SUBTREE")" ]; then
+      echo "Arbor isolation requires a clean source subtree: $ARBOR_SOURCE_REPO/$ARBOR_SOURCE_SUBTREE" >&2
+      exit 2
+    fi
+    ARBOR_SOURCE_COMMIT=$(git -C "$ARBOR_SOURCE_REPO" rev-parse HEAD)
     ARBOR_SOURCE_SNAPSHOT_ROOT=${ARBOR_SOURCE_SNAPSHOT_ROOT:-${EAR}/cache/arbor-source-snapshots}
     mkdir -p "$ARBOR_SOURCE_SNAPSHOT_ROOT"
     ARBOR_SOURCE_SNAPSHOT=$(mktemp -d "${ARBOR_SOURCE_SNAPSHOT_ROOT}/${RUN_TAG}_${COMP}.XXXXXX")
-    archive_tracked_source "$ARBOR_DIR" "$ARBOR_SOURCE_SNAPSHOT" "$ARBOR_SOURCE_COMMIT"
-    for required_adapter_file in src/mle/run.py src/mle/eval_runner.py src/mle/adapter.py; do
+    git -C "$ARBOR_SOURCE_REPO" archive "$ARBOR_SOURCE_COMMIT:$ARBOR_SOURCE_SUBTREE" \
+      | tar -x -C "$ARBOR_SOURCE_SNAPSHOT"
+    for required_adapter_file in src/mle/run.py src/mle/eval_runner.py src/mle/adapter.py src/mle/state_store.py; do
       if [ ! -f "$ARBOR_SOURCE_SNAPSHOT/$required_adapter_file" ]; then
         echo "Arbor archived commit is missing adapter file: $required_adapter_file" >&2
         exit 2

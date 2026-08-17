@@ -211,6 +211,16 @@ def test_mlevolve_launcher_mounts_only_public_benchmark_data() -> None:
     assert "agent.seed=$SEED" in mlevolve_branch
 
 
+def test_arbor_launcher_archives_the_outer_benchmark_subtree() -> None:
+    launcher = Path("docker-eval/run_in_docker.sh").read_text(encoding="utf-8")
+    arbor_branch = launcher.split("  Arbor)", 1)[1].split("    ;;", 1)[0]
+    assert 'ARBOR_SOURCE_REPO=${ARBOR_SOURCE_REPO:-$EAR}' in arbor_branch
+    assert 'ARBOR_SOURCE_SUBTREE=${ARBOR_SOURCE_SUBTREE:-baselines/Arbor}' in arbor_branch
+    assert 'git -C "$ARBOR_SOURCE_REPO" archive "$ARBOR_SOURCE_COMMIT:$ARBOR_SOURCE_SUBTREE"' in arbor_branch
+    assert 'git -C "$ARBOR_DIR"' not in arbor_branch
+    assert "src/mle/state_store.py" in arbor_branch
+
+
 def test_codex_terminal_adapter_builds_real_harbor_job(tmp_path: Path) -> None:
     dataset = _terminal_dataset(tmp_path)
     request = HarborTerminalRequest(
