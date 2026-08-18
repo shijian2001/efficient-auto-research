@@ -435,12 +435,23 @@ class Agent:
 
             # 6. Check tool calls
             if not tool_calls:
+                initial_autonomous_nudge = (
+                    not self.config.yield_on_text
+                    and self.config.premature_stop_nudges
+                    and not self.tool_uses
+                    and no_tool_nudges == 0
+                    and turn == 1
+                    and bool(text.strip())
+                )
                 if (
                     self.config.premature_stop_nudges
                     and
                     no_tool_nudges < 3
                     and turn < self.config.max_turns
-                    and _looks_like_premature_no_tool_stop(text)
+                    and (
+                        initial_autonomous_nudge
+                        or _looks_like_premature_no_tool_stop(text)
+                    )
                 ):
                     no_tool_nudges += 1
                     _print_status(
@@ -883,6 +894,19 @@ def _looks_like_premature_no_tool_stop(text: str) -> bool:
         "应该",
     )
     if any(marker in normalized for marker in future_markers):
+        return True
+
+    # Models often describe unfinished work with a subject-specific future
+    # clause ("the portfolio will separate", "I will test") rather than a
+    # first-person planning marker. Keep this action list narrow enough that a
+    # factual sentence about what a model will do does not trigger repeatedly.
+    future_action = re.search(
+        r"\bwill\s+(?:now\s+)?(?:analy[sz]e|build|check|compare|continue|create|"
+        r"dispatch|evaluate|execute|explore|generate|implement|inspect|launch|"
+        r"measure|prepare|run|separate|start|submit|test|train|write)\b",
+        normalized,
+    )
+    if future_action:
         return True
 
     # Chinese sentences often end with 。 instead of : when announcing next steps

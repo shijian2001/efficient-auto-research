@@ -342,6 +342,47 @@ def test_default_autonomous_agent_keeps_premature_stop_nudge(tmp_path):
     )
 
 
+def test_autonomous_agent_nudges_an_initial_text_only_plan(tmp_path):
+    agent, provider, tool, result = _run_agent(
+        tmp_path,
+        [
+            _text_response("The initial portfolio will separate the approaches and will test them next."),
+            _text_response("I have no further actions to take."),
+        ],
+        yield_on_text=False,
+        premature_stop_nudges=True,
+    )
+
+    assert result == "I have no further actions to take."
+    assert len(provider.calls) == 2
+    assert tool.calls == []
+    assert any(
+        message.get("_internal") == "premature_stop_nudge"
+        for message in agent.messages
+    )
+
+
+def test_autonomous_agent_detects_future_action_after_tool_use(tmp_path):
+    agent, provider, tool, result = _run_agent(
+        tmp_path,
+        [
+            _tool_response(),
+            _text_response("The portfolio will separate the candidates and will evaluate them next."),
+            _text_response("The current evidence is sufficient to finish."),
+        ],
+        yield_on_text=False,
+        premature_stop_nudges=True,
+    )
+
+    assert result == "The current evidence is sufficient to finish."
+    assert len(provider.calls) == 3
+    assert tool.calls == [{"path": "target"}]
+    assert sum(
+        message.get("_internal") == "premature_stop_nudge"
+        for message in agent.messages
+    ) == 1
+
+
 def test_autonomous_agent_config_defaults_are_unchanged(tmp_path):
     provider = _ScriptedProvider([
         _tool_response(text="Inspecting the target."),
