@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 from pathlib import Path
 
 import pytest
@@ -9,7 +10,11 @@ import benchmark_adapters
 import BenchmarkAdapters
 from BenchmarkAdapters.artifacts import publish_artifact
 from BenchmarkAdapters.contracts import AdapterError
-from BenchmarkAdapters.formal_contract import hardware_comparison_fingerprint
+from BenchmarkAdapters.formal_contract import (
+    hardware_comparison_fingerprint,
+    repetition_summary,
+    student_t_two_sided_critical_value,
+)
 from BenchmarkAdapters.preflight import _evidence_for
 from BenchmarkAdapters.process import redact_sensitive_payload
 from BenchmarkAdapters.protocol import BenchmarkMode, FormalProtocol
@@ -256,3 +261,72 @@ def test_sensitive_payload_redaction_preserves_token_telemetry() -> None:
     assert secret not in serialized
     assert "authorization" not in serialized
     assert "api_key" not in serialized
+
+
+# Two-sided Student-t critical values at 95% confidence, from standard tables.
+_T_TABLE_95 = {
+    1: 12.706,
+    2: 4.303,
+    3: 3.182,
+    4: 2.776,
+    5: 2.571,
+    10: 2.228,
+    20: 2.086,
+    30: 2.042,
+    120: 1.980,
+}
+
+
+def test_student_t_critical_values_match_published_tables() -> None:
+    for degrees_of_freedom, expected in _T_TABLE_95.items():
+        actual = student_t_two_sided_critical_value(degrees_of_freedom, 0.95)
+        assert actual == pytest.approx(expected, abs=5e-4), degrees_of_freedom
+    # Large samples converge on the normal quantile the old code hard-coded.
+    assert student_t_two_sided_critical_value(100000, 0.95) == pytest.approx(1.95996, abs=1e-4)
+    assert student_t_two_sided_critical_value(2, 0.99) == pytest.approx(9.9248, abs=1e-3)
+    assert student_t_two_sided_critical_value(2, 0.90) == pytest.approx(2.9200, abs=1e-3)
+
+
+def test_student_t_critical_value_rejects_degenerate_inputs() -> None:
+    with pytest.raises(AdapterError, match="at least one degree of freedom"):
+        student_t_two_sided_critical_value(0, 0.95)
+    for confidence in (0.0, 1.0, -0.5, 1.5):
+        with pytest.raises(AdapterError, match="strictly between 0 and 1"):
+            student_t_two_sided_critical_value(2, confidence)
+
+
+def test_avg_at_3_confidence_interval_uses_the_t_distribution() -> None:
+    summary = repetition_summary([0.30, 0.40, 0.50], outer_repetitions=3)
+    assert summary["reporting_label"] == "avg_at_3"
+    assert summary["mean"] == pytest.approx(0.40)
+    assert summary["standard_deviation"] == pytest.approx(0.10)
+    assert summary["standard_error"] == pytest.approx(0.10 / math.sqrt(3))
+    assert summary["ci95_method"] == "student_t"
+    assert summary["ci95_degrees_of_freedom"] == 2
+    assert summary["ci95_critical_value"] == pytest.approx(4.302653, abs=1e-5)
+    margin = summary["ci95_critical_value"] * summary["standard_error"]
+    assert summary["ci95_lower"] == pytest.approx(0.40 - margin, abs=1e-12)
+    assert summary["ci95_upper"] == pytest.approx(0.40 + margin, abs=1e-12)
+    assert margin == pytest.approx(4.302653 * summary["standard_error"], abs=1e-6)
+    # The old z=1.96 interval understated the width by ~2.2x.
+    width = summary["ci95_upper"] - summary["ci95_lower"]
+    normal_width = 2 * 1.96 * summary["standard_error"]
+    assert width / normal_width == pytest.approx(4.302653 / 1.96, abs=1e-5)
+
+
+def test_confidence_interval_scales_with_the_configured_repetition_count() -> None:
+    """The critical value is derived from outer_repetitions, never hard-coded."""
+
+    identical = repetition_summary([0.25, 0.25, 0.25], outer_repetitions=3)
+    assert identical["ci95_lower"] == pytest.approx(0.25)
+    assert identical["ci95_upper"] == pytest.approx(0.25)
+    single = repetition_summary([0.42], outer_repetitions=1)
+    assert single["reporting_label"] == "single_run"
+    assert single["ci95_lower"] is None
+    assert single["ci95_upper"] is None
+    assert single["ci95_method"] is None
+    assert single["ci95_critical_value"] is None
+    with pytest.raises(AdapterError, match="outer_repetitions must be 1 or 3"):
+        repetition_summary([0.1, 0.2], outer_repetitions=2)
+    with pytest.raises(AdapterError, match="all 3 configured outer runs"):
+        repetition_summary([0.1, 0.2], outer_repetitions=3)

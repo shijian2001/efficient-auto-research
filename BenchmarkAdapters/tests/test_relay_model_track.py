@@ -177,3 +177,205 @@ def test_telemetry_records_track_digest_strips_and_response_kind(monkeypatch, tm
     assert record["effective_request_param_digest"] == relay.MODEL_TRACK_DIGEST
     assert record["stripped_params"] == ["logprobs", "top_p"]
     assert record["response_kind"] == "tool_call"
+
+
+def _truncated_responses_payload() -> dict[str, object]:
+    """An upstream Responses object cut off by the upstream output-token limit."""
+
+    return {
+        "id": "resp_truncated",
+        "object": "response",
+        "status": "incomplete",
+        "incomplete_details": {"reason": "max_output_tokens"},
+        "model": "gpt-5.5",
+        "output": [
+            {
+                "id": "msg_1",
+                "type": "message",
+                "status": "incomplete",
+                "role": "assistant",
+                "content": [{"type": "output_text", "text": "partial answer that was cut"}],
+            }
+        ],
+        "usage": {"input_tokens": 11, "output_tokens": 512, "total_tokens": 523},
+    }
+
+
+def test_truncated_responses_upstream_becomes_length_finish_reason(
+    monkeypatch, tmp_path: Path
+) -> None:
+    relay = _relay(monkeypatch, tmp_path)
+    chat = relay._responses_response_to_chat(_truncated_responses_payload())
+    assert chat["choices"][0]["finish_reason"] == "length"
+    assert chat["choices"][0]["message"]["content"] == "partial answer that was cut"
+
+
+def test_truncated_message_item_without_envelope_status_is_still_length(
+    monkeypatch, tmp_path: Path
+) -> None:
+    relay = _relay(monkeypatch, tmp_path)
+    payload = _truncated_responses_payload()
+    payload.pop("status")
+    payload.pop("incomplete_details")
+    chat = relay._responses_response_to_chat(payload)
+    assert chat["choices"][0]["finish_reason"] == "length"
+
+
+def test_complete_responses_upstream_keeps_stop_and_tool_calls(
+    monkeypatch, tmp_path: Path
+) -> None:
+    relay = _relay(monkeypatch, tmp_path)
+    complete = {
+        "id": "resp_ok",
+        "status": "completed",
+        "incomplete_details": None,
+        "output": [
+            {
+                "type": "message",
+                "status": "completed",
+                "content": [{"type": "output_text", "text": "done"}],
+            }
+        ],
+        "usage": {},
+    }
+    assert relay._responses_response_to_chat(complete)["choices"][0]["finish_reason"] == "stop"
+    with_tool = {
+        "id": "resp_tool",
+        "status": "completed",
+        "output": [
+            {
+                "type": "function_call",
+                "call_id": "call_1",
+                "name": "record_value",
+                "arguments": "{}",
+            }
+        ],
+        "usage": {},
+    }
+    assert (
+        relay._responses_response_to_chat(with_tool)["choices"][0]["finish_reason"]
+        == "tool_calls"
+    )
+
+
+def test_length_finish_reason_becomes_messages_max_tokens(monkeypatch, tmp_path: Path) -> None:
+    relay = _relay(monkeypatch, tmp_path)
+    truncated_chat = {
+        "id": "chatcmpl-truncated",
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "partial"},
+                "finish_reason": "length",
+            }
+        ],
+        "usage": {"prompt_tokens": 11, "completion_tokens": 512},
+    }
+    message = relay._chat_response_to_messages(truncated_chat)
+    assert message["stop_reason"] == "max_tokens"
+
+
+def test_messages_stop_reason_covers_the_remaining_terminal_states(
+    monkeypatch, tmp_path: Path
+) -> None:
+    relay = _relay(monkeypatch, tmp_path)
+
+    def _stop_reason(finish_reason: str, *, tool_calls: bool = False) -> str:
+        message: dict[str, object] = {"role": "assistant", "content": "text"}
+        if tool_calls:
+            message["tool_calls"] = [
+                {"id": "call_1", "type": "function", "function": {"name": "t", "arguments": "{}"}}
+            ]
+        return relay._chat_response_to_messages(
+            {"choices": [{"message": message, "finish_reason": finish_reason}], "usage": {}}
+        )["stop_reason"]
+
+    assert _stop_reason("stop") == "end_turn"
+    assert _stop_reason("tool_calls", tool_calls=True) == "tool_use"
+    assert _stop_reason("content_filter") == "refusal"
+    # A missing finish_reason must still fall back on the message shape.
+    assert (
+        relay._chat_response_to_messages(
+            {
+                "choices": [
+                    {
+                        "message": {
+                            "role": "assistant",
+                            "tool_calls": [
+                                {
+                                    "id": "call_1",
+                                    "type": "function",
+                                    "function": {"name": "t", "arguments": "{}"},
+                                }
+                            ],
+                        }
+                    }
+                ],
+                "usage": {},
+            }
+        )["stop_reason"]
+        == "tool_use"
+    )
+
+
+def test_length_finish_reason_becomes_incomplete_responses_object(
+    monkeypatch, tmp_path: Path
+) -> None:
+    relay = _relay(monkeypatch, tmp_path)
+    truncated_chat = {
+        "id": "chatcmpl-truncated",
+        "choices": [
+            {
+                "index": 0,
+                "message": {"role": "assistant", "content": "partial"},
+                "finish_reason": "length",
+            }
+        ],
+        "usage": {"prompt_tokens": 11, "completion_tokens": 512},
+    }
+    response = relay._chat_response_to_responses(truncated_chat)
+    assert response["status"] == "incomplete"
+    assert response["incomplete_details"] == {"reason": "max_output_tokens"}
+    assert [item["status"] for item in response["output"]] == ["incomplete"]
+    complete = relay._chat_response_to_responses(
+        {
+            "id": "chatcmpl-ok",
+            "choices": [
+                {"index": 0, "message": {"role": "assistant", "content": "all"}, "finish_reason": "stop"}
+            ],
+            "usage": {},
+        }
+    )
+    assert complete["status"] == "completed"
+    assert complete["incomplete_details"] is None
+    assert [item["status"] for item in complete["output"]] == ["completed"]
+
+
+def test_truncation_survives_a_full_responses_to_messages_round_trip(
+    monkeypatch, tmp_path: Path
+) -> None:
+    """The cross-protocol path an Agent actually sees: responses -> chat -> messages."""
+
+    relay = _relay(monkeypatch, tmp_path)
+    chat = relay._responses_response_to_chat(_truncated_responses_payload())
+    message = relay._chat_response_to_messages(chat)
+    assert message["stop_reason"] == "max_tokens"
+    responses_again = relay._chat_response_to_responses(chat)
+    assert responses_again["status"] == "incomplete"
+    assert responses_again["incomplete_details"] == {"reason": "max_output_tokens"}
+
+
+def test_streaming_synthesis_carries_the_truncation_signal(monkeypatch, tmp_path: Path) -> None:
+    relay = _relay(monkeypatch, tmp_path)
+    chat = relay._responses_response_to_chat(_truncated_responses_payload())
+    chat_stream = relay._synthesize_sse(chat).decode("utf-8")
+    assert '"finish_reason": "length"' in chat_stream
+    messages_stream = relay._synthesize_messages_sse(
+        relay._chat_response_to_messages(chat)
+    ).decode("utf-8")
+    assert '"stop_reason": "max_tokens"' in messages_stream
+    responses_stream = relay._synthesize_responses_sse(
+        relay._chat_response_to_responses(chat)
+    ).decode("utf-8")
+    assert "response.incomplete" in responses_stream
+    assert "response.completed" not in responses_stream

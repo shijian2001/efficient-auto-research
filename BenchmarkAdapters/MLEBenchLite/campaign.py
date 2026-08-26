@@ -26,7 +26,7 @@ from ..thin_registry import require_clean_upstream_source
 from .adapter import MleLiteAdapter, MleLiteRequest
 from .aggregate import aggregate_seeds, calculate_seed_metrics
 from .formal import FormalMleOutcome, run_formal_mle
-from .grading import GRADER_WORKER
+from .grading import GRADER_WORKER, metric_is_lower_better
 from .membership import (
     data_manifest_digest,
     load_lite_task_ids,
@@ -156,6 +156,10 @@ def generate_ml_master_config(request: MleLiteRequest) -> MleLiteRequest:
             str(request.output_dir / "workspace"),
             "--gpu-id",
             str(request.gpu_id),
+            "--is-lower-better",
+            "true" if metric_is_lower_better(
+                competition_id=request.competition_id, data_root=request.data_root
+            ) else "false",
             "--model",
             str(request.model),
             "--model-parameters-json",

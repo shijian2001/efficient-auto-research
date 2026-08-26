@@ -273,6 +273,24 @@ Arbor 的 MLE 需要 `arbor-benchmark-patched`，Terminal AO 的 ML-Master 2.0 �
 AiScientist 需要各自的显式 variant。模型配置、协议资产、Python 依赖、clean source
 和真实 smoke 全部完成后，才可以开始正式 campaign。
 
+已修复的四类正确性问题（2026-08-26，细节见各自文档）：
+
+- **ML-Master 的 `is_lower_better`**：per-run config 以前沿用上游模板里写死的 `false`，
+  在 22 题中的 7 道 lower-is-better 题上把最差解留在 `best_submission/`。方向现在由
+  host 侧 `MLEBenchLite/metric_direction_worker.py` 从官方 leaderboard 解出后显式传入。
+- **Arbor 内层仓库**：`executor_timeout` 4h→2h 的改动过去只提交到外层仓库，
+  内层 `baselines/Arbor-longrun-patched` 的 dirty 子树让 launcher 直接 `exit 2`。
+  该改动已提交到内层仓库；死变量 `ARBOR_SOURCE_ALLOW_DIRTY` 已删除。
+- **relay 截断信号**：chat / responses / messages 三个协议互转时会把上游的
+  `incomplete` 压成 `stop`/`end_turn`，让 Agent 把被截断的回答当成完整回答。
+  三个方向现在都透传 `length` / `max_tokens` / `incomplete_details`。
+- **95% CI 用 z 而非 t**：n=3 时用 z=1.96 把区间宽度低估约 2.2 倍，现在按
+  `outer_repetitions - 1` 取 Student-t 临界值（df=2 时 4.3027）。
+
+另有一处**尚未修复**的 provenance 错配：run manifest 记录 `baselines/Arbor` 的 commit，
+launcher 实际跑的是 `baselines/Arbor-longrun-patched`，两者不是同一份代码。修复需要改
+`registry.py`，见 `BenchmarkAdapters/docs/ARBOR_MLE_ADAPTER_REPAIR.md`。
+
 每个 Agent 的差异说明位于对应目录的 `adapter_docs/`；环境安装清单与一键脚本位于
 [`BenchmarkAdapters/environments/`](BenchmarkAdapters/environments/)：
 

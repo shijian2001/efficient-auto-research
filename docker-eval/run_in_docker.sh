@@ -539,7 +539,6 @@ $INNER_CMD"
     # that the adapter source cannot be shadowed by that inner repository.
     ARBOR_SOURCE_REPO=${ARBOR_SOURCE_REPO:-$EAR/baselines/Arbor-longrun-patched}
     ARBOR_SOURCE_SUBTREE=${ARBOR_SOURCE_SUBTREE:-.}
-    ARBOR_SOURCE_ALLOW_DIRTY=${ARBOR_SOURCE_ALLOW_DIRTY:-1}
     ARBOR_SOURCE_DIR=${ARBOR_SOURCE_REPO}/${ARBOR_SOURCE_SUBTREE}
     ARBOR_OUTPUT_DIR=${ARBOR_OUTPUT_DIR:-${EAR}/run-logs/${RUN_TAG}_Arbor_${COMP}_gpu${GPU_ID}}
     mkdir -p "$ARBOR_OUTPUT_DIR"

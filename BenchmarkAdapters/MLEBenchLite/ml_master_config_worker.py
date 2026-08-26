@@ -20,6 +20,7 @@ def main() -> int:
     parser.add_argument("--staged-data-root", type=Path, required=True)
     parser.add_argument("--workspace-dir", type=Path, required=True)
     parser.add_argument("--gpu-id", type=int, required=True)
+    parser.add_argument("--is-lower-better", choices=("true", "false"), required=True)
     parser.add_argument("--model", required=True)
     parser.add_argument("--model-parameters-json", required=True)
     args = parser.parse_args()
@@ -34,6 +35,12 @@ def main() -> int:
     shutil.copytree(args.public_dir, public_destination)
     payload["competition_id"] = args.competition_id
     payload["data_root"] = str(args.staged_data_root.resolve())
+    # The upstream template hard-codes a single example competition and its
+    # metric direction.  ML-Master compares candidate solutions with this flag,
+    # so leaving the template default keeps the worst solution on the seven
+    # lower-is-better Lite competitions.  The caller resolves the direction from
+    # the official MLE-Bench leaderboard.
+    payload["is_lower_better"] = args.is_lower_better == "true"
     payload["llm"] = {"openai": copy.deepcopy(payload["llm"]["openai"]), "default": "openai"}
     model_parameters = json.loads(args.model_parameters_json)
     if not isinstance(model_parameters, dict) or not model_parameters:

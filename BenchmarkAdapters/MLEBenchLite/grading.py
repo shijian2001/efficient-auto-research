@@ -17,6 +17,7 @@ from .membership import require_lite_task
 
 DEFAULT_MLE_PYTHON = ROOT / "mle-bench-lite/.venv/bin/python"
 GRADER_WORKER = Path(__file__).with_name("grader_worker.py")
+METRIC_DIRECTION_WORKER = Path(__file__).with_name("metric_direction_worker.py")
 
 
 @dataclass(frozen=True)
@@ -94,4 +95,64 @@ def grade_submission(
     return grade
 
 
-__all__ = ["DEFAULT_MLE_PYTHON", "OfficialGrade", "grade_submission"]
+def metric_is_lower_better(
+    *,
+    competition_id: str,
+    data_root: Path,
+    python_executable: Path = DEFAULT_MLE_PYTHON,
+    enforce_lite_membership: bool = True,
+) -> bool:
+    """Resolve the official metric direction from the frozen MLE-Bench leaderboard.
+
+    The official ``mlebench`` package only exists inside the locked MLE-Bench
+    environment, so the answer is produced by a host-owned worker instead of by
+    any Agent-side environment.
+    """
+
+    if enforce_lite_membership:
+        require_lite_task(competition_id)
+    python_executable = python_executable.expanduser().absolute()
+    if not python_executable.is_file() or not os.access(python_executable, os.X_OK):
+        raise AdapterError(f"MLE-Bench Python does not exist: {python_executable}")
+    completed = subprocess.run(
+        [
+            str(python_executable),
+            str(METRIC_DIRECTION_WORKER),
+            "--data-root",
+            str(data_root.resolve()),
+            "--competition-id",
+            competition_id,
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        text=True,
+        timeout=600,
+        check=False,
+    )
+    if completed.returncode:
+        raise AdapterError(
+            f"cannot resolve the official metric direction for {competition_id}: "
+            f"{(completed.stderr or completed.stdout)[-2000:]}"
+        )
+    try:
+        payload = json.loads(completed.stdout.strip().splitlines()[-1])
+    except (IndexError, json.JSONDecodeError) as exc:
+        raise AdapterError(
+            f"official metric-direction worker produced no usable report for {competition_id}"
+        ) from exc
+    if payload.get("competition_id") != competition_id or not isinstance(
+        payload.get("is_lower_better"), bool
+    ):
+        raise AdapterError(
+            f"official metric-direction report is not bound to {competition_id}"
+        )
+    return bool(payload["is_lower_better"])
+
+
+__all__ = [
+    "DEFAULT_MLE_PYTHON",
+    "METRIC_DIRECTION_WORKER",
+    "OfficialGrade",
+    "grade_submission",
+    "metric_is_lower_better",
+]

@@ -17,7 +17,7 @@ from BenchmarkAdapters.MLEBenchLite.campaign import (
     run_campaign_cell,
 )
 from BenchmarkAdapters.MLEBenchLite.native_wrappers import run_ai_scientist, run_ml_master
-from BenchmarkAdapters.MLEBenchLite.grading import grade_submission
+from BenchmarkAdapters.MLEBenchLite.grading import grade_submission, metric_is_lower_better
 from BenchmarkAdapters.MLEBenchLite.membership import (
     data_manifest_digest,
     load_data_manifest,
@@ -318,3 +318,133 @@ def test_formal_cell_uses_wall_clock_not_one_step_default(tmp_path: Path, monkey
     assert request.timeout_seconds == protocol.wall_clock_seconds
     assert request.steps == 1000
     assert request.max_turns == 1000
+
+
+LOWER_IS_BETTER_LITE_TASKS = frozenset(
+    {
+        "denoising-dirty-documents",
+        "dog-breed-identification",
+        "dogs-vs-cats-redux-kernels-edition",
+        "leaf-classification",
+        "new-york-city-taxi-fare-prediction",
+        "nomad2018-predict-transparent-conductors",
+        "spooky-author-identification",
+    }
+)
+
+
+def test_official_metric_direction_matches_the_frozen_lite_leaderboards() -> None:
+    tasks = load_lite_task_ids()
+    assert LOWER_IS_BETTER_LITE_TASKS <= set(tasks)
+    directions = {
+        task: metric_is_lower_better(
+            competition_id=task, data_root=ROOT / "mle-bench-data"
+        )
+        for task in tasks
+    }
+    assert {task for task, lower in directions.items() if lower} == set(
+        LOWER_IS_BETTER_LITE_TASKS
+    )
+    assert sum(directions.values()) == 7
+    assert len(directions) - sum(directions.values()) == 15
+
+
+def test_metric_direction_rejects_non_lite_tasks() -> None:
+    with pytest.raises(AdapterError, match="not in the frozen"):
+        metric_is_lower_better(
+            competition_id="definitely-not-a-lite-task",
+            data_root=ROOT / "mle-bench-data",
+        )
+
+
+def test_ml_master_generated_config_carries_the_official_metric_direction(
+    tmp_path: Path,
+) -> None:
+    import subprocess
+
+    import yaml
+
+    source_root = AGENTS["ml-master-2"].install_path
+    template = source_root / "configs/ml_master_2/deepseek-v3.2-example.yaml"
+    assert yaml.safe_load(template.read_text(encoding="utf-8"))["is_lower_better"] is False
+    worker = (
+        ROOT / "BenchmarkAdapters/MLEBenchLite/ml_master_config_worker.py"
+    )
+    public_dir = tmp_path / "source-public"
+    public_dir.mkdir()
+    (public_dir / "train.csv").write_text("a,b\n1,2\n", encoding="utf-8")
+    for competition, flag, expected in (
+        ("spooky-author-identification", "true", True),
+        ("aerial-cactus-identification", "false", False),
+    ):
+        destination = tmp_path / competition / "config.yaml"
+        completed = subprocess.run(
+            [
+                str(source_root / ".venv/bin/python"),
+                str(worker),
+                "--template",
+                str(template),
+                "--destination",
+                str(destination),
+                "--competition-id",
+                competition,
+                "--public-dir",
+                str(public_dir),
+                "--staged-data-root",
+                str(tmp_path / competition / "public-data"),
+                "--workspace-dir",
+                str(tmp_path / competition / "workspace"),
+                "--gpu-id",
+                "0",
+                "--is-lower-better",
+                flag,
+                "--model",
+                "test-model",
+                "--model-parameters-json",
+                json.dumps({"temperature": 1.0}),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stderr
+        payload = yaml.safe_load(destination.read_text(encoding="utf-8"))
+        assert payload["competition_id"] == competition
+        assert payload["is_lower_better"] is expected
+
+
+def test_ml_master_config_generation_requires_an_explicit_metric_direction(
+    tmp_path: Path,
+) -> None:
+    import subprocess
+
+    source_root = AGENTS["ml-master-2"].install_path
+    completed = subprocess.run(
+        [
+            str(source_root / ".venv/bin/python"),
+            str(ROOT / "BenchmarkAdapters/MLEBenchLite/ml_master_config_worker.py"),
+            "--template",
+            str(source_root / "configs/ml_master_2/deepseek-v3.2-example.yaml"),
+            "--destination",
+            str(tmp_path / "config.yaml"),
+            "--competition-id",
+            "spooky-author-identification",
+            "--public-dir",
+            str(tmp_path),
+            "--staged-data-root",
+            str(tmp_path / "public-data"),
+            "--workspace-dir",
+            str(tmp_path / "workspace"),
+            "--gpu-id",
+            "0",
+            "--model",
+            "test-model",
+            "--model-parameters-json",
+            json.dumps({"temperature": 1.0}),
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode != 0
+    assert "--is-lower-better" in completed.stderr

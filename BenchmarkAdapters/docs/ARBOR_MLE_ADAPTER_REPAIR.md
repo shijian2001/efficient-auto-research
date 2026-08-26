@@ -142,3 +142,32 @@ hash binding.
 This repair does not address Chaii validation overfitting, Arbor algorithm
 quality, Git strategy, metric semantics, model selection, relay tuning, missing
 formal benchmark assets, or the broader seven-Agent readiness program.
+
+## Source Provenance and the Inner Arbor Repository
+
+`docker-eval/run_in_docker.sh` launches Arbor from `baselines/Arbor-longrun-patched`,
+which is itself a git repository nested inside this benchmark repository. The
+launcher freezes the Agent by `git archive HEAD` over that **inner** repo and
+refuses to start when its subtree is dirty (`SUBTREE=.`, `exit 2`). Two
+consequences follow, and both have bitten this adapter:
+
+- An edit committed only to the outer benchmark repository never reaches the
+  container. It also leaves the inner subtree dirty, so the clean gate rejects
+  every Arbor launch. The `executor_timeout: 14400 -> 7200` change (4h -> 2h per
+  executor; under a 12h budget three executor timeouts consumed the whole budget
+  and produced zero submissions) was in exactly this state and is now committed
+  to `baselines/Arbor-longrun-patched` itself.
+- `ARBOR_SOURCE_ALLOW_DIRTY` was assigned in the launcher but read nowhere. It
+  advertised an opt-out that did not exist; the clean gate is unconditional. The
+  dead assignment has been removed rather than wired up — a dirty-source escape
+  hatch would defeat the provenance guarantee this section exists to protect.
+
+**Known provenance mismatch (unresolved).** `MLEBenchLite/campaign.py:199`
+records `AGENTS["arbor"].install_path`, which is `baselines/Arbor`, while the
+launcher actually executes `baselines/Arbor-longrun-patched`. The manifest's
+`agent_commit` and `source_dirty` therefore describe a different working tree
+than the code that ran. Fixing it means giving the `arbor` /
+`arbor-benchmark-patched` pair a `runtime_path` (the `AgentSpec` field already
+exists and `execution_path` already prefers it) so that manifest identity
+follows the executed source. That change lives in `registry.py` and is out of
+scope here.

@@ -671,6 +671,71 @@ def _responses_request_to_chat(body: dict) -> dict:
     return chat
 
 
+# --- Truncation / stop-signal propagation across protocol conversions -------
+#
+# Each wire protocol names the same terminal states differently.  A relay that
+# rewrites one protocol into another must carry the *incomplete* states across,
+# otherwise an Agent whose answer was cut off by an upstream output-token limit
+# receives an ordinary "stop"/"end_turn" and treats a truncated answer as a
+# complete one.
+
+# Responses API `incomplete_details.reason` -> chat `finish_reason`.
+_RESPONSES_INCOMPLETE_REASONS = {
+    "max_output_tokens": "length",
+    "max_tokens": "length",
+    "content_filter": "content_filter",
+}
+
+
+def _responses_finish_reason(data: dict, *, has_tool_calls: bool) -> str:
+    """Map a Responses API terminal state onto an OpenAI chat finish_reason."""
+
+    status = data.get("status")
+    details = data.get("incomplete_details")
+    reason = details.get("reason") if isinstance(details, dict) else None
+    if status == "incomplete" or reason is not None:
+        return _RESPONSES_INCOMPLETE_REASONS.get(str(reason), "length")
+    # Some upstreams report the truncation on the message item instead of on the
+    # response envelope.
+    for item in data.get("output", []):
+        if isinstance(item, dict) and item.get("status") == "incomplete":
+            return "length"
+    return "tool_calls" if has_tool_calls else "stop"
+
+
+def _chat_finish_reason(data: dict) -> str:
+    choice = (data.get("choices") or [{}])[0]
+    reason = choice.get("finish_reason")
+    if isinstance(reason, str) and reason:
+        return reason
+    message = choice.get("message") or {}
+    return "tool_calls" if message.get("tool_calls") else "stop"
+
+
+# Chat `finish_reason` -> Responses API (status, incomplete_details).
+def _chat_finish_reason_to_responses_status(reason: str) -> tuple[str, dict | None]:
+    if reason == "length":
+        return "incomplete", {"reason": "max_output_tokens"}
+    if reason == "content_filter":
+        return "incomplete", {"reason": "content_filter"}
+    return "completed", None
+
+
+# Chat `finish_reason` -> Anthropic Messages API `stop_reason`.
+_CHAT_TO_MESSAGES_STOP_REASON = {
+    "length": "max_tokens",
+    "tool_calls": "tool_use",
+    "function_call": "tool_use",
+    "content_filter": "refusal",
+    "stop": "end_turn",
+}
+
+
+def _messages_stop_reason(data: dict) -> str:
+    reason = _chat_finish_reason(data)
+    return _CHAT_TO_MESSAGES_STOP_REASON.get(reason, "end_turn")
+
+
 def _responses_response_to_chat(data: dict) -> dict:
     texts: list[str] = []
     tool_calls: list[dict[str, object]] = []
@@ -714,7 +779,9 @@ def _responses_response_to_chat(data: dict) -> dict:
             {
                 "index": 0,
                 "message": message,
-                "finish_reason": "tool_calls" if tool_calls else "stop",
+                "finish_reason": _responses_finish_reason(
+                    data, has_tool_calls=bool(tool_calls)
+                ),
             }
         ],
         "usage": {
@@ -764,13 +831,19 @@ def _chat_response_to_responses(data: dict) -> dict:
     response_id = str(data.get("id", f"resp_{uuid.uuid4().hex[:24]}"))
     if not response_id.startswith("resp_"):
         response_id = f"resp_{response_id}"
+    status, incomplete_details = _chat_finish_reason_to_responses_status(
+        _chat_finish_reason(data)
+    )
+    if status != "completed":
+        for item in output:
+            item["status"] = "incomplete"
     return {
         "id": response_id,
         "object": "response",
         "created_at": int(data.get("created", time.time())),
-        "status": "completed",
+        "status": status,
         "error": None,
-        "incomplete_details": None,
+        "incomplete_details": incomplete_details,
         "model": data.get("model", FORCE_MODEL),
         "output": output,
         "output_text": text or "",
@@ -812,7 +885,7 @@ def _chat_response_to_messages(data: dict) -> dict:
         "role": "assistant",
         "model": data.get("model", FORCE_MODEL),
         "content": content,
-        "stop_reason": "tool_use" if message.get("tool_calls") else "end_turn",
+        "stop_reason": _messages_stop_reason(data),
         "stop_sequence": None,
         "usage": {
             "input_tokens": usage.get("prompt_tokens", usage.get("input_tokens")),
@@ -977,7 +1050,14 @@ def _synthesize_responses_sse(data: dict) -> bytes:
         for item in data.get("output", [])
         if isinstance(item, dict)
     ]
-    events.append({"type": "response.completed", "response": data})
+    # A truncated response must not be announced as `response.completed`, or a
+    # Responses-API client treats the cut-off output as a finished answer.
+    terminal = (
+        "response.incomplete"
+        if data.get("status") == "incomplete"
+        else "response.completed"
+    )
+    events.append({"type": terminal, "response": data})
     return "".join(
         f"event: {event['type']}\ndata: {json.dumps(event, ensure_ascii=False)}\n\n"
         for event in events

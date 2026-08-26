@@ -443,6 +443,90 @@ class FormalPreflightReport:
         write_json_exclusive(path, self.to_dict())
 
 
+def student_t_two_sided_critical_value(degrees_of_freedom: int, confidence: float) -> float:
+    """Exact two-sided Student-t critical value t(1-(1-confidence)/2, df).
+
+    The standard library ships no t quantile and this package intentionally
+    depends on nothing but ``httpx``, so the quantile is inverted here from the
+    regularised incomplete beta function (``math.betainc`` is likewise absent,
+    so the CDF is built from a continued fraction).  Using the normal quantile
+    z=1.96 instead — which is what this contract used to do — understates the
+    interval by roughly 2.2x at the three outer runs this benchmark reports.
+    """
+
+    if degrees_of_freedom < 1:
+        raise AdapterError("Student-t critical value requires at least one degree of freedom")
+    if not 0.0 < confidence < 1.0:
+        raise AdapterError("confidence level must lie strictly between 0 and 1")
+    target = 1.0 - (1.0 - confidence) / 2.0
+    low, high = 0.0, 1.0
+    while _student_t_cdf(high, degrees_of_freedom) < target:
+        high *= 2.0
+        if high > 1e12:
+            raise AdapterError("Student-t critical value failed to bracket the target quantile")
+    for _ in range(200):
+        middle = (low + high) / 2.0
+        if _student_t_cdf(middle, degrees_of_freedom) < target:
+            low = middle
+        else:
+            high = middle
+    return (low + high) / 2.0
+
+
+def _student_t_cdf(value: float, degrees_of_freedom: int) -> float:
+    x = degrees_of_freedom / (degrees_of_freedom + value * value)
+    tail = 0.5 * _regularized_incomplete_beta(x, degrees_of_freedom / 2.0, 0.5)
+    return 1.0 - tail if value > 0 else tail
+
+
+def _regularized_incomplete_beta(x: float, a: float, b: float) -> float:
+    if x <= 0.0:
+        return 0.0
+    if x >= 1.0:
+        return 1.0
+    log_prefix = (
+        math.lgamma(a + b)
+        - math.lgamma(a)
+        - math.lgamma(b)
+        + a * math.log(x)
+        + b * math.log1p(-x)
+    )
+    if x < (a + 1.0) / (a + b + 2.0):
+        return math.exp(log_prefix) * _beta_continued_fraction(x, a, b) / a
+    return 1.0 - math.exp(log_prefix) * _beta_continued_fraction(1.0 - x, b, a) / b
+
+
+def _beta_continued_fraction(x: float, a: float, b: float) -> float:
+    """Lentz's algorithm for the continued fraction of the incomplete beta."""
+
+    tiny = 1e-30
+    c = 1.0
+    d = 1.0 - (a + b) * x / (a + 1.0)
+    d = tiny if abs(d) < tiny else d
+    d = 1.0 / d
+    result = d
+    for iteration in range(1, 300):
+        even = 2 * iteration
+        numerator = iteration * (b - iteration) * x / ((a + even - 1.0) * (a + even))
+        d = 1.0 + numerator * d
+        d = tiny if abs(d) < tiny else d
+        c = 1.0 + numerator / c
+        c = tiny if abs(c) < tiny else c
+        d = 1.0 / d
+        result *= d * c
+        numerator = -(a + iteration) * (a + b + iteration) * x / ((a + even) * (a + even + 1.0))
+        d = 1.0 + numerator * d
+        d = tiny if abs(d) < tiny else d
+        c = 1.0 + numerator / c
+        c = tiny if abs(c) < tiny else c
+        d = 1.0 / d
+        delta = d * c
+        result *= delta
+        if abs(delta - 1.0) < 1e-14:
+            return result
+    raise AdapterError("incomplete beta continued fraction did not converge")
+
+
 def repetition_summary(values: Sequence[float], *, outer_repetitions: int) -> dict[str, Any]:
     if len(values) != outer_repetitions:
         raise AdapterError(
@@ -462,10 +546,18 @@ def repetition_summary(values: Sequence[float], *, outer_repetitions: int) -> di
             "standard_error": None,
             "ci95_lower": None,
             "ci95_upper": None,
+            "ci95_method": None,
+            "ci95_degrees_of_freedom": None,
+            "ci95_critical_value": None,
         }
     standard_deviation = statistics.stdev(float(value) for value in values)
     standard_error = standard_deviation / math.sqrt(outer_repetitions)
-    margin = 1.96 * standard_error
+    # The sample standard deviation is estimated from the same handful of outer
+    # runs, so the interval must use the Student-t critical value for n-1
+    # degrees of freedom.  The normal quantile is only correct as n grows.
+    degrees_of_freedom = outer_repetitions - 1
+    critical_value = student_t_two_sided_critical_value(degrees_of_freedom, 0.95)
+    margin = critical_value * standard_error
     return {
         "reporting_label": "avg_at_3",
         "num_outer_runs": 3,
@@ -474,6 +566,9 @@ def repetition_summary(values: Sequence[float], *, outer_repetitions: int) -> di
         "standard_error": standard_error,
         "ci95_lower": mean - margin,
         "ci95_upper": mean + margin,
+        "ci95_method": "student_t",
+        "ci95_degrees_of_freedom": degrees_of_freedom,
+        "ci95_critical_value": critical_value,
     }
 
 
@@ -512,6 +607,7 @@ __all__ = [
     "is_placeholder",
     "redact_relay_url",
     "repetition_summary",
+    "student_t_two_sided_critical_value",
     "validate_gpu_attestation",
     "verify_file_digest",
     "verify_hashed_json",
