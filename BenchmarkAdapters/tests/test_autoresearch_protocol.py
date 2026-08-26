@@ -541,9 +541,15 @@ def test_host_runner_attests_evaluate_bpb_in_actual_subprocess(
         assert "host-attested" in (result.failure_reason or "")
 
 
-def test_supervisor_selects_dev_minimum_replays_and_requires_two_final_scores(
+def test_supervisor_scores_the_agent_declared_revision_not_the_dev_best(
     tmp_path: Path,
 ) -> None:
+    """The Agent's own final choice is scored, even when a better dev candidate exists.
+
+    Recognising which of its candidates is best is part of the Agent's ability, so
+    the harness must replay the declared revision (1.08) rather than substituting
+    the minimum-dev-score one (1.03).
+    """
     protocol = build_protocol()
 
     def native_runner(context):
@@ -571,11 +577,14 @@ def test_supervisor_selects_dev_minimum_replays_and_requires_two_final_scores(
         run_kind="smoke",
     )
     assert result.score_valid is True
-    assert result.score == 1.03
-    assert result.metrics["declared_revision_id"] != result.metrics["selected_revision_id"]
+    assert result.score == 1.08
+    assert result.metrics["declared_revision_id"] == result.metrics["selected_revision_id"]
+    assert result.metrics["selection_policy"] == "agent-declared"
     assert result.metrics["held_out_evaluations_completed"] == 2
     selection = json.loads((tmp_path / "run/selection.json").read_text(encoding="utf-8"))
     assert selection["selection_uses_held_out"] is False
+    assert selection["selection_policy_id"] == "agent-declared"
+    assert selection["harness_selected_among_candidates"] is False
     assert sha256_file(tmp_path / "run/artifacts/final/train.py") == result.artifact_sha256
 
 

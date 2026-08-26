@@ -30,6 +30,7 @@ class AutoResearchSeedCell:
     final_val_bpb_mean: float
     held_out_val_bpb: tuple[float, float]
     result_path: str
+    selection_policy: str
     manifest_digest: str
     hardware_fingerprint: str
     model_track_id: str
@@ -167,6 +168,35 @@ def _held_out_value(
     return float(value)
 
 
+def _selection_policy(path: Path, *, result: dict[str, Any]) -> str:
+    """Replay the per-run final-artifact selection policy.
+
+    The policy is uniform across Agents: each Agent declares its own final
+    revision and the host never substitutes a different candidate. Surfacing it
+    on the aggregate makes any future divergence between Agents visible instead
+    of silent.
+    """
+    if not path.is_file() or path.is_symlink():
+        raise AdapterError("Autoresearch selection record is missing")
+    payload = _load_object(path)
+    policy = str(payload.get("selection_policy_id", ""))
+    metrics = result.get("metrics")
+    recorded = (
+        str(metrics.get("selection_policy", "")) if isinstance(metrics, dict) else ""
+    )
+    if (
+        policy != "agent-declared"
+        or recorded != policy
+        or payload.get("harness_selected_among_candidates") is not False
+        or payload.get("selection_uses_held_out") is not False
+        or payload.get("declared_revision_id") != payload.get("selected_revision_id")
+    ):
+        raise AdapterError(
+            "Autoresearch final revision was not Agent-declared under a held-out-free policy"
+        )
+    return policy
+
+
 def _completed_cell(
     result_path: Path,
     *,
@@ -204,6 +234,9 @@ def _completed_cell(
         or sha256_file(artifact_path) != artifact_digest
     ):
         raise AdapterError("Autoresearch final artifact differs from result hash")
+    selection_policy = _selection_policy(
+        result_path.parent / "selection.json", result=result
+    )
     seed_policy = SeedPolicy.load(protocol.seed_policy_path)
     values = tuple(
         _held_out_value(
@@ -228,6 +261,7 @@ def _completed_cell(
         final_val_bpb_mean=score,
         held_out_val_bpb=(values[0], values[1]),
         result_path=str(result_path),
+        selection_policy=selection_policy,
         manifest_digest=manifest_digest,
         hardware_fingerprint=hardware_fingerprint,
         model_track_id=str(manifest.get("model_track_id", "")),
@@ -273,6 +307,9 @@ def aggregate_autoresearch(
         raise AdapterError("Autoresearch outer runs mix Agent source commits")
     if len({cell.adapter_commit for cell in cells}) != 1:
         raise AdapterError("Autoresearch outer runs mix Adapter source commits")
+    selection_policies = {cell.selection_policy for cell in cells}
+    if len(selection_policies) != 1:
+        raise AdapterError("Autoresearch outer runs mix final-artifact selection policies")
     summary = repetition_summary(
         [cell.final_val_bpb_mean for cell in cells],
         outer_repetitions=protocol.outer_repetitions,
@@ -293,6 +330,7 @@ def aggregate_autoresearch(
         "model_config_digest": next(iter(model_config_digests)),
         "comparison_fingerprint": next(iter(fingerprints)),
         "adapter_commit": cells[0].adapter_commit,
+        "selection_policy": next(iter(selection_policies)),
         "metrics": {"held_out_final_val_bpb": summary},
         "outer_runs": [asdict(cell) for cell in cells],
         "held_out_evaluations_per_outer_run": 2,
@@ -318,6 +356,7 @@ def autoresearch_scorecard(
             {
                 "agent": agent,
                 "score": payload["metrics"]["held_out_final_val_bpb"]["mean"],
+                "selection_policy": payload["selection_policy"],
             }
         )
     ranking.sort(key=lambda item: float(item["score"]))
@@ -343,6 +382,11 @@ def autoresearch_scorecard(
         and len(model_config_digests) == 1
         and len(adapter_commits) == 1
     )
+    selection_policies = {
+        agent: payload["selection_policy"]
+        for agent, payload in agents.items()
+        if payload.get("formal_score_valid")
+    }
     return {
         "schema_version": 2,
         "protocol_id": protocol.protocol_id,
@@ -355,6 +399,8 @@ def autoresearch_scorecard(
         "agents": agents,
         "formal_ranking": ranking if complete else [],
         "complete_seven_agent_comparison_valid": complete,
+        "selection_policy_by_agent": selection_policies,
+        "uniform_selection_policy_valid": len(set(selection_policies.values())) <= 1,
         "same_model_track_valid": len(model_config_digests) == 1,
         "comparison_environment_consistent": len(comparison_fingerprints) == 1,
         "adapter_commit_consistent": len(adapter_commits) == 1,

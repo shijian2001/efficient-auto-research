@@ -27,6 +27,7 @@ class OptimizerDesignSeedCell:
     development_score_steps: int | None
     result_path: str
     failure_reason: str | None
+    selection_policy: str | None
     manifest_digest: str | None
     hardware_fingerprint: str | None
     agent_commit: str | None
@@ -223,6 +224,35 @@ def _evaluation_trajectory(
     return tuple(trajectory)
 
 
+def _selection_policy(path: Path, *, payload: dict[str, Any]) -> str:
+    """Replay the per-run final-artifact selection policy.
+
+    The policy is uniform across Agents: each Agent declares its own final
+    revision and the host never substitutes a different candidate. Surfacing it
+    on the aggregate makes any future divergence between Agents visible instead
+    of silent.
+    """
+    if not path.is_file() or path.is_symlink():
+        raise AdapterError("Optimizer Design selection record is missing")
+    record = _load_object(path)
+    policy = str(record.get("selection_policy_id", ""))
+    metrics = payload.get("metrics")
+    recorded = (
+        str(metrics.get("selection_policy", "")) if isinstance(metrics, dict) else ""
+    )
+    if (
+        policy != "agent-declared"
+        or recorded != policy
+        or record.get("harness_selected_among_candidates") is not False
+        or record.get("selection_uses_held_out") is not False
+        or record.get("declared_revision_id") != record.get("selected_revision_id")
+    ):
+        raise AdapterError(
+            "Optimizer Design final revision was not Agent-declared under a held-out-free policy"
+        )
+    return policy
+
+
 def _completed_cell(
     result_path: Path,
     *,
@@ -263,6 +293,7 @@ def _completed_cell(
             development_score_steps=None,
             result_path=str(result_path),
             failure_reason=str(payload.get("failure_reason") or "non-completed result"),
+            selection_policy=None,
             manifest_digest=manifest_digest,
             hardware_fingerprint=hardware_fingerprint,
             agent_commit=agent_commit,
@@ -314,6 +345,9 @@ def _completed_cell(
     development_score = metrics.get("development_score_steps")
     if not isinstance(development_score, int):
         raise AdapterError("Optimizer Design development selection score is missing")
+    selection_policy = _selection_policy(
+        result_path.parent / "selection.json", payload=payload
+    )
     return OptimizerDesignSeedCell(
         seed=seed,
         state="completed",
@@ -322,6 +356,7 @@ def _completed_cell(
         development_score_steps=development_score,
         result_path=str(result_path),
         failure_reason=None,
+        selection_policy=selection_policy,
         manifest_digest=manifest_digest,
         hardware_fingerprint=hardware_fingerprint,
         agent_commit=agent_commit,
@@ -357,6 +392,7 @@ def aggregate_optimizer_design(
                     development_score_steps=None,
                     result_path=str(result_path),
                     failure_reason="result is missing",
+                    selection_policy=None,
                     manifest_digest=None,
                     hardware_fingerprint=None,
                     agent_commit=None,
@@ -384,6 +420,7 @@ def aggregate_optimizer_design(
                     development_score_steps=None,
                     result_path=str(result_path),
                     failure_reason=str(exc),
+                    selection_policy=None,
                     manifest_digest=None,
                     hardware_fingerprint=None,
                     agent_commit=None,
@@ -417,6 +454,12 @@ def aggregate_optimizer_design(
             if cell.score_valid and cell.model_config_digest
         }
     ) == 1
+    selection_policies = {
+        cell.selection_policy
+        for cell in cells
+        if cell.score_valid and cell.selection_policy
+    }
+    selection_policy_consistent = len(selection_policies) == 1
     formal_valid = (
         protocol.formal_baseline_ready
         and len(scores) == protocol.outer_repetitions
@@ -424,6 +467,7 @@ def aggregate_optimizer_design(
         and agent_commit_consistent
         and adapter_commit_consistent
         and model_config_consistent
+        and selection_policy_consistent
     )
     if not formal_valid:
         missing = [cell.seed for cell in cells if not cell.score_valid]
@@ -454,6 +498,10 @@ def aggregate_optimizer_design(
         "agent_commit_consistent": agent_commit_consistent,
         "adapter_commit_consistent": adapter_commit_consistent,
         "model_config_consistent": model_config_consistent,
+        "selection_policy_consistent": selection_policy_consistent,
+        "selection_policy": (
+            next(iter(selection_policies)) if formal_valid else None
+        ),
         "formal_hardware_fingerprint": (
             next(iter(fingerprints)) if formal_valid else None
         ),
@@ -511,6 +559,7 @@ def optimizer_design_scorecard(
             {
                 "agent": agent,
                 "score": payload["metrics"]["held_out_common_significant_step"]["mean"],
+                "selection_policy": payload["selection_policy"],
             }
             for agent, payload in agents.items()
             if payload.get("formal_score_valid")
@@ -527,6 +576,11 @@ def optimizer_design_scorecard(
         if payload.get("formal_score_valid")
     }
     comparison_set_consistent = len(formal_fingerprints) <= 1
+    selection_policies = {
+        agent: payload["selection_policy"]
+        for agent, payload in agents.items()
+        if payload.get("formal_score_valid")
+    }
     complete = comparison_set_consistent and len(ranked) == len(AGENTS)
     return {
         "schema_version": 1,
@@ -540,6 +594,8 @@ def optimizer_design_scorecard(
         "agents": agents,
         "formal_ranking": ranked if complete else [],
         "comparison_set_consistent": comparison_set_consistent,
+        "selection_policy_by_agent": selection_policies,
+        "uniform_selection_policy_valid": len(set(selection_policies.values())) <= 1,
         "complete_seven_agent_comparison_valid": complete,
         "unranked_agents": [
             agent for agent, payload in agents.items() if not payload.get("formal_score_valid")
@@ -554,6 +610,7 @@ def optimizer_design_scorecard(
             "requires_one_model_track_across_scorecard": True,
             "failed_and_missing_cells_preserved": True,
             "development_scores_excluded": True,
+            "requires_agent_declared_final_artifact": True,
             "external_arbor_4xa100_numbers_excluded": True,
         },
     }

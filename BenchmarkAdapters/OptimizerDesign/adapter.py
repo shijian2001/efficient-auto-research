@@ -32,7 +32,7 @@ from .protocol import (
 from .revisions import OptimizerRevisionStore
 from .resource import optimizer_design_resource_lease
 from .runtime import AgentRuntimeManifest
-from ..thin_registry import backend_identity, selected_variant
+from ..thin_registry import backend_identity
 
 
 @dataclass(frozen=True)
@@ -403,15 +403,8 @@ class OptimizerDesignBenchmarkAdapter:
             )
             result.write(output_dir / "result.json")
             return result
-        canonical_arbor = (
-            request.agent == "arbor"
-            and selected_variant(
-                request.agent, "optimizer-design", request.agent_variant
-            )
-            is None
-        )
         declaration = outcome.declared_revision_id or broker.declared_revision_id
-        best = broker.scored(declaration) if canonical_arbor and declaration else broker.best
+        best = broker.scored(declaration) if declaration else None
         if not outcome.completed or best is None:
             result = BenchmarkRunResult(
                 run_id=manifest.run_id,
@@ -429,7 +422,14 @@ class OptimizerDesignBenchmarkAdapter:
                 artifact_path=None,
                 artifact_sha256=None,
                 wall_clock_seconds=time.monotonic() - started,
-                failure_reason=outcome.failure_reason or "no valid development candidate",
+                failure_reason=(
+                    outcome.failure_reason
+                    or (
+                        "native search did not declare a replayable final revision"
+                        if declaration is None
+                        else "Agent-declared final revision has no development evaluation record"
+                    )
+                ),
             )
             result.write(output_dir / "result.json")
             return result
@@ -464,12 +464,11 @@ class OptimizerDesignBenchmarkAdapter:
         write_json_exclusive(
             output_dir / "selection.json",
             {
+                "declared_revision_id": declaration,
                 "selected_revision_id": best.revision.revision_id,
-                "selection_policy": (
-                    "Agent-owned final trunk revision"
-                    if canonical_arbor
-                    else "minimum valid development score_steps"
-                ),
+                "selection_policy": "agent-declared final artifact",
+                "selection_policy_id": "agent-declared",
+                "harness_selected_among_candidates": False,
                 "development_score_steps": best.evaluation.score_steps,
                 "selection_uses_held_out": False,
                 "artifact_sha256": artifact.sha256,
@@ -499,6 +498,7 @@ class OptimizerDesignBenchmarkAdapter:
             metrics={
                 "primary_metric": "held_out_common_significant_step",
                 "development_score_steps": best.evaluation.score_steps,
+                "selection_policy": "agent-declared",
                 "held_out_score_steps": [record.score_steps for record in final_records],
                 "held_out_val_loss": [record.val_loss for record in final_records],
                 "held_out_common_significant_step": score,

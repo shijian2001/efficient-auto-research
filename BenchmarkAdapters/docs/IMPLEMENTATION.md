@@ -21,11 +21,30 @@
 4. host-owned LLM relay Unix socket。
 
 它不会得到 protocol/split 文件、89-task dataset、test ID、test evaluator、Harbor
-credential 或主仓库。Supervisor 在 outer loop 结束后停止 dev broker，按 dev 分选择并
-replay allowlisted revision，然后在写入 one-shot gate 后运行一次 53-task test。
+credential 或主仓库。Supervisor 在 outer loop 结束后停止 dev broker，replay **Agent 自己
+声明的** allowlisted revision，然后在写入 one-shot gate 后运行一次 53-task test。
 
 这只是保证 36-dev 搜索与 53-test 最终评分不混用的最小公平边界，不包含针对恶意 Agent
 的额外防作弊系统、sealed candidate worker 或全局消费账本。
+
+## Final Artifact Selection Policy
+
+「最终交哪个候选」是 Agent 能力的一部分，因此 Terminal AO、Autoresearch Architecture
+Design 和 Optimizer Design 三个 benchmark 对**每一个** Agent 使用同一条规则：
+
+- Agent 自选。harness 不再从所有 dev 评估过的候选里按 dev 分代选最好的
+  （`broker.best` 不再参与最终选择，只保留给搜索期反馈用）。
+- 统一接口是 declaration：AR/OD 走 broker 的 `declare-final` 操作
+  （`dev_client.declare_current`），AO 走 `CandidateDevBroker.declare_current()`。
+- 没有显式声明的 Agent（CLI 型等），run 结束时 workspace 里留下的当前状态即为其提交，
+  由 host 原样评估并声明；host 绝不改选别的候选。
+- Fail-closed：完全没有可声明产物（崩溃、超时、workspace 为空）的 run 记为失败，
+  保留在分母里，不回退到 harness 代选。
+- 每个 run 在 `selection.json` 记 `selection_policy_id`（当前恒为 `agent-declared`）、
+  `harness_selected_among_candidates: false` 和 `selection_uses_test/held_out: false`；
+  三个 aggregate 会 replay 并校验这些字段，并在 scorecard 上给出
+  `selection_policy_by_agent` 与 `uniform_selection_policy_valid` 两列，
+  这样将来若某个 Agent 走了不同路径可以被看见而不是静默。
 
 ## Scoring
 
@@ -33,6 +52,10 @@ replay allowlisted revision，然后在写入 one-shot gate 后运行一次 53-t
   只做同题比较，不跨题平均。
 - Terminal AO：每 seed 固定 53 分母；缺失/error 计零；三 seed 报 mean、sample
   standard deviation、SEM 和 95% CI。
+- 95% CI 用 Student-t 临界值（`formal_contract.student_t_two_sided_critical_value`），
+  自由度按实际 `outer_repetitions - 1` 计算，不是硬编码的正态分位数。n=3 时
+  t(0.975, df=2)=4.3027；旧代码用 z=1.96，把区间宽度低估约 2.2 倍。summary 里
+  额外记录 `ci95_method`、`ci95_degrees_of_freedom`、`ci95_critical_value` 以便审计。
 - `scorecard` 将两类分数分栏，`composite_score` 固定为 `null`。
 
 ## Validation State

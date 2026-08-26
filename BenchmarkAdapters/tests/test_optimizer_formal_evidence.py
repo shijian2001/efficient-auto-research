@@ -214,12 +214,28 @@ def _write_outer_run(
         metrics={
             "primary_metric": "held_out_common_significant_step",
             "development_score_steps": 75,
+            "selection_policy": "agent-declared",
         },
         artifact_path=str(artifact.resolve()),
         artifact_sha256=artifact_digest,
         wall_clock_seconds=1.0,
     )
     result.write(run_dir / "result.json")
+    (run_dir / "selection.json").write_text(
+        json.dumps(
+            {
+                "declared_revision_id": "candidate-0001",
+                "selected_revision_id": "candidate-0001",
+                "selection_policy": "agent-declared final artifact",
+                "selection_policy_id": "agent-declared",
+                "harness_selected_among_candidates": False,
+                "development_score_steps": 75,
+                "selection_uses_held_out": False,
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
     return run_dir
 
 

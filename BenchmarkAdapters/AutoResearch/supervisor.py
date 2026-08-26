@@ -22,7 +22,7 @@ from .revisions import TrainRevisionStore
 from .search import SearchContext, SearchOutcome, SearchRunner
 from .seed_injection import SeedPolicy
 from ..task_specs import task_spec_digest
-from ..thin_registry import backend_identity, selected_variant
+from ..thin_registry import backend_identity
 
 
 def _git_identity(path: Path) -> tuple[str, bool]:
@@ -404,18 +404,13 @@ def _run_autoresearch_once(
         )
         result.write(output_dir / "result.json")
         return result
-    canonical_arbor = (
-        agent == "arbor"
-        and selected_variant(agent, "autoresearch-architecture", agent_variant) is None
-    )
     declaration = search_outcome.declared_revision_id or broker.declared_revision_id
     if declaration is not None and broker.declared_revision_id is None:
         broker.declare_final(declaration)
     native_matches = search_outcome.native_component == backend_identity(
         agent, "autoresearch-architecture", agent_variant
     )
-    selected = broker.scored(declaration) if declaration is not None else None
-    best = selected if canonical_arbor else broker.best
+    best = broker.scored(declaration) if declaration is not None else None
     failure_reason = None
     if not native_matches:
         failure_reason = "native search component differs from the registered Agent backend"
@@ -424,7 +419,7 @@ def _run_autoresearch_once(
     elif declaration is None:
         failure_reason = "native search did not declare a replayable final revision"
     elif best is None:
-        failure_reason = "native search produced no valid dev-scored revision"
+        failure_reason = "Agent-declared final revision has no development evaluation record"
     elif time.monotonic() > started + run_budget and not search_outcome.timed_out:
         failure_reason = "native search exceeded the registered outer budget"
     if failure_reason is not None:
@@ -455,11 +450,9 @@ def _run_autoresearch_once(
         {
             "declared_revision_id": declaration,
             "selected_revision_id": selected.revision.revision_id,
-            "selection_policy": (
-                "Agent-owned final trunk revision"
-                if canonical_arbor
-                else "minimum valid development val_bpb"
-            ),
+            "selection_policy": "agent-declared final artifact",
+            "selection_policy_id": "agent-declared",
+            "harness_selected_among_candidates": False,
             "selection_uses_held_out": False,
             "dev_val_bpb": selected.evaluation.val_bpb,
             "train_sha256": selected.revision.train_sha256,
@@ -512,6 +505,7 @@ def _run_autoresearch_once(
         "native_component": search_outcome.native_component,
         "declared_revision_id": declaration,
         "selected_revision_id": selected.revision.revision_id,
+        "selection_policy": "agent-declared",
         "candidate_gpu_seconds": sum(item.evaluation.wall_clock_seconds for item in broker.calls),
         "time_to_best_seconds": selected.completed_elapsed_seconds,
         "candidate_to_best": selected.evaluation_sequence,

@@ -225,12 +225,29 @@ def _write_outer_run(
         status=RunStatus.COMPLETED,
         score_valid=True,
         score=evaluation.pass_rate,
-        metrics={"claimed_pass_rate": evaluation.pass_rate},
+        metrics={
+            "claimed_pass_rate": evaluation.pass_rate,
+            "selection_policy": "agent-declared",
+        },
         artifact_path=str(artifact.path.resolve()),
         artifact_sha256=artifact.sha256,
         wall_clock_seconds=1.0,
     )
     result.write(run_dir / "result.json")
+    (run_dir / "selection.json").write_text(
+        json.dumps(
+            {
+                "revision_id": "candidate-0001",
+                "harness_digest": candidate_digest,
+                "selection_policy": "agent-declared final artifact",
+                "selection_policy_id": "agent-declared",
+                "harness_selected_among_candidates": False,
+                "selection_uses_test": False,
+            },
+            sort_keys=True,
+        ),
+        encoding="utf-8",
+    )
     return run_dir
 
 
@@ -410,27 +427,41 @@ def _ear_launcher_module():
     return ear
 
 
-def _prepare_ear_exception_test(monkeypatch: pytest.MonkeyPatch) -> object:
+def _prepare_ear_exception_test(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> tuple[object, object]:
+    """Arm the EAR launcher for a single failing step.
+
+    The launcher itself no longer owns a search loop — it delegates to EAR's
+    native repository mode — so the failure seams live in EAR's own
+    `agent.engine.repo_domain`. Both git and the embedder are stubbed so the
+    test needs neither a real repository nor the sentence-encoder download.
+    """
     ear = _ear_launcher_module()
+    from agent.engine import repo_domain
+
     monkeypatch.setenv(
         "TERMINAL_OUTER_MODEL_PARAMETERS",
         json.dumps({"temperature": 0.0}),
     )
-    monkeypatch.setattr(ear, "commit_for_head", lambda _workspace: "a" * 40)
-    monkeypatch.setattr(ear, "select_parent", lambda *_args, **_kwargs: None)
-    monkeypatch.setattr(ear, "git", lambda *_args, **_kwargs: None)
-    return ear
+
+    class _Completed:
+        stdout = "a" * 40
+
+    monkeypatch.setattr(repo_domain, "git", lambda *_args, **_kwargs: _Completed())
+    monkeypatch.setattr(repo_domain, "embed_diff", lambda _diff, plan="": None)
+    return ear, repo_domain
 
 
 def test_terminal_ear_proposal_failure_preserves_original_exception(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    ear = _prepare_ear_exception_test(monkeypatch)
+    ear, repo_domain = _prepare_ear_exception_test(tmp_path, monkeypatch)
 
     def fail_proposal(*_args, **_kwargs):
         raise RuntimeError("synthetic proposal failure")
 
-    monkeypatch.setattr(ear, "llm_query", fail_proposal)
+    monkeypatch.setattr(repo_domain, "llm_query", fail_proposal)
     payload = ear.run_native_loop(
         workspace=tmp_path,
         output_dir=tmp_path / "proposal-output",
@@ -448,17 +479,14 @@ def test_terminal_ear_proposal_failure_preserves_original_exception(
 def test_terminal_ear_evaluation_failure_preserves_original_exception(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    ear = _prepare_ear_exception_test(monkeypatch)
-    monkeypatch.setattr(
-        ear,
-        "llm_query",
-        lambda *_args, **_kwargs: ("synthetic response", 1, 2),
+    ear, repo_domain = _prepare_ear_exception_test(tmp_path, monkeypatch)
+    diff_text = (
+        "--- a/terminus_2.py\n+++ b/terminus_2.py\n@@ -1 +1 @@\n-old\n+new\n"
     )
-    monkeypatch.setattr(ear, "extract_unified_diff", lambda _response: "synthetic diff")
     monkeypatch.setattr(
-        ear,
-        "apply_candidate_diff",
-        lambda _workspace, _parent, _diff: "b" * 40,
+        repo_domain,
+        "llm_query",
+        lambda *_args, **_kwargs: (f"```diff\n{diff_text}```", 1, 2),
     )
 
     def fail_evaluation(*_args, **_kwargs):

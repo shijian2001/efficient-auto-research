@@ -200,12 +200,26 @@ def _write_outer_run(
         status=RunStatus.COMPLETED,
         score_valid=True,
         score=score,
-        metrics={"claimed_precomputed_mean": score},
+        metrics={
+            "claimed_precomputed_mean": score,
+            "selection_policy": "agent-declared",
+        },
         artifact_path=str(artifact.resolve()),
         artifact_sha256=artifact_digest,
         wall_clock_seconds=1.0,
     )
     result.write(run_dir / "result.json")
+    write_json_exclusive(
+        run_dir / "selection.json",
+        {
+            "declared_revision_id": "candidate-0001",
+            "selected_revision_id": "candidate-0001",
+            "selection_policy": "agent-declared final artifact",
+            "selection_policy_id": "agent-declared",
+            "harness_selected_among_candidates": False,
+            "selection_uses_held_out": False,
+        },
+    )
     return run_dir
 
 

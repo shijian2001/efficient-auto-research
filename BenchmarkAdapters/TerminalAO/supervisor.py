@@ -32,7 +32,6 @@ from .protocol import TerminalAOProtocol
 from .revisions import RevisionStore
 from .sealed import SealedTestGate
 from .split import FrozenSplit
-from ..thin_registry import selected_variant
 
 
 def _git_identity(path: Path) -> tuple[str, bool]:
@@ -393,26 +392,13 @@ def _run_terminal_ao_once(
                 else:
                     launcher_error = str(exc)
             try:
-                if (
-                    agent == "arbor"
-                    and selected_variant(agent, "terminal-bench-ao", agent_variant)
-                    is None
-                ):
-                    broker.declare_current()
-                else:
-                    broker.evaluate_current()
+                broker.declare_current()
             except AdapterError as exc:
                 launcher_error = f"{launcher_error}; {exc}" if launcher_error else str(exc)
-    canonical_arbor = (
-        agent == "arbor"
-        and selected_variant(agent, "terminal-bench-ao", agent_variant) is None
-    )
-    best = broker.declared if canonical_arbor else broker.best
+    best = broker.declared
     if best is None:
         raise AdapterError(
-            "Terminal AO search produced no Agent-declared valid revision"
-            if canonical_arbor
-            else "Terminal AO search produced no valid dev-scored revision"
+            "Terminal AO search produced no Agent-declared final harness"
         )
     final_harness = store.replay(best.revision.revision_id, output_dir / "final-harness")
     harness_digest = tree_digest(final_harness)
@@ -428,11 +414,9 @@ def _run_terminal_ao_once(
             "launcher_return_code": launcher_result.return_code if launcher_result else None,
             "launcher_error": launcher_error,
             "launcher_timed_out": launcher_timed_out,
-            "selection_policy": (
-                "Agent-owned final trunk revision"
-                if canonical_arbor
-                else "maximum valid development pass rate"
-            ),
+            "selection_policy": "agent-declared final artifact",
+            "selection_policy_id": "agent-declared",
+            "harness_selected_among_candidates": False,
             "selection_uses_test": False,
         },
     )
@@ -462,6 +446,7 @@ def _run_terminal_ao_once(
                 "primary_metric": "held_out_53_pass_rate",
                 "held_out_test_consumed": False,
                 "dev_selected_pass_rate": best.evaluation.pass_rate,
+                "selection_policy": "agent-declared",
                 "direct_89_score_used": False,
             },
             artifact_path=None,
@@ -518,6 +503,7 @@ def _run_terminal_ao_once(
             "errors": test_record.errors,
             "missing_rewards": test_record.missing_rewards,
             "dev_selected_pass_rate": best.evaluation.pass_rate,
+            "selection_policy": "agent-declared",
             "launcher_timed_out_at_budget": launcher_timed_out,
             "direct_89_score_used": False,
         },

@@ -20,9 +20,8 @@ from ...LLMRelay import (
 )
 from ...process import redact_process_output, redact_sensitive_payload
 from ...registry import AGENTS
-from ...thin_registry import selected_variant
 from ..broker import DevBrokerServer
-from ..dev_client import declare_current
+from ..dev_client import declare_current, evaluate_current
 from ..search import SearchContext, SearchOutcome
 from .common import NativeLaunchRequest, build_native_command
 from .sandbox import sandbox_native_command
@@ -357,33 +356,24 @@ class NativeCommandSearchRunner:
             redacted_stdout = result.stdout.replace(server.token, "<capability-token>")
             with (context.output_dir / "native-agent.log").open("x", encoding="utf-8") as handle:
                 handle.write(redacted_stdout)
-            canonical_arbor = (
-                context.agent == "arbor"
-                and selected_variant(
-                    context.agent,
-                    "autoresearch-architecture",
-                    context.agent_variant,
-                )
-                is None
-            )
-            if (
-                canonical_arbor
-                and request.state_path.is_file()
-            ):
-                request.state_path.unlink()
-            if canonical_arbor:
-                evaluate_current(
-                    str(socket_path),
-                    server.token,
-                    contract.artifact_path(workspace),
-                    request.state_path,
-                )
-                declare_current(str(socket_path), server.token, request.state_path)
-            elif (
-                context.broker.declared_revision_id is None
-                and request.state_path.is_file()
-            ):
-                declare_current(str(socket_path), server.token, request.state_path)
+            declaration_error: str | None = None
+            if context.broker.declared_revision_id is None:
+                # Uniform final-artifact protocol, identical for every Agent: an Agent
+                # that did not declare explicitly submits whatever it left in the
+                # workspace. The host evaluates that state and declares it verbatim; it
+                # never picks a different candidate on the Agent's behalf.
+                if request.state_path.is_file():
+                    request.state_path.unlink()
+                try:
+                    evaluate_current(
+                        str(socket_path),
+                        server.token,
+                        contract.artifact_path(workspace),
+                        request.state_path,
+                    )
+                    declare_current(str(socket_path), server.token, request.state_path)
+                except (OSError, RuntimeError) as exc:
+                    declaration_error = f"{type(exc).__name__}: {exc}"
         native_result_path = request.output_dir / "native-result.json"
         native_result = None
         if native_result_path.is_file():
@@ -423,9 +413,13 @@ class NativeCommandSearchRunner:
             completed=result.return_code in {0, 124} and context.broker.declared_revision_id is not None,
             timed_out=timed_out,
             failure_reason=(
-                None
-                if result.return_code in {0, 124}
-                else f"native Agent command exited with code {result.return_code}"
+                f"native Agent command exited with code {result.return_code}"
+                if result.return_code not in {0, 124}
+                else (
+                    f"Agent declared no final artifact: {declaration_error}"
+                    if declaration_error
+                    else None
+                )
             ),
             metadata=payload,
         )
