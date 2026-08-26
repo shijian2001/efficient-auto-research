@@ -41,6 +41,11 @@ class AgentSpec:
         return self.terminal_direct_smoke_status
 
     @property
+    def terminal_ao_supported(self) -> bool:
+        """False when no non-invasive Harness Engineering AO adaptation exists."""
+        return not self.terminal_ao_backend.startswith("unsupported:")
+
+    @property
     def execution_path(self) -> Path:
         return self.runtime_path or self.install_path
 
@@ -66,9 +71,9 @@ AGENTS = {
         "native-docker",
         "native-mlevolve-uct",
         "optimizer-design-mlevolve-uct",
-        "native-mlevolve-repository",
+        "unsupported:Kaggle-shaped search engine; candidate success is decided by submission.csv production",
         "blocked:agent_adapters.mlevolve:MLEvolveTerminalAgent",
-        "non-comparable direct solver blocked; formal AO uses native MLEvolve UCT repository backend",
+        "non-comparable direct solver blocked; MLEvolve does not participate in Terminal AO",
     ),
     "arbor": AgentSpec(
         "arbor",
@@ -115,9 +120,9 @@ AGENTS = {
         "native-mle",
         "unsupported:official ML-Master workflow is MLE-specific",
         "unsupported:official ML-Master workflow is MLE-specific",
-        "unsupported:official ML-Master workflow is MLE-specific",
+        "unsupported:Kaggle-shaped playground workspace; best-solution promotion is decided by submission.csv artifacts",
         "blocked:agent_adapters.ml_master_2:MLMaster2Agent",
-        "native ML-Master 2 direct solver blocked; formal AO uses native EvoMaster repository workflow",
+        "native ML-Master 2 direct solver blocked; ML-Master 2.0 does not participate in Terminal AO",
     ),
     "ai-scientist": AgentSpec(
         "ai-scientist",
@@ -135,4 +140,24 @@ AGENTS = {
 }
 
 
-__all__ = ["AGENTS", "AgentSpec", "ROOT"]
+TERMINAL_AO_UNSUPPORTED_REASONS = {
+    "mlevolve": (
+        "MLEvolve's search engine decides candidate success by whether a node produced "
+        "submission.csv (baselines/MLEvolve/engine/execution.py:26-30) and manages its best "
+        "solution by that same path (baselines/MLEvolve/engine/solution_manager.py:71,169; "
+        "baselines/MLEvolve/agents/debug_agent.py:78). Terminal AO candidates are git diffs "
+        "scored by dev pass rate and never produce a submission.csv, so no non-invasive "
+        "adaptation exists. This is a task-shape mismatch, not an MLEvolve capability limit."
+    ),
+    "ml-master-2": (
+        "ML-Master 2.0's playground hard-codes a Kaggle-shaped workspace "
+        "(best_submission/best_solution/submission/working) and promotes its best solution by "
+        "copying submission_<uid>.csv "
+        "(baselines/EvoMaster/playground/ml_master_2/core/playground.py:107-113,212,300). "
+        "Terminal AO has no such artifact, so no non-invasive adaptation exists. This is a "
+        "task-shape mismatch, not an ML-Master 2.0 capability limit."
+    ),
+}
+
+
+__all__ = ["AGENTS", "TERMINAL_AO_UNSUPPORTED_REASONS", "AgentSpec", "ROOT"]

@@ -32,12 +32,41 @@ re-export。
 | Agent | MLE 原生路径 | Terminal AO 原生路径 | Optimizer Design 小 Adapter |
 |---|---|---|---|
 | EAR | EAR Docker graph search | EAR KTS/Thompson repository backend | EAR KTS |
-| MLEvolve | MLEvolve Docker search/fusion | `AgentSearch`/`SearchNode` UCT repository backend | MLEvolve UCT |
+| MLEvolve | MLEvolve Docker search/fusion | **不适用**（任务形状不匹配，见下） | MLEvolve UCT |
 | Arbor | 原版 unsupported；显式 `arbor-benchmark-patched` | 官方 `arbor run` + plugin evaluator | 官方 `arbor run` + plugin evaluator |
 | Codex | `codex exec` public-only workspace | native `codex exec` repository loop | Codex CLI |
 | Claude Code | `claude --print` public-only workspace | native `claude --print` repository loop | Claude CLI |
-| ML-Master 2.0 | 官方 `run.py --agent ml_master_2` 完整 workflow | 原版 unsupported；显式 staged variant | 原版 unsupported；显式 staged variant |
+| ML-Master 2.0 | 官方 `run.py --agent ml_master_2` 完整 workflow | **不适用**（任务形状不匹配，见下） | 原版 unsupported；显式 staged variant |
 | AiScientist | 官方 `aisci mle run` | 原版 unsupported；显式 terminal variant | 原版 unsupported；显式 architecture variant |
+
+### Terminal AO 的适用边界：5 个 Agent
+
+Terminal AO 的比较集合是 **EAR / Arbor / Codex / Claude Code / AiScientist** 五家，
+不是全部七家。唯一权威来源是 `thin_registry.terminal_ao_agents()`；所有 AO 分母、
+dispatch 表和 readiness 遍历都必须引用它，不得各自硬编码七家。
+
+MLEvolve 和 ML-Master 2.0 被排除，原因是**任务形状不匹配，而不是 Agent 能力不足**。
+两者作为 Kaggle 形态的 ML 工程 Agent 都是完整可用的，在 MLE-Bench Lite 上均原生运行
+22 题、不受本次改动影响：
+
+- **MLEvolve**：其搜索引擎用「候选节点是否产出 `submission.csv`」判定成功
+  （`baselines/MLEvolve/engine/execution.py:26-30`），并按同一路径管理最优解
+  （`baselines/MLEvolve/engine/solution_manager.py:71,169`；
+  `baselines/MLEvolve/agents/debug_agent.py:78`）。
+- **ML-Master 2.0**：其 playground 写死 Kaggle 形状的 workspace
+  （`best_submission`/`best_solution`/`submission`/`working`），并通过复制
+  `submission_<uid>.csv` 晋升最优解
+  （`baselines/EvoMaster/playground/ml_master_2/core/playground.py:107-113,212,300`）。
+
+而 Harness Engineering AO 的候选是冻结 `terminus-2` 仓库的 git revision、由聚合 dev
+pass rate 评分，永远不产生这类 csv 产物。要让它们参与，就必须重写各自引擎的核心判定
+逻辑——那样跑出的分数衡量的是我们的改写，而不是该 Agent。
+
+先前 `TerminalAO/launchers/{mlevolve,ml_master_2}.py` 曾用 benchmark 自己写的外层循环、
+prompt、diff 提取、评估与选优，包住上游的一个函数或一段 prompt 序列。把那种结果记为该
+Agent 的 AO 分数，等于把 harness 的行为归因给 Agent。因此这两个入口改为 fail-closed 存根，
+在 `TerminalAOAdapter.__init__`、`build_native_ao_command` 和 launcher 三层各自抛
+`UnsupportedAdapterError`，而不是保留一个带脚注的数字。
 
 原版 ID 与显式变体分离：`arbor-benchmark-patched`、
 `ai-scientist-terminal-variant`、`ai-scientist-architecture-variant`、
@@ -54,6 +83,9 @@ re-export。
 - AO dev evaluation 在 disposable copy 上运行；revision 只允许修改冻结 allowlist；
   test endpoint 在搜索期不存在。
 - MLE 和 Terminal AO 分栏统计，不生成未经预注册的混合总分。
+- Terminal AO scorecard 的 `complete_comparison_set_valid` 以 5 家比较集合为分母，
+  并在 `comparison_set` / `excluded_agents` 中显式记录集合与排除理由；
+  排除的 Agent 不计入分母，也不会因凑不齐七家而withhold 排名。
 - 五个 Benchmark 分别排名；同一 scorecard 只接受相同 model-config digest、硬件指纹和
   Adapter commit。N=1 标记 `single_run` 且标准差为空；只有 N=3 才标记 `avg_at_3`。
 - 这些边界只服务于公平横向比较；本实现不增加针对恶意 Agent 的额外防作弊系统。

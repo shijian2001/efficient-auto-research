@@ -21,10 +21,14 @@ from .OptimizerDesign.protocol import (
 )
 from .readiness import ReadinessLevel
 from .protocol import sha256_file
-from .registry import AGENTS, ROOT
+from .registry import AGENTS, ROOT, TERMINAL_AO_UNSUPPORTED_REASONS
 from .TerminalAO.protocol import TerminalAOProtocol
 from .TerminalAO.split import FrozenSplit
-from .thin_registry import THIN_CLASSIFICATIONS, UPSTREAM_REVISIONS
+from .thin_registry import (
+    THIN_CLASSIFICATIONS,
+    UPSTREAM_REVISIONS,
+    terminal_ao_agents,
+)
 
 
 DEFAULT_AO_PROTOCOL = ROOT / "terminal-bench-2/ao_protocol/protocol.json"
@@ -491,6 +495,23 @@ def collect_preflight(
                 "terminal-ao": "terminal-bench-ao",
             }[mode]
             classification = THIN_CLASSIFICATIONS.get(key, {}).get(benchmark_id)
+            if mode == "terminal-ao" and key not in terminal_ao_agents():
+                # Excluded from the AO comparison set by architecture, not by
+                # readiness. See registry.TERMINAL_AO_UNSUPPORTED_REASONS.
+                modes[mode] = {
+                    "level": ReadinessLevel.NOT_READY.name.lower(),
+                    "level_value": int(ReadinessLevel.NOT_READY),
+                    "detail": (
+                        "not applicable: this Agent's architecture cannot express "
+                        "Harness Engineering AO candidates without rewriting its core"
+                    ),
+                    "evidence_path": None,
+                    "thin_adapter_classification": "not-applicable",
+                    "reviewed_original_source": None,
+                    "formal_launch_allowed": False,
+                    "unsupported_reason": TERMINAL_AO_UNSUPPORTED_REASONS[key],
+                }
+                continue
             reviewed_original_source = (
                 key not in UPSTREAM_REVISIONS
                 or (

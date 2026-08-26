@@ -62,7 +62,8 @@ from .OptimizerDesign.runtime import freeze_agent_runtime_manifest_candidate
 from .preflight import collect_preflight
 from .process import DEFAULT_PROXY, relay_client_env, run_command
 from .protocol import FormalProtocol, write_json_exclusive
-from .registry import AGENTS, ROOT
+from .registry import AGENTS, ROOT, TERMINAL_AO_UNSUPPORTED_REASONS
+from .thin_registry import terminal_ao_agents
 from .security import is_sensitive_name, redact_url
 from .status import collect_status
 from .TerminalBench.adapter import HarborTerminalRequest
@@ -643,7 +644,8 @@ def _formal_tools_parsers(subparsers: argparse._SubParsersAction) -> None:
     )
     ao_aggregate.add_argument("--protocol", type=Path, required=True)
     ao_aggregate.add_argument("--campaign-dir", type=Path, required=True)
-    ao_aggregate.add_argument("--agent", required=True)
+    # Only the AO comparison set; excluded Agents have no AO results to aggregate.
+    ao_aggregate.add_argument("--agent", choices=terminal_ao_agents(), required=True)
     ao_aggregate.add_argument("--output", type=Path)
 
     terminal_card = subparsers.add_parser(
@@ -1151,7 +1153,6 @@ def _handle_formal_tool(args: argparse.Namespace) -> int | None:
             gpu_id=args.gpu_id,
             model_config=ModelTrackConfig.load(args.model_config, formal=True),
             agent_variant=args.agent_variant,
-            gpu_ids=tuple(args.gpu_id),
         )
         result = outcome.result if hasattr(outcome, "result") else outcome
         _print_or_write(result.to_dict())
@@ -1259,7 +1260,12 @@ def _handle_formal_tool(args: argparse.Namespace) -> int | None:
                     campaign_dir=args.ao_campaign_dir,
                     agent=agent,
                 )
+                for agent in terminal_ao_agents()
+            },
+            "terminal_ao_excluded_agents": {
+                agent: TERMINAL_AO_UNSUPPORTED_REASONS[agent]
                 for agent in AGENTS
+                if agent not in terminal_ao_agents()
             },
         }
         _print_or_write(payload, args.output)

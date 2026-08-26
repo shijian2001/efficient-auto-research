@@ -85,8 +85,10 @@ AGENT_VARIANTS = {
         key="ml-master-autoresearch-variant",
         base_agent="ml-master-2",
         display_name="ML-Master benchmark-defined staged workflow variant",
+        # terminal-bench-ao is intentionally absent: ML-Master 2.0's Kaggle-shaped
+        # workspace cannot express Harness Engineering AO candidates. See
+        # registry.TERMINAL_AO_UNSUPPORTED_REASONS["ml-master-2"].
         benchmarks=(
-            "terminal-bench-ao",
             "autoresearch-architecture",
             "optimizer-design",
             "fml-bench",
@@ -128,12 +130,37 @@ VARIANT_BACKENDS = {
         "optimizer-design": "optimizer-design-ai-scientist-subagent",
     },
     "ml-master-autoresearch-variant": {
-        "terminal-bench-ao": "native-ml-master-2-repository",
         "autoresearch-architecture": "native-ml-master-2-workflow",
         "optimizer-design": "optimizer-design-ml-master-2-workflow",
         "fml-bench": "native-ml-master-2-workflow",
     },
 }
+
+
+def terminal_ao_agents() -> tuple[str, ...]:
+    """The Agent set that Terminal-Bench AO can score, in registry order.
+
+    An Agent participates when its original backend fits the Harness Engineering AO
+    task shape, or when a registered variant covers ``terminal-bench-ao``. MLEvolve and
+    ML-Master 2.0 satisfy neither: both decide candidate success from a produced
+    ``submission.csv`` deep inside their engines, while AO candidates are git revisions
+    of a frozen ``terminus-2`` harness scored by dev pass rate. Adapting them would mean
+    rewriting that core, so they are excluded from the AO comparison set. Both stay fully
+    native on MLE-Bench Lite; see ``registry.TERMINAL_AO_UNSUPPORTED_REASONS``.
+
+    Every Terminal AO denominator, dispatch table, and readiness sweep must use this set
+    rather than the whole ``AGENTS`` registry, otherwise a complete comparison of the
+    supported Agents is wrongly reported as incomplete.
+    """
+    return tuple(
+        agent
+        for agent, spec in AGENTS.items()
+        if not spec.terminal_ao_backend.startswith("unsupported:")
+        or any(
+            variant.base_agent == agent and "terminal-bench-ao" in variant.benchmarks
+            for variant in AGENT_VARIANTS.values()
+        )
+    )
 
 
 def variant_name(agent_variant: str | None) -> str | None:
@@ -201,6 +228,12 @@ def backend_identity(agent: str, benchmark_id: str, agent_variant: str | None) -
     if variant is not None:
         return VARIANT_BACKENDS[variant.key][benchmark_id]
     require_thin_support(agent, benchmark_id, agent_variant)
+    if benchmark_id == "terminal-bench-ao" and agent not in terminal_ao_agents():
+        # Never hand back an "unsupported:" marker as if it were a backend identity;
+        # it would be recorded in a manifest as though a run had a backend.
+        raise UnsupportedAdapterError(
+            f"{agent} does not participate in terminal-bench-ao"
+        )
     spec = AGENTS[agent]
     return {
         "mle-bench-lite": spec.mle_backend,
@@ -268,5 +301,6 @@ __all__ = [
     "require_clean_upstream_source",
     "require_thin_support",
     "selected_variant",
+    "terminal_ao_agents",
     "variant_name",
 ]

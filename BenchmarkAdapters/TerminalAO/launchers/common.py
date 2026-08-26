@@ -10,10 +10,14 @@ from pathlib import Path
 from typing import Mapping
 
 from ...arbor_thin import write_arbor_config
-from ...contracts import AdapterError, CommandSpec, require_file
-from ...registry import AGENTS, ROOT
+from ...contracts import AdapterError, CommandSpec, UnsupportedAdapterError, require_file
+from ...registry import AGENTS, ROOT, TERMINAL_AO_UNSUPPORTED_REASONS
 from ...task_specs import task_spec_text
-from ...thin_registry import require_clean_upstream_source, require_thin_support
+from ...thin_registry import (
+    require_clean_upstream_source,
+    require_thin_support,
+    terminal_ao_agents,
+)
 
 
 @dataclass(frozen=True)
@@ -182,8 +186,6 @@ def _arbor(
 def _python_native(request: NativeAOLaunchRequest, module: str, python: Path, label: str) -> CommandSpec:
     source_roots = {
         "ear": AGENTS["ear"].install_path,
-        "mlevolve": AGENTS["mlevolve"].install_path,
-        "ml-master-2": AGENTS["ml-master-2"].install_path,
         "ai-scientist": AGENTS["ai-scientist"].install_path / "src",
     }
     python_path = f"{ROOT}:{source_roots[request.agent]}"
@@ -230,6 +232,11 @@ def _python_native(request: NativeAOLaunchRequest, module: str, python: Path, la
 def build_native_ao_command(request: NativeAOLaunchRequest) -> CommandSpec:
     if request.agent not in AGENTS:
         raise AdapterError(f"unknown baseline agent: {request.agent}")
+    if request.agent not in terminal_ao_agents():
+        raise UnsupportedAdapterError(
+            f"{request.agent} does not participate in Terminal-Bench AO: "
+            f"{TERMINAL_AO_UNSUPPORTED_REASONS[request.agent]}"
+        )
     variant = require_thin_support(
         request.agent, "terminal-bench-ao", request.agent_variant
     )
@@ -256,32 +263,19 @@ def build_native_ao_command(request: NativeAOLaunchRequest) -> CommandSpec:
             ROOT / "BenchmarkAdapters/environments/mle/ear/.venv/bin/python",
             "EAR native graph/Thompson Terminal AO loop",
         ),
-        "mlevolve": (
-            "BenchmarkAdapters.TerminalAO.launchers.mlevolve",
-            ROOT / "BenchmarkAdapters/environments/agents/mlevolve/.venv/bin/python",
-            "MLEvolve native search Terminal AO loop",
-        ),
-        "ml-master-2": (
-            "BenchmarkAdapters.TerminalAO.launchers.ml_master_2",
-            ROOT / "baselines/EvoMaster/.venv/bin/python",
-            "ML-Master 2 native EvoMaster Terminal AO loop",
-        ),
         "ai-scientist": (
             "BenchmarkAdapters.TerminalAO.launchers.ai_scientist",
             ROOT / "baselines/AiScientist/.venv/bin/python",
             "AiScientist native subagent Terminal AO loop",
         ),
     }
-    if request.agent in {"ml-master-2", "ai-scientist"} and variant is None:
+    if request.agent == "ai-scientist" and variant is None:
         raise AdapterError(f"unreachable original {request.agent} Terminal AO dispatch")
     module, python, label = modules[request.agent]
     if variant is not None:
         label = {
             "ai-scientist-terminal-variant": (
                 "AiScientist TerminalTaskSubagent variant"
-            ),
-            "ml-master-autoresearch-variant": (
-                "ML-Master benchmark-defined staged workflow variant"
             ),
         }.get(variant.key, label)
     return _python_native(request, module, python, label)

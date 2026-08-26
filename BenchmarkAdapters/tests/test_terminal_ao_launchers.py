@@ -11,6 +11,7 @@ import pytest
 
 from BenchmarkAdapters.contracts import CommandSpec
 from BenchmarkAdapters.registry import AGENTS, ROOT
+from BenchmarkAdapters.thin_registry import terminal_ao_agents
 from BenchmarkAdapters.TerminalAO.baseline import BaselineManifest, tree_digest
 from BenchmarkAdapters.TerminalAO.aggregate import aggregate_terminal_ao
 from BenchmarkAdapters.TerminalAO.dev_client import request_evaluation
@@ -92,7 +93,7 @@ def test_dev_socket_exposes_only_structured_dev_feedback(tmp_path: Path, monkeyp
     assert len(broker.calls) == 1
 
 
-@pytest.mark.parametrize("agent", tuple(AGENTS))
+@pytest.mark.parametrize("agent", terminal_ao_agents())
 def test_every_ao_launcher_dispatches_to_a_distinct_native_loop(
     agent: str,
     tmp_path: Path,
@@ -107,22 +108,23 @@ def test_every_ao_launcher_dispatches_to_a_distinct_native_loop(
         model="gpt-5.5",
         seed=0,
         timeout_seconds=172800,
+        model_parameters={},
+        request_timeout_seconds=60,
+        retry_policy={},
     )
     command = build_native_ao_command(request)
     text = " ".join(command.argv)
     assert command.label == {
         "ear": "EAR native graph/Thompson Terminal AO loop",
-        "mlevolve": "MLEvolve native search Terminal AO loop",
         "arbor": "Arbor native coordinator Terminal AO loop",
         "codex": "Codex native Terminal AO loop",
         "claude-code": "Claude Code native Terminal AO loop",
-        "ml-master-2": "ML-Master 2 native EvoMaster Terminal AO loop",
         "ai-scientist": "AiScientist native subagent Terminal AO loop",
     }[agent]
     assert "dev.sock" in text
     assert "held-out-53" not in text
     assert "split.json" not in text
-    if agent in {"ear", "mlevolve", "ml-master-2", "ai-scientist"}:
+    if agent in {"ear", "ai-scientist"}:
         assert f"BenchmarkAdapters.TerminalAO.launchers.{agent.replace('-', '_')}" in text
 
 
@@ -143,7 +145,7 @@ def test_ear_is_bound_to_clean_g3_worktree() -> None:
     ).stdout.strip() == "7cd9ed5c1db0ff5250faad373e5d5a67209e604c"
 
 
-def test_supervisor_selects_dev_best_then_consumes_one_sealed_test(
+def test_supervisor_scores_agent_declared_harness_then_consumes_one_sealed_test(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -184,13 +186,16 @@ def test_supervisor_selects_dev_best_then_consumes_one_sealed_test(
     selection = json.loads((output / "selection.json").read_text())
     assert selection["dev_evaluations"] == 2
     assert selection["selection_uses_test"] is False
+    assert selection["selection_policy_id"] == "agent-declared"
+    assert selection["harness_selected_among_candidates"] is False
+    assert result.metrics["selection_policy"] == "agent-declared"
     assert result.score == pytest.approx(2 / 53)
     assert result.metrics["direct_89_score_used"] is False
     assert (output / "sealed/test-consumed.json").is_file()
     assert (output / "artifacts/final/harness.tar").is_file()
 
 
-def test_supervisor_timeout_closes_search_and_scores_dev_best(
+def test_supervisor_timeout_closes_search_and_scores_declared_harness(
     tmp_path: Path,
     monkeypatch,
 ) -> None:
@@ -398,18 +403,6 @@ def test_relay_token_log_is_summed_without_inventing_cost(tmp_path: Path) -> Non
             "agent.engine.thompson.select_parent",
         ),
         (
-            "mlevolve",
-            ROOT / "BenchmarkAdapters/environments/agents/mlevolve/.venv/bin/python",
-            "BenchmarkAdapters.TerminalAO.launchers.mlevolve",
-            "engine.node_selection.select_with_soft_switch",
-        ),
-        (
-            "ml-master-2",
-            ROOT / "baselines/EvoMaster/.venv/bin/python",
-            "BenchmarkAdapters.TerminalAO.launchers.ml_master_2",
-            "evomaster.agent.agent.BaseAgent.run",
-        ),
-        (
             "ai-scientist",
             ROOT / "baselines/AiScientist/.venv/bin/python",
             "BenchmarkAdapters.TerminalAO.launchers.ai_scientist",
@@ -425,8 +418,6 @@ def test_python_launchers_import_their_native_control_loop(
 ) -> None:
     source_root = {
         "ear": AGENTS[agent].install_path,
-        "mlevolve": AGENTS[agent].install_path,
-        "ml-master-2": AGENTS[agent].install_path,
         "ai-scientist": AGENTS[agent].install_path / "src",
     }[agent]
     source_file = ROOT / "BenchmarkAdapters/TerminalAO/launchers" / f"{module.rsplit('.', 1)[-1]}.py"
@@ -448,16 +439,6 @@ def test_python_launchers_import_their_native_control_loop(
     ("agent", "expected_python", "variant"),
     [
         ("ear", ROOT / "BenchmarkAdapters/environments/mle/ear/.venv/bin/python", "default"),
-        (
-            "mlevolve",
-            ROOT / "BenchmarkAdapters/environments/agents/mlevolve/.venv/bin/python",
-            "default",
-        ),
-        (
-            "ml-master-2",
-            ROOT / "baselines/EvoMaster/.venv/bin/python",
-            "ml-master-autoresearch-variant",
-        ),
         (
             "ai-scientist",
             ROOT / "baselines/AiScientist/.venv/bin/python",

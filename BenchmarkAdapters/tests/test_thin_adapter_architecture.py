@@ -123,7 +123,9 @@ class ThinAdapterArchitectureTests(unittest.TestCase):
             },
             "ml-master-2": {
                 "mle-bench-lite": "native-thin",
-                "terminal-bench-ao": "patched-variant",
+                # No variant covers Terminal AO: ML-Master 2.0's Kaggle-shaped
+                # workspace cannot express Harness Engineering AO candidates.
+                "terminal-bench-ao": "unsupported",
                 "autoresearch-architecture": "patched-variant",
                 "optimizer-design": "patched-variant",
                 "fml-bench": "patched-variant",
@@ -302,7 +304,7 @@ class ThinAdapterArchitectureTests(unittest.TestCase):
             "native-arbor-coordinator",
         )
 
-    def test_arbor_original_final_selection_is_agent_declared(self) -> None:
+    def test_every_agent_final_selection_is_agent_declared(self) -> None:
         autoresearch = _function_source(
             "BenchmarkAdapters/AutoResearch/supervisor.py",
             "_run_autoresearch_once",
@@ -313,14 +315,18 @@ class ThinAdapterArchitectureTests(unittest.TestCase):
         optimizer = _function_source(
             "BenchmarkAdapters/OptimizerDesign/adapter.py", "_run_attested"
         )
-        self.assertIn("selected if canonical_arbor else broker.best", autoresearch)
-        self.assertIn("broker.declared if canonical_arbor else broker.best", terminal)
         self.assertIn(
-            "broker.scored(declaration) if canonical_arbor and declaration else broker.best",
-            optimizer,
+            "broker.scored(declaration) if declaration is not None else None",
+            autoresearch,
         )
+        self.assertIn("best = broker.declared", terminal)
+        self.assertIn("broker.scored(declaration) if declaration else None", optimizer)
         for source in (autoresearch, terminal, optimizer):
-            self.assertIn("Agent-owned final trunk revision", source)
+            # The harness must never pick a candidate on the Agent's behalf, and
+            # no Agent may be special-cased out of declaring its own submission.
+            self.assertNotIn("broker.best", source)
+            self.assertNotIn("canonical_arbor", source)
+            self.assertIn('"selection_policy_id": "agent-declared"', source)
 
     def test_ai_scientist_original_uses_official_mle_entrypoint(self) -> None:
         source = _function_source(
@@ -407,7 +413,6 @@ class ThinAdapterArchitectureTests(unittest.TestCase):
     def test_ml_master_custom_stage_workflow_is_an_explicit_variant(self) -> None:
         sources = (
             _source("BenchmarkAdapters/AutoResearch/launchers/ml_master_2.py"),
-            _source("BenchmarkAdapters/TerminalAO/launchers/ml_master_2.py"),
             _source(
                 "BenchmarkAdapters/FMLBench/agents/ml_master_autoresearch_variant.py"
             ),
@@ -416,6 +421,12 @@ class ThinAdapterArchitectureTests(unittest.TestCase):
         variant = self.thin.AGENT_VARIANTS["ml-master-autoresearch-variant"]
         self.assertEqual(variant.base_agent, "ml-master-2")
         self.assertNotIn("mle-bench-lite", variant.benchmarks)
+        # Terminal AO is excluded by architecture, not merely unimplemented: the
+        # launcher is a fail-closed stub and no variant may re-enable it.
+        self.assertNotIn("terminal-bench-ao", variant.benchmarks)
+        terminal_stub = _source("BenchmarkAdapters/TerminalAO/launchers/ml_master_2.py")
+        self.assertNotIn("for stage_name", terminal_stub)
+        self.assertIn("UnsupportedAdapterError", terminal_stub)
 
     def test_ml_master_generated_config_preserves_workflow_controls(self) -> None:
         source = _source("BenchmarkAdapters/MLEBenchLite/ml_master_config_worker.py")

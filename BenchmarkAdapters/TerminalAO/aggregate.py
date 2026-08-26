@@ -20,7 +20,8 @@ from ..formal_contract import (
 )
 from ..protocol import BenchmarkMode, canonical_json, sha256_file
 from ..records import RunStatus
-from ..registry import AGENTS
+from ..registry import AGENTS, TERMINAL_AO_UNSUPPORTED_REASONS
+from ..thin_registry import terminal_ao_agents
 from ..task_specs import task_spec_digest
 from .baseline import tree_digest
 from .protocol import TerminalAOProtocol
@@ -39,6 +40,7 @@ class TerminalAOSeedMetrics:
     wall_clock_seconds: float
     total_tokens: int | None
     total_cost: float | None
+    selection_policy: str
     manifest_digest: str
     artifact_sha256: str
     model_config_digest: str
@@ -230,6 +232,34 @@ def _task_records(
     return passed, failed, errors, missing, pass_rate, tokens, cost
 
 
+def _selection_policy(path: Path, *, result: dict[str, Any]) -> str:
+    """Replay the per-run final-artifact selection policy.
+
+    The policy is uniform across Agents: each Agent declares its own final
+    artifact and the host never substitutes a different candidate. Surfacing it
+    on the aggregate makes any future divergence between Agents visible instead
+    of silent.
+    """
+    if not path.is_file() or path.is_symlink():
+        raise AdapterError("Terminal AO selection record is missing")
+    payload = _load_object(path)
+    policy = str(payload.get("selection_policy_id", ""))
+    metrics = result.get("metrics")
+    recorded = (
+        str(metrics.get("selection_policy", "")) if isinstance(metrics, dict) else ""
+    )
+    if (
+        policy != "agent-declared"
+        or recorded != policy
+        or payload.get("harness_selected_among_candidates") is not False
+        or payload.get("selection_uses_test") is not False
+    ):
+        raise AdapterError(
+            "Terminal AO final artifact was not Agent-declared under a test-free policy"
+        )
+    return policy
+
+
 def _completed_outer_run(
     result_path: Path,
     *,
@@ -281,6 +311,9 @@ def _completed_outer_run(
         and gate.get("outer_run_index") == outer_run_index
     ):
         raise AdapterError("Terminal AO sealed test gate record is invalid")
+    selection_policy = _selection_policy(
+        result_path.parent / "selection.json", result=result
+    )
     passed, failed, errors, missing, pass_rate, tokens, cost = _task_records(
         result_path.parent / "sealed/test-evaluation/evaluation.json",
         protocol=protocol,
@@ -300,6 +333,7 @@ def _completed_outer_run(
         wall_clock_seconds=float(result.get("wall_clock_seconds", 0.0)),
         total_tokens=tokens,
         total_cost=cost,
+        selection_policy=selection_policy,
         manifest_digest=manifest_digest,
         artifact_sha256=artifact_digest,
         model_config_digest=str(manifest.get("model_config_digest", "")),
@@ -352,6 +386,9 @@ def aggregate_terminal_ao(
         raise AdapterError("Terminal AO outer runs mix model, hardware, or adapter tracks")
     if len({record.agent_commit for record in outer_runs}) != 1:
         raise AdapterError("Terminal AO outer runs mix Agent source commits")
+    selection_policies = {record.selection_policy for record in outer_runs}
+    if len(selection_policies) != 1:
+        raise AdapterError("Terminal AO outer runs mix final-artifact selection policies")
     known_costs = [record.total_cost for record in outer_runs if record.total_cost is not None]
     return {
         "schema_version": 2,
@@ -366,6 +403,7 @@ def aggregate_terminal_ao(
         "formal_score_valid": True,
         "formal_avg_at_3_valid": protocol.outer_repetitions == 3,
         "tasks_per_outer_run": 53,
+        "selection_policy": next(iter(selection_policies)),
         "metrics": {"held_out_53_pass_rate": summary},
         "outer_runs": [asdict(record) for record in outer_runs],
         "total_tokens": (
@@ -385,7 +423,12 @@ def terminal_ao_scorecard(
 ) -> dict[str, Any]:
     agents: dict[str, Any] = {}
     ranking: list[dict[str, Any]] = []
-    for agent in AGENTS:
+    # The comparison set is the Agents whose architecture fits the Harness Engineering
+    # AO task shape, not every registered Agent. MLEvolve and ML-Master 2.0 are excluded
+    # by registry.TERMINAL_AO_UNSUPPORTED_REASONS; counting them here would make a
+    # complete five-Agent comparison report itself as incomplete and withhold the ranking.
+    comparison_set = terminal_ao_agents()
+    for agent in comparison_set:
         try:
             payload = aggregate_terminal_ao(
                 protocol=protocol, campaign_dir=campaign_dir, agent=agent
@@ -398,6 +441,7 @@ def terminal_ao_scorecard(
             {
                 "agent": agent,
                 "score": payload["metrics"]["held_out_53_pass_rate"]["mean"],
+                "selection_policy": payload["selection_policy"],
             }
         )
     ranking.sort(key=lambda item: float(item["score"]), reverse=True)
@@ -406,7 +450,12 @@ def terminal_ao_scorecard(
         for payload in agents.values()
         if payload.get("formal_score_valid")
     }
-    complete = len(ranking) == len(AGENTS) and len(keys) == 1
+    complete = len(ranking) == len(comparison_set) and len(keys) == 1
+    selection_policies = {
+        agent: payload["selection_policy"]
+        for agent, payload in agents.items()
+        if payload.get("formal_score_valid")
+    }
     return {
         "schema_version": 2,
         "benchmark_id": "terminal-bench-ao",
@@ -416,9 +465,21 @@ def terminal_ao_scorecard(
         "outer_repetitions": protocol.outer_repetitions,
         "reporting_label": "single_run" if protocol.outer_repetitions == 1 else "avg_at_3",
         "agents": agents,
+        "comparison_set": list(comparison_set),
+        "excluded_agents": {
+            agent: TERMINAL_AO_UNSUPPORTED_REASONS[agent]
+            for agent in AGENTS
+            if agent not in comparison_set
+        },
         "formal_ranking": ranking if complete else [],
         "same_model_hardware_track_valid": len(keys) == 1,
-        "complete_seven_agent_comparison_valid": complete,
+        "selection_policy_by_agent": selection_policies,
+        "uniform_selection_policy_valid": len(set(selection_policies.values())) <= 1,
+        "complete_comparison_set_valid": complete,
+        "unranked_agents": [
+            agent for agent in comparison_set
+            if not agents[agent].get("formal_score_valid")
+        ],
         "terminal_direct_smoke_included": False,
     }
 

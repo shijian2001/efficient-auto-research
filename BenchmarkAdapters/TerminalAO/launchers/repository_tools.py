@@ -1,4 +1,13 @@
-"""Repository candidate operations shared by native search-loop backends."""
+"""Repository candidate operations shared by native search-loop backends.
+
+Scope note: ``candidate_prompt`` was once shared by the MLEvolve and ML-Master 2.0
+Terminal AO launchers. Both are now fail-closed stubs -- those Agents are excluded from
+the AO comparison set (see ``registry.TERMINAL_AO_UNSUPPORTED_REASONS``) -- so this
+module's sole remaining consumer is ``launchers/ear.py``, which is itself migrating to a
+native EAR loop. A benchmark-authored prompt is scaffolding, not Agent behavior: do not
+add new consumers here to make another Agent appear to run Terminal AO. If the EAR
+migration lands, ``candidate_prompt`` and its helpers become dead and should be deleted.
+"""
 
 from __future__ import annotations
 

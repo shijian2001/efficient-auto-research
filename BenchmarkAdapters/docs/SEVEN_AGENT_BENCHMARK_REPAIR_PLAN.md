@@ -60,7 +60,7 @@ Terminal-Bench 的正式 AO 路径会在协议、模型、源码或产物条件�
 Terminal-Bench 正式任务是外层研究 Agent 优化固定的 `terminus-2` harness：
 
 ```text
-外层 Agent：EAR / MLEvolve / Arbor / Codex / Claude Code / ML-Master 2 / AiScientist
+外层 Agent（5 家比较集合）：EAR / Arbor / Codex / Claude Code / AiScientist
                                   │
                                   │ 48 小时，只能访问 dev evaluator
                                   ▼
@@ -81,6 +81,39 @@ Terminal-Bench 正式任务是外层研究 Agent 优化固定的 `terminus-2` ha
 6. 搜索结束后冻结最终 harness；每个独立外层 run 只允许执行一次 53-task test evaluation。
 7. 主指标是 held-out test pass rate。dev pass rate 只用于搜索过程和诊断，不是最终比分。
 8. 每个 Agent 至少运行 3 个预注册外层 seed，报告 Test Pass Rate Avg@3、标准差和置信区间。
+9. 比较集合是 5 家，不是 7 家。唯一权威来源是 `thin_registry.terminal_ao_agents()`；
+   scorecard 的 `complete_comparison_set_valid` 以该集合为分母，并在 `comparison_set` /
+   `excluded_agents` 中显式记录集合和排除理由。
+
+#### 2.2.1 MLEvolve 与 ML-Master 2.0 的排除（任务形状不匹配）
+
+**结论**：这两家不参与 Terminal AO。这是关于 **benchmark 适用边界** 的结论，
+不是对 Agent 质量的评判——两者作为 Kaggle 形态的 ML 工程 Agent 都完整可用，
+在 MLE-Bench Lite 上均原生运行 22 题，本次改动不影响那条路径。
+
+**证据**：AO 候选是冻结 `terminus-2` 仓库的 git revision，由聚合 dev pass rate 评分，
+永不产出 `submission.csv`。而两家的引擎都把该产物写死在核心判定里：
+
+| Agent | 硬编码位置 | 作用 |
+|---|---|---|
+| MLEvolve | `baselines/MLEvolve/engine/execution.py:26-30` | 用是否产出 `submission_<id>.csv` 判定候选节点成功 |
+| MLEvolve | `baselines/MLEvolve/engine/solution_manager.py:71,169` | 按该路径管理与晋升最优解 |
+| MLEvolve | `baselines/MLEvolve/agents/debug_agent.py:78` | prompt 写死要求生成 `submission.csv` |
+| ML-Master 2.0 | `.../ml_master_2/core/playground.py:107-113` | workspace 写死 `best_submission`/`best_solution`/`submission`/`working` |
+| ML-Master 2.0 | `.../ml_master_2/core/playground.py:212,300` | Draft/Improve 阶段通过复制 `submission_<uid>.csv` 晋升最优解 |
+
+（ML-Master 路径前缀为 `baselines/EvoMaster/playground/`。）
+
+要让它们参与，必须重写各自引擎的核心成功判定——那样跑出的分数衡量的是我们的改写，
+而不是该 Agent。
+
+**为什么排除而不是加脚注**：先前的
+`TerminalAO/launchers/{mlevolve,ml_master_2}.py` 是 benchmark 自己写的外层循环、prompt、
+diff 提取、评估与选优，包住上游的一个函数（MLEvolve 仅 `select_with_soft_switch`）或一段
+benchmark 自撰的三阶段 prompt 序列（ML-Master）。把这种输出记为该 Agent 的 AO 分数，等于把
+harness 的行为归因给 Agent；数字一旦进入表格，无论脚注怎么写都会被当作该 Agent 的成绩。
+因此改为 fail-closed：`TerminalAOAdapter.__init__`、`build_native_ao_command` 和两个
+launcher 存根三层各自抛 `UnsupportedAdapterError`。
 
 ### 2.3 36/53 split 的身份
 
@@ -93,7 +126,8 @@ Terminal-Bench 正式任务是外层研究 Agent 优化固定的 `terminus-2` ha
 
 ## 3. Definition of Done
 
-只有同时满足以下条件，才能宣布“七 Agent 可以正常运行并给出有效横向比分”：
+只有同时满足以下条件，才能宣布“各 Benchmark 可以正常运行并给出有效横向比分”
+（MLE-Bench Lite 为七家；Terminal AO 为 5 家比较集合，见 2.2.1）：
 
 ### 3.1 单个 Agent × Benchmark 的完成条件
 
@@ -115,17 +149,25 @@ Terminal-Bench 正式任务是外层研究 Agent 优化固定的 `terminus-2` ha
 - 同一 seed schedule、运行次数、失败计零和 retry 规则。
 - 同一最终 artifact 选择和冻结规则。
 - 不混用不同 commit、不同代际或不同 seed 的逐题最好分来拼接一行结果。
+- 每个 Benchmark 的比较集合以该 Benchmark 的适用边界为准，不是「必须凑齐七家」。
+  MLE-Bench Lite 是完整七家；Terminal AO 是 5 家
+  （`thin_registry.terminal_ao_agents()`，排除理由见 2.2.1）。分母取自该集合：
+  一个完整的 5 家 AO 比较是**有效**的，不因为不满七家而被判为不完整或 withhold 排名。
 
 ## 4. 修复后的运行矩阵
+
+Terminal AO 一栏是 5 家比较集合（EAR / Arbor / Codex / Claude Code / AiScientist）；
+MLEvolve 与 ML-Master 2.0 因任务形状不匹配不参与，理由见 2.2.1。MLE-Bench Lite 一栏
+仍是完整七家。
 
 | Agent | MLE-Bench Lite 正式路径 | Terminal 36/53 AO 正式路径 | 当前 readiness 上限 |
 |---|---|---|---|
 | EAR | G3 legacy CLI、显式 artifact、官方 grader | 原生 G3 `thompson.select_parent` KTS repository backend | 命令可构造；当前 source/config/资产未达到正式运行条件 |
-| MLEvolve | control-plane format server、显式 artifact、官方 grader | 原生 `AgentSearch`/`SearchNode` + UCT repository backend | 命令可构造；当前 source/config/资产未达到正式运行条件 |
+| MLEvolve | control-plane format server、显式 artifact、官方 grader | **不参与**（任务形状不匹配，见 2.2.1） | MLE 侧命令可构造；AO 入口 fail-closed |
 | Arbor | 原版不支持，需 `arbor-benchmark-patched` | 原版要求 clean upstream；patched variant 可用 | 默认入口不能正式用；variant 和 clean source 待确认 |
 | Codex | public-only Bubblewrap workspace + host relay/grader | 原生 `codex exec` + AO Bubblewrap/dev capability | 命令可构造；当前 config/资产/adapter 环境未完成 |
 | Claude Code | public-only Bubblewrap workspace + host relay/grader | 原生 `claude --print` + AO Bubblewrap/dev capability | 命令可构造；当前 config/资产/adapter 环境未完成 |
-| ML-Master 2.0 | clean 原版 `run.py --agent ml_master_2` | 必须使用 `ml-master-autoresearch-variant` | 默认 AO 入口不支持；MLE source 当前有未提交变化 |
+| ML-Master 2.0 | clean 原版 `run.py --agent ml_master_2` | **不参与**（任务形状不匹配，见 2.2.1） | AO 入口 fail-closed；MLE source 当前有未提交变化 |
 | AiScientist | clean 原版 `aisci mle run` | 必须使用 `ai-scientist-terminal-variant` | 默认 AO 入口不支持；MLE source 当前有未提交变化 |
 
 ## 5. 共享结构修复
@@ -305,6 +347,16 @@ MLE 扩展保存官方 competition report；Terminal AO 扩展保存 dev history
 - watchdog 使用统一 wall-clock 并保留 closeout 窗口。
 - Agent workspace 只能看到当前 public task；禁止任意 host symlink/volume。
 - final candidate 显式发布到统一 artifact contract。
+- **per-run config 必须显式设置 `is_lower_better`**。上游模板把它连同示例竞赛
+  `detecting-insults-in-social-commentary` 一起写死为 `false`，而
+  `playground.py:140-143` 用这个字段判定哪个候选更好。22 题里有 7 题是
+  lower-is-better（denoising-dirty-documents、dog-breed-identification、
+  dogs-vs-cats-redux-kernels-edition、leaf-classification、
+  new-york-city-taxi-fare-prediction、nomad2018-predict-transparent-conductors、
+  spooky-author-identification），漏设会让 `best_submission/` 保留最差解，而
+  `native_wrappers.py:50` 恰好只取这个目录。方向由 host 侧
+  `MLEBenchLite/metric_direction_worker.py` 在锁定的 mle-bench Python 里从官方
+  leaderboard 解出，再经 `--is-lower-better` 传给 config worker，Agent 环境不参与判定。
 
 ### MLE-012：AiScientist
 
@@ -410,7 +462,11 @@ BenchmarkAdapters/TerminalAO/
 - 每次调用记录 caller、candidate hash、开始结束时间和成本。
 - 限制最大并发和调用频率，但不对不同 Agent施加不同隐藏限制。
 
-## 8. 七个 AO 原生 launcher
+## 8. 五个 AO 原生 launcher
+
+比较集合为 EAR / Arbor / Codex / Claude Code / AiScientist。下面的 AO-AGENT-006
+（MLEvolve）和 AO-AGENT-007（ML-Master 2.0）两节保留为**已放弃的方案记录**：这两家因
+任务形状不匹配退出 Terminal AO（见 2.2.1），其 launcher 已改为 fail-closed 存根。
 
 ### AO-AGENT-001：Codex
 
@@ -460,7 +516,13 @@ BenchmarkAdapters/TerminalAO/
 - EAR 的 Thompson、graph update 和 parent selection 保持原生；只抽象 artifact、executor 和 evaluator contract。
 - test reward 永不回流 graph。
 
-### AO-AGENT-006：MLEvolve
+### AO-AGENT-006：MLEvolve —— 已放弃，不参与 Terminal AO
+
+**状态**：不实施。下列设想需要重写 MLEvolve 引擎中「候选是否产出 `submission.csv`」这一
+核心成功判定（`engine/execution.py:26-30`、`engine/solution_manager.py:71,169`），已超出
+「保留 Agent 原生行为」的边界。详见 2.2.1。MLEvolve 在 MLE-Bench Lite 上不受影响。
+
+以下为原方案存档：
 
 **大重构，但保留搜索流程**：增加 domain-neutral repository candidate backend。
 
@@ -471,7 +533,14 @@ BenchmarkAdapters/TerminalAO/
 - final fusion 在 AO 中改为 best revision selection/replay；禁止拼接不兼容代码 patch。
 - MLE-specific coldstart、submission fusion 和 format server 不进入 AO backend。
 
-### AO-AGENT-007：ML-Master 2.0
+### AO-AGENT-007：ML-Master 2.0 —— 已放弃，不参与 Terminal AO
+
+**状态**：不实施。下列设想需要重写 playground 写死的 Kaggle 形状 workspace 与
+`submission_<uid>.csv` 晋升逻辑（`playground/ml_master_2/core/playground.py:107-113,212,300`），
+已超出「保留 Agent 原生行为」的边界。详见 2.2.1。ML-Master 2.0 在 MLE-Bench Lite 上不受影响，
+在 autoresearch / optimizer-design / fml 上仍可用 `ml-master-autoresearch-variant`。
+
+以下为原方案存档：
 
 **大重构**：把全部阶段迁移到 run-owned repository workspace 和 broker。
 
@@ -491,6 +560,14 @@ BenchmarkAdapters/TerminalAO/
 - reasoning effort：相同。
 - temperature 和采样参数：相同，除非 Agent API 无法表达；差异必须预注册并单列 sensitivity。
 - endpoint/relay 参数清洗、retry 和 timeout：相同。
+- 截断信号必须跨协议透传。relay 同时提供 chat/responses/messages 三个入口并在中间互转，
+  转换必须把上游的 `status="incomplete"` / `incomplete_details` 映射成 chat 的
+  `finish_reason="length"`，再映射成 messages 的 `stop_reason="max_tokens"`，反向也一样
+  （`server.py` 的 `_responses_finish_reason` / `_chat_finish_reason_to_responses_status` /
+  `_messages_stop_reason`）。剥掉 Agent 侧 output token cap 后上游改用自身默认上限，截断
+  依然会发生；若转换把它压成 `stop`/`end_turn`，Agent 会把被截断的回答当成完整回答，
+  这是唯一一类「以为成功其实失败」的静默错误。SSE 合成同样要发 `response.incomplete`
+  而不是 `response.completed`。
 - MLE：同一每题 wall-clock 和硬件。
 - Terminal AO：同一 48 小时 outer wall-clock、同一 baseline harness和 dev broker。
 - seed schedule：所有 Agent 使用同一列表，例如 `[0, 1, 2]`。
@@ -508,7 +585,7 @@ BenchmarkAdapters/TerminalAO/
 
 主榜建议以 Any Medal Rate 为主要质量指标，同时完整报告其他三个 rate。逐题 raw score用于同题 Agent 比较。
 
-跨 seed 报告 mean、sample standard deviation、SEM 和 95% CI。所有 22 题都进入分母；失败、超时、缺 submission 和 invalid submission 不能从分母删除。
+跨 seed 报告 mean、sample standard deviation、SEM 和 95% CI（Student-t，df = outer_repetitions - 1；n=3 时 t=4.3027，不是 z=1.96）。所有 22 题都进入分母；失败、超时、缺 submission 和 invalid submission 不能从分母删除。
 
 ### 9.3 Terminal AO 主分
 
@@ -525,7 +602,11 @@ Test Pass Rate = 53 个 held-out task 中 reward=1 的任务数 / 53
 - clean Agent exit rate；
 - test evaluator完整性。
 
-只有 53/53 trial 都产生可审计终态，或按预注册规则填 0，run 才有有效 aggregate。跨 3 个 outer seed 报告 Avg@3、标准差和 95% CI。
+只有 53/53 trial 都产生可审计终态，或按预注册规则填 0，run 才有有效 aggregate。跨 3 个 outer seed 报告 Avg@3、标准差和 95% CI（Student-t，df=2，t=4.3027）。
+
+横向排名的分母是 5 家比较集合（`thin_registry.terminal_ao_agents()`），不是 `len(AGENTS)`。
+scorecard 用 `complete_comparison_set_valid` 表示该集合是否齐全，并在 `comparison_set` /
+`excluded_agents` 中记录集合成员与排除理由，使「谁被排除、为什么」在产物中可审计。
 
 ### 9.4 效率指标
 
@@ -571,7 +652,7 @@ MLE Any Medal Rate 与 Terminal AO Test Pass Rate 可以放在同一 scorecard�
 - evaluator在 disposable copy上运行 candidate harness。
 - Agent 不能修改 Harbor、tasks、verifier、split、baseline record、relay和 evaluator。
 - shell默认无 host credential、Docker socket和任意宿主文件访问。
-- final harness进行 allowlist diff、symlink逃逸、大小和文件类型检查，确保七个 Agent提交的是同一类可 replay artifact。
+- final harness进行 allowlist diff、symlink逃逸、大小和文件类型检查，确保比较集合内五个 Agent提交的是同一类可 replay artifact。
 
 ## 11. 测试计划
 
@@ -606,7 +687,8 @@ MLE Any Medal Rate 与 Terminal AO Test Pass Rate 可以放在同一 scorecard�
 
 - 已知改动能提高dev和test；
 - test不可见；
-- 七个 Agent 的 shipped native launcher 都能创建 candidate、连接 dev broker并发布可 replay best；
+- 比较集合内五个 Agent 的 shipped native launcher 都能创建 candidate、连接 dev broker并发布可 replay best；
+- MLEvolve 和 ML-Master 2.0 的 AO 入口 fail-closed 抛 `UnsupportedAdapterError`，绝不产出 AO 产物；
 - 失败candidate不污染best；
 - test只执行一次；
 - result和hash完整。
@@ -639,7 +721,7 @@ MLE Any Medal Rate 与 Terminal AO Test Pass Rate 可以放在同一 scorecard�
 - [x] 接入官方grader和22-task campaign。
 - [x] 接入Arbor、Codex、Claude Code、AiScientist。
 - [x] 完成ML-Master 2 config builder和workspace隔离。
-- [ ] 七 Agent逐个完成真实scored smoke。
+- [ ] 比较集合内的 Agent 逐个完成真实scored smoke（AO 为 5 家）。
 
 ### Phase 3：实现AO evaluator和supervisor
 

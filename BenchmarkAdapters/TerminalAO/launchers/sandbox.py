@@ -56,10 +56,7 @@ def _runtime_mounts(agent: str) -> tuple[Path, ...]:
     if agent == "ear":
         venv = ROOT / "BenchmarkAdapters/environments/mle/ear/.venv"
         mounts.extend((AGENTS[agent].install_path, *_python_runtime_mounts(venv / "bin/python")))
-    elif agent == "mlevolve":
-        venv = ROOT / "BenchmarkAdapters/environments/agents/mlevolve/.venv"
-        mounts.extend((AGENTS[agent].install_path, *_python_runtime_mounts(venv / "bin/python")))
-    elif agent in {"ml-master-2", "ai-scientist", "arbor"}:
+    elif agent in {"ai-scientist", "arbor"}:
         venv = AGENTS[agent].execution_path / ".venv"
         mounts.extend((AGENTS[agent].install_path, *_python_runtime_mounts(venv / "bin/python")))
     return tuple(dict.fromkeys(path.absolute() for path in mounts))

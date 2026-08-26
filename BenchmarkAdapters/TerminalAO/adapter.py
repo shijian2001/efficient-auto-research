@@ -5,10 +5,17 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
-from ..contracts import AdapterError, CommandSpec, require_directory, require_file
+from ..contracts import (
+    AdapterError,
+    CommandSpec,
+    UnsupportedAdapterError,
+    require_directory,
+    require_file,
+)
 from ..formal_contract import ModelTrackConfig
 from ..process import DEFAULT_PROXY, relay_client_env
-from ..registry import AGENTS, ROOT
+from ..registry import AGENTS, ROOT, TERMINAL_AO_UNSUPPORTED_REASONS
+from ..thin_registry import terminal_ao_agents
 
 
 @dataclass(frozen=True)
@@ -31,6 +38,13 @@ class TerminalAOAdapter:
     def __init__(self, agent: str):
         if agent not in AGENTS:
             raise AdapterError(f"unknown baseline agent: {agent}")
+        if agent not in terminal_ao_agents():
+            # Fail closed at the entry point, before any protocol, workspace, or model
+            # setup, so an excluded Agent can never produce a Terminal AO artifact.
+            raise UnsupportedAdapterError(
+                f"{agent} does not participate in Terminal-Bench AO: "
+                f"{TERMINAL_AO_UNSUPPORTED_REASONS[agent]}"
+            )
         self.agent = agent
 
     def build_command(self, request: TerminalAORequest) -> CommandSpec:
