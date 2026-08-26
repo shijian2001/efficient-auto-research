@@ -104,14 +104,17 @@ BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters mle-cell \
   --protocol /runs/mle/protocol.json --agent codex \
   --competition-id spooky-author-identification --seed 0 \
   --data-root /data/mle-bench --campaign-dir /runs/mle \
-  --model-config /secure-config/model-track.json --agent-variant pinned-codex
+  --model-config BenchmarkAdapters/configs/model-track.gpt-5.5-host-relay.json \
+  --agent-variant pinned-codex
 
 # 运行一个 Terminal AO seed；正式 timeout 固定为 172800 秒
+# 本机 model-track：BenchmarkAdapters/configs/model-track.gpt-5.5-host-relay.json
 BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters terminal-ao \
   --agent ear --protocol terminal-bench-2/ao_protocol/protocol.json \
   --output-dir /runs/ao/ear/run-0 --seed 0 --gpu-id 0 --gpu-id 1 \
   --gpu-id 2 --gpu-id 3 --gpu-id 4 --gpu-id 5 --gpu-id 6 --gpu-id 7 \
-  --model-config /secure-config/model-track.json --agent-variant g3@FULL_COMMIT
+  --model-config BenchmarkAdapters/configs/model-track.gpt-5.5-host-relay.json \
+  --agent-variant g3@7cd9ed5c1db0ff5250faad373e5d5a67209e604c
 
 # 分别聚合
 BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters mle-aggregate \
@@ -154,3 +157,15 @@ Optimizer Design 还要求先晋级受保护的双 held-out baseline 记录；�
 才允许显示更高层级，也才可发布正式横向比分。完整修复和验收清单见
 `BenchmarkAdapters/docs/SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md` 和
 `BenchmarkAdapters/docs/OPTIMIZER_DESIGN_SEVEN_AGENT_ADAPTER.md`。
+
+## 后面怎么起实验
+
+现在还不能开正式长跑。先把 schema-v2 资产、真实 model-track、venv、干净 pinned
+源码补齐，再对每个进表格子做一次真实 smoke。操作清单（比较集合、CLI、variant、
+fail-closed 条件）写在
+`BenchmarkAdapters/docs/SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md` 第 17 节。
+
+进表格子是 **MLE 七家 + Terminal AO 五家**，不是 14 格。AO 必须带显式 variant 的
+是 AiScientist（`ai-scientist-terminal-variant`）；Arbor MLE 必须带
+`arbor-benchmark-patched`。MLEvolve 和 ML-Master 2.0 的 AO 入口应直接抛
+`UnsupportedAdapterError`，不要为它们开 AO 预算。

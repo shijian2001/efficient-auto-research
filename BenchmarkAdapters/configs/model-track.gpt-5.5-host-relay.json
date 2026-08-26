@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "model_track_id": "gpt-5.5-high-t1-4090-host-relay",
+  "outer_model_id": "gpt-5.5",
+  "relay_base_url": "http://127.0.0.1:6200/v1",
+  "model_parameters": {
+    "temperature": 1.0,
+    "reasoning_effort": "high"
+  },
+  "terminal_inner_model_id": "gpt-5.5",
+  "terminal_inner_parameters": {
+    "temperature": 1.0,
+    "reasoning_effort": "high"
+  },
+  "request_timeout_seconds": 600,
+  "retry_policy": {
+    "max_retries": 20
+  }
+}

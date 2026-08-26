@@ -269,9 +269,12 @@ Terminal-Bench 现在有两条不同路径：`terminal-direct-smoke` 是 89 题�
 `terminus-2`，最后只评测一次 53 个 held-out task。两条路径的分数不能混用。
 
 当前 registry 已登记七个 Agent，但默认入口并不等于每个 Agent 都已经可以正式评分：
-Arbor 的 MLE 需要 `arbor-benchmark-patched`，Terminal AO 的 ML-Master 2.0 和
-AiScientist 需要各自的显式 variant。模型配置、协议资产、Python 依赖、clean source
-和真实 smoke 全部完成后，才可以开始正式 campaign。
+Arbor 的 MLE 需要 `arbor-benchmark-patched`，Terminal AO 的 AiScientist 需要
+`ai-scientist-terminal-variant`。MLEvolve 和 ML-Master 2.0 **不参与** Terminal AO
+（任务形状不匹配）。模型配置、协议资产、Python 依赖、clean source 和真实 smoke
+全部完成后，才可以开始正式 campaign。后面怎么起实验（比较集合、冻结资产、
+formal-preflight、smoke、22×7×3 MLE 与 5×3×48h AO）见
+[`SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md` 第 17 节](BenchmarkAdapters/docs/SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md)。
 
 已修复的四类正确性问题（2026-08-26，细节见各自文档）：
 

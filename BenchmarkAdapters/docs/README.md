@@ -7,19 +7,29 @@ The canonical implementation and capability matrix are documented in
 
 The adapter code, native launcher definitions, host-owned graders, and scorecard
 logic are present. This does not mean that all fourteen Agent x Benchmark cells
-can currently produce formal scores. The current checkout still needs:
+can currently produce formal scores. Current checkout status:
 
-- an MLE-Bench Lite schema-v2 data manifest with prepared public/private hashes;
-- a schema-v2 Terminal AO protocol with an immutable benchmark source commit;
-- a real, shared model-track configuration instead of the placeholder file;
-- a complete `BenchmarkAdapters/.venv` (the current environment is missing
-  PyYAML); and
-- clean, pinned Agent source checkouts plus one real end-to-end smoke per cell.
+- MLE-Bench Lite schema-v2 data manifest: generate with `mle-freeze-assets`
+  against `mle-bench-data/` (22 prepared trees are present on this host).
+- Terminal AO protocol is still schema 1 until a 40-char
+  `benchmark_source_commit` is supplied to `terminal-ao-protocol`.
+- Shared model-track for this host: `configs/model-track.gpt-5.5-host-relay.json`
+  (gpt-5.5, temperature 1.0, reasoning_effort high, relay
+  `http://127.0.0.1:6200/v1`). The placeholder file remains a template only.
+- `BenchmarkAdapters/.venv` includes PyYAML.
+- Nested Agent checkouts are still dirty; formal preflight will refuse those
+  cells until each `install_path` is a clean pinned commit. Do not reset
+  Arbor / AiScientist / EvoMaster working trees without an explicit pin.
 
-Arbor MLE uses `arbor-benchmark-patched`; Terminal AO uses
-`ml-master-autoresearch-variant` for ML-Master 2.0 and
-`ai-scientist-terminal-variant` for AiScientist. The 89-task direct Terminal
+Arbor MLE uses `arbor-benchmark-patched`. Terminal AO uses
+`ai-scientist-terminal-variant` for AiScientist; MLEvolve and ML-Master 2.0
+are excluded from AO (task-shape mismatch). The 89-task direct Terminal
 path is a smoke path and its scores must not be compared with Terminal AO.
+
+How to start the later formal campaign — comparison set, freeze-assets,
+model-track, preflight, per-cell smoke, then 22×7×3 MLE and 5×3×48h AO —
+is §17 of `SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md`. Do not launch the long
+runs until those gates pass.
 
 The implemented repair checklist, scoring protocol, remaining real-run gates,
 and evidence requirements for all seven Agents on MLE-Bench Lite and

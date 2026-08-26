@@ -4,7 +4,7 @@
 
 - 文档性质：修复清单、已实现状态和正式验收规范的单一权威文档。
 - 实现状态：MLE 评分/campaign、Terminal AO supervisor、七个原生 launcher、统计和 CLI 代码已经写入；完整 `BenchmarkAdapters/tests` 曾通过 81 项，另有 35 项定向回归记录。
-- 当前状态：这只能说明代码结构和部分命令检查已经完成。MLE manifest、Terminal AO 正式 protocol、模型配置、adapter Python 依赖和 Agent clean checkout 还没有全部准备好；尚未完成 22×7×3 MLE 与 7×3×48h AO 正式长跑，因此当前没有正式横向榜单。
+- 当前状态：这只能说明代码结构和部分命令检查已经完成。MLE manifest、Terminal AO 正式 protocol、模型配置、adapter Python 依赖和 Agent clean checkout 还没有全部准备好；尚未完成 22×7×3 MLE 与 5×3×48h AO 正式长跑，因此当前没有正式横向榜单。起实验的前置条件和命令见第 17 节。
 - 目标 Agent：EAR、MLEvolve、Arbor、Codex、Claude Code、ML-Master 2.0、AiScientist。
 - 目标 Benchmark：完整 22 题 MLE-Bench Lite，以及 Terminal-Bench 2.0 的 36 dev / 53 held-out test Harness Engineering AO 协议。
 - 明确排除：89 题由七个外层 Agent 直接逐题解题的分数不属于本文档定义的 Terminal-Bench AO 正式分。
@@ -738,22 +738,24 @@ MLE Any Medal Rate 与 Terminal AO Test Pass Rate 可以放在同一 scorecard�
 
 ### Phase 5：接入搜索型AO launcher
 
-- [x] EAR repository backend。
-- [x] MLEvolve repository backend。
-- [x] ML-Master 2 repository workflow。
+- [x] EAR 原生化 repository mode（`agent/run_repo.py` + thin `launchers/ear.py`）。
+- [x] MLEvolve、ML-Master 2.0：改为 fail-closed 存根，不参与 AO（见 2.2.1）。
 
 ### Phase 6：七Agent验收
 
 - [x] synthetic AO acceptance与真实 Bubblewrap 隐藏性测试通过。
-- [ ] 七Agent MLE真实smoke全部有有效report或预期失败记录。
-- [ ] 七Agent AO seam smoke全部通过。
+- [ ] 七 Agent MLE 真实 smoke 全部有有效 report 或预期失败记录。
+- [ ] 五家 AO 比较集合的 seam smoke 全部通过；MLEvolve / ML-Master 2.0 入口确认 fail-closed。
 - [ ] 固定一个小型pilot campaign检查scorecard和统计脚本。
 
 ### Phase 7：正式实验
 
+比较集合不是 7×2。MLE 是七家，AO 是五家（`thin_registry.terminal_ao_agents()`）。
+启动步骤、variant 和 fail-closed 条件见第 17 节；未过第 17.1 的 gate 不得开长跑。
+
 - [ ] 冻结全部commit、lock、image和protocol digest。
 - [ ] 22 MLE tasks × 7 Agents × 3 seeds。
-- [ ] 36/53 AO × 7 Agents × 3 outer seeds × 48h。
+- [ ] 36/53 AO × 5 Agents × 3 outer seeds × 48h。
 - [ ] 自动聚合、审计和生成最终横向表。
 
 ## 13. 已实现 CLI
@@ -842,4 +844,138 @@ BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters terminal-direct-smoke --
 - 当前仓库中 EAR、MLEvolve、Arbor、ML-Master 2.0、AiScientist 有未提交变化；正式入口会直接返回失败，不会开始正式实验。
 - `BenchmarkAdapters/.venv` 当前缺 PyYAML；MLE manifest 仍是 schema 1，Terminal AO protocol 仍是 schema 1，模型配置仍是占位符。
 - 当前可以生成**结构正确、失败保留分母的横向 scorecard**，但里面的零分是“正式结果缺失计零”，不是七个 Agent 已完成的实验成绩。
-- 只有在干净 commit 上完成七 Agent × 至少 3 seeds 的真实长跑后，才能发布有效正式比分并把 readiness 升级为 `formal_protocol_ready`。
+- 只有在干净 commit 上完成 MLE 七家 × 至少 3 seeds、AO 五家 × 至少 3 outer seeds 的真实长跑后，才能发布有效正式比分并把 readiness 升级为 `formal_protocol_ready`。起跑清单见第 17 节。
+
+## 17. 后面怎么起正式实验
+
+本节是 Phase 7 的操作清单。代码侧的公平边界已经落地（各家跑自己的循环、host 评分、产物各家自选、AO 分母是五家）。**现在还不能开长跑**：正式入口会 fail-closed。先做 17.1，再做 17.2 的格子级 smoke，最后才是 17.3 的 campaign。
+
+比较集合：
+
+| Benchmark | 进表的 Agent | 必填 `--agent-variant` | 不进表 |
+|---|---|---|---|
+| MLE-Bench Lite 22 题 | 七家 | Arbor：`arbor-benchmark-patched`；其余用 pinned 原版 ID（`ear` 用 `g3@7cd9ed5c1db0ff5250faad373e5d5a67209e604c`） | 无 |
+| Terminal AO 36/53 | EAR / Arbor / Codex / Claude Code / AiScientist | AiScientist：`ai-scientist-terminal-variant`；Arbor 原版可跑，patched 也可 | MLEvolve、ML-Master 2.0（任务形状不匹配，入口抛 `UnsupportedAdapterError`） |
+
+`ai-scientist-terminal-variant` 已经登记，launcher 调 `TerminalTaskSubagent.run`。该 Subagent 是我们加在 `baselines/AiScientist` 工作树里的文件，**尚未提交进内层仓库**；正式跑之前必须把它提交到干净 pinned commit，否则 `formal_source_clean` 会拒。
+
+### 17.1 开跑前必须齐的资产（缺一项就退出）
+
+按这个顺序做。每一步成功后再做下一步。占位符 model-track、schema 1 协议、dirty source 都会被正式 preflight 拒绝。
+
+1. **补 Adapter 环境**
+
+   ```bash
+   BenchmarkAdapters/.venv/bin/python -c "import yaml"
+   # pyproject.toml 已声明 pyyaml>=6；若 venv 仍缺：在 BenchmarkAdapters/ 下 `uv sync`
+   ```
+
+2. **冻结 MLE schema-v2 data manifest**（当前 `MLEBenchLite/data_manifest.json` 是 schema 1，缺 prepared public/private 哈希）
+
+   ```bash
+   BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters mle-freeze-assets \
+     --data-root mle-bench-data \
+     --output /tmp/mle-data-manifest.v2.json
+   ```
+
+   人工审计后，把通过审查的文件提升为 `BenchmarkAdapters/MLEBenchLite/data_manifest.json`。CLI 只生成待审稿，不会自动覆盖正式资产。
+
+3. **生成 Terminal AO schema-v2 protocol**（当前 `terminal-bench-2/ao_protocol/protocol.json` 是 schema 1，`inner_model` 写死 `gpt-5.5`，没有 `benchmark_source_commit`）
+
+   ```bash
+   BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters terminal-ao-protocol \
+     --source terminal-bench-2 \
+     --benchmark-source-commit <40-char-upstream-or-local-freeze-commit> \
+     --outer-repetitions 3 \
+     --output /tmp/terminal-ao-protocol.v2.json
+   ```
+
+   `benchmark_source_commit` 必须是 40 位十六进制。`terminal-bench-2/` 本地没有 `.git`，这个 commit 要从上游 Terminal-Bench 仓库或本项目冻结记录里查，不能留空。正式 contract 还要求 `inner_model = configured-by-model-track`。人工审计后再替换仓库里的 `protocol.json`。
+
+4. **共享 model-track**。本机 4090 + host relay 的非密钥配置已经写入
+   `BenchmarkAdapters/configs/model-track.gpt-5.5-host-relay.json`
+   （`gpt-5.5`，temperature 1.0，reasoning_effort high，
+   `relay_base_url=http://127.0.0.1:6200/v1`，`max_retries=20`）。
+   `model-track.placeholder.json` 只留作模板，正式命令不要指向它。
+   API key 仍走环境变量，不要写进 JSON。若 relay 不在 6200，复制该文件到仓库外再改 URL。
+
+5. **干净 pinned 源码**。正式 `formal_source_clean` 要求 adapter 仓库和该 Agent 的 `install_path` 都 `git status` 干净。当前会挡正式入口的 dirty 树包括：内层 EAR（`ear/g3` 工作区有未跟踪的 repo-mode 文件）、`baselines/MLEvolve`、`baselines/Arbor`、`baselines/EvoMaster`、`baselines/AiScientist`。EAR 的正式 AO/MLE 源仍钉在 `ear/g3@7cd9ed5`；repo-mode 新文件目前只 vendored 在外层 `full4090`，若正式格子要从内层 checkout 跑，需要先决定是把这些文件提交进 `ear/g3` 还是改 registry 指向外层 vendored 树。
+
+6. **Arbor MLE provenance**。registry 记的是 `baselines/Arbor`，launcher 实际跑 `baselines/Arbor-longrun-patched`。开 Arbor MLE 正式格之前先按 `ARBOR_MLE_ADAPTER_REPAIR.md` 把 identity 改到真正执行的那棵树，否则 manifest commit 审计对不上。
+
+7. **格子级 formal-preflight 必须全绿**，再允许该格子消耗 API：
+
+   ```bash
+   BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters formal-preflight \
+     --benchmark mle-bench-lite --agent ear \
+     --agent-variant g3@7cd9ed5c1db0ff5250faad373e5d5a67209e604c \
+     --protocol /runs/mle/protocol.json \
+     --model-config /secure-config/model-track.json \
+     --data-root mle-bench-data \
+     --output /runs/preflight/mle-ear.json
+
+   BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters formal-preflight \
+     --benchmark terminal-bench-ao --agent ai-scientist \
+     --agent-variant ai-scientist-terminal-variant \
+     --protocol terminal-bench-2/ao_protocol/protocol.json \
+     --model-config /secure-config/model-track.json \
+     --output /runs/preflight/ao-ai-scientist.json
+   ```
+
+### 17.2 真实 smoke（不计正式表）
+
+预算明确批准后再跑。mock / dry-run 不算 smoke。
+
+- **MLE**：每个进表 Agent 在同一道低成本 Lite 题（建议 `spooky-author-identification`）上跑短预算，必须拿到官方 grader report 或明确失败记录。
+- **AO**：比较集合内五家各用冻结 baseline，在 2 个 dev task 上跑一次真实 optimization seam，再用 2 个非搜索 task 验证 final freeze 和 one-shot test gate。MLEvolve / ML-Master 2.0 确认入口抛 `UnsupportedAdapterError`，不要为它们开 AO 预算。
+- smoke 产物单独目录，scorecard 不得把它们和正式 campaign 混在一起。
+
+示例（路径和 variant 按 17.1 冻结后的文件替换）：
+
+```bash
+# 生成 N=3 MLE protocol
+BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters mle-protocol \
+  --output /runs/mle/protocol.json --outer-repetitions 3 --timeout 86400
+
+# MLE 单 cell smoke
+BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters mle-cell \
+  --protocol /runs/mle/protocol.json --agent ear \
+  --competition-id spooky-author-identification --seed 0 \
+  --data-root mle-bench-data --campaign-dir /runs/mle-smoke \
+  --model-config /secure-config/model-track.json \
+  --agent-variant g3@7cd9ed5c1db0ff5250faad373e5d5a67209e604c
+
+# AO 单 seed；正式 wall-clock 是 172800 秒，smoke 不要用这个预算
+BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters terminal-ao \
+  --agent ear --protocol terminal-bench-2/ao_protocol/protocol.json \
+  --output-dir /runs/ao-smoke/ear/seed-0 --seed 0 \
+  --model-config /secure-config/model-track.json \
+  --agent-variant g3@7cd9ed5c1db0ff5250faad373e5d5a67209e604c
+```
+
+Arbor MLE 必须带 `--agent-variant arbor-benchmark-patched`。AiScientist AO 必须带 `--agent-variant ai-scientist-terminal-variant`。
+
+### 17.3 正式 campaign
+
+17.2 的每个进表格子都有真实 smoke 之后才开。同一 model-track digest、同一硬件指纹、同一 adapter commit。N=1 只能标 `single_run`；要发 Avg@3 必须 N=3。
+
+- MLE：22 题 × 7 Agent × seeds `{0,1,2}`。失败、超时、缺 submission 留在 22 题分母里，计零，不重跑（基础设施故障除外）。
+- AO：5 Agent × seeds `{0,1,2}` × 48h，dev concurrency 8。53 held-out 只评一次。缺 reward / error / timeout 按 0 计入，同时报告 infra error rate。
+- 分栏聚合，不生成 MLE+AO 混合总分：
+
+  ```bash
+  BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters mle-scorecard \
+    --protocol /runs/mle/protocol.json --campaign-dir /runs/mle \
+    --output /runs/mle-scorecard.json
+  BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters terminal-ao-scorecard \
+    --protocol terminal-bench-2/ao_protocol/protocol.json --campaign-dir /runs/ao \
+    --output /runs/ao-scorecard.json
+  BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters scorecard \
+    --mle-protocol /runs/mle/protocol.json --mle-campaign-dir /runs/mle \
+    --ao-protocol terminal-bench-2/ao_protocol/protocol.json --ao-campaign-dir /runs/ao \
+    --output /runs/scorecard.json
+  ```
+
+AO scorecard 的 `complete_comparison_set_valid` 以五家为分母；`excluded_agents` 必须能复述 MLEvolve / ML-Master 2.0 的排除理由。89 题 `terminal-direct-smoke` 分不得进入这两张表。
+
+Autoresearch / Optimizer Design / FML 不在本轮双 Benchmark 正式表里，仍按各自文档的独立 gate，不要和 MLE/AO campaign 抢同一组 GPU 或同一份 model-track 实验目录。
