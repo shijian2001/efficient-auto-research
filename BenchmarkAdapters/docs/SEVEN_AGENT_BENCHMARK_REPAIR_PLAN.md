@@ -818,7 +818,7 @@ BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters terminal-direct-smoke --
 
 - MLE protocol ID：`mle-bench-lite-official-22-v1`。
 - MLE protocol digest：`883d83df01f597645bc9bec94e351b3f7bceac14de898e09b613c4319af3bc36`。
-- MLE data manifest digest：`c82bb608db6ba0e64421d9bc23ef11f22d669c87db8201e55f5f7a742f0e276d`。
+- MLE data manifest digest：`6b9bcf44f6f28c965d3da3eb76cfaf24ebb61c384ace4cd82a4a354ffc1db04a`（schema 2）。
 - MLE source commit：`507f92e1138bb6e40dac5c6ee7a6758e6424bf97`。
 - Terminal AO protocol ID：`terminal-bench-ao-reconstruction-v1`。
 - Terminal AO protocol digest：`2469cdd2354c645f6befa75a7bbf369ef3f689149bfcecca5648bdfd3037dda8`。
@@ -842,7 +842,10 @@ BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters terminal-direct-smoke --
 
 - 目前只有部分 Agent 的命令可以构造；Arbor、ML-Master 2.0、AiScientist 还需要显式 variant 或 clean 原版路径。即使命令可以构造，也不代表已经可以正式评分。
 - 当前仓库中 EAR、MLEvolve、Arbor、ML-Master 2.0、AiScientist 有未提交变化；正式入口会直接返回失败，不会开始正式实验。
-- `BenchmarkAdapters/.venv` 当前缺 PyYAML；MLE manifest 仍是 schema 1，Terminal AO protocol 仍是 schema 1，模型配置仍是占位符。
+- `BenchmarkAdapters/.venv` 已含 PyYAML。MLE `data_manifest.json` 已是 schema 2。
+  本机 model-track 为 `configs/model-track.gpt-5.5-host-relay.json`。
+  Terminal AO protocol 仍是 schema 1（缺 `benchmark_source_commit`）。
+  若干 nested Agent 源树仍 dirty，正式 preflight 会拒那些格子。
 - 当前可以生成**结构正确、失败保留分母的横向 scorecard**，但里面的零分是“正式结果缺失计零”，不是七个 Agent 已完成的实验成绩。
 - 只有在干净 commit 上完成 MLE 七家 × 至少 3 seeds、AO 五家 × 至少 3 outer seeds 的真实长跑后，才能发布有效正式比分并把 readiness 升级为 `formal_protocol_ready`。起跑清单见第 17 节。
 
@@ -870,15 +873,11 @@ BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters terminal-direct-smoke --
    # pyproject.toml 已声明 pyyaml>=6；若 venv 仍缺：在 BenchmarkAdapters/ 下 `uv sync`
    ```
 
-2. **冻结 MLE schema-v2 data manifest**（当前 `MLEBenchLite/data_manifest.json` 是 schema 1，缺 prepared public/private 哈希）
-
-   ```bash
-   BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters mle-freeze-assets \
-     --data-root mle-bench-data \
-     --output /tmp/mle-data-manifest.v2.json
-   ```
-
-   人工审计后，把通过审查的文件提升为 `BenchmarkAdapters/MLEBenchLite/data_manifest.json`。CLI 只生成待审稿，不会自动覆盖正式资产。
+2. **MLE schema-v2 data manifest** 已从本机 `mle-bench-data/` 的 22 套 prepared
+   public/private 树冻结，写入 `BenchmarkAdapters/MLEBenchLite/data_manifest.json`
+   （digest `6b9bcf44f6f28c965d3da3eb76cfaf24ebb61c384ace4cd82a4a354ffc1db04a`，
+   `mlebench_source_commit=507f92e1138bb6e40dac5c6ee7a6758e6424bf97`）。
+   若数据树以后有变，重新跑 `mle-freeze-assets` 再人工提升，不要手改哈希。
 
 3. **生成 Terminal AO schema-v2 protocol**（当前 `terminal-bench-2/ao_protocol/protocol.json` 是 schema 1，`inner_model` 写死 `gpt-5.5`，没有 `benchmark_source_commit`）
 

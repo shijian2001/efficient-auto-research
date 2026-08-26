@@ -9,8 +9,9 @@ The adapter code, native launcher definitions, host-owned graders, and scorecard
 logic are present. This does not mean that all fourteen Agent x Benchmark cells
 can currently produce formal scores. Current checkout status:
 
-- MLE-Bench Lite schema-v2 data manifest: generate with `mle-freeze-assets`
-  against `mle-bench-data/` (22 prepared trees are present on this host).
+- MLE-Bench Lite `data_manifest.json` is schema 2 (digest
+  `6b9bcf44f6f28c965d3da3eb76cfaf24ebb61c384ace4cd82a4a354ffc1db04a`), frozen
+  from this host's `mle-bench-data/` prepared trees.
 - Terminal AO protocol is still schema 1 until a 40-char
   `benchmark_source_commit` is supplied to `terminal-ao-protocol`.
 - Shared model-track for this host: `configs/model-track.gpt-5.5-host-relay.json`
