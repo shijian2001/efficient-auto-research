@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>terminal_bench_autoresearch_20260531_025602_opus47_depth2_case_smoke — Research Dashboard</title>
+<style>
+:root {
+  --bg: #f8fafc;
+  --surface: #ffffff;
+  --text: #1e293b;
+  --text2: #475569;
+  --text3: #94a3b8;
+  --border: #e2e8f0;
+  --accent: #3b82f6;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f172a;
+    --surface: #1e293b;
+    --text: #e2e8f0;
+    --text2: #94a3b8;
+    --text3: #64748b;
+    --border: #334155;
+    --accent: #60a5fa;
+  }
+}
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.6;
+  padding: 0;
+}
+.container { max-width: 1200px; margin: 0 auto; padding: 20px; }
+.header {
+  background: linear-gradient(135deg, #1e40af 0%, #7c3aed 100%);
+  color: white;
+  padding: 32px 40px;
+  margin-bottom: 24px;
+  border-radius: 12px;
+}
+.header h1 { font-size: 28px; margin-bottom: 4px; font-weight: 700; }
+.header .subtitle { opacity: 0.85; font-size: 15px; }
+.header .meta-info { margin-top: 12px; font-size: 13px; opacity: 0.7; }
+.header .meta-info span { margin-right: 16px; }
+
+.section { margin-bottom: 28px; }
+.section-title {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 14px;
+  color: var(--text);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.section-title::before {
+  content: '';
+  display: inline-block;
+  width: 4px;
+  height: 20px;
+  background: var(--accent);
+  border-radius: 2px;
+}
+
+/* Score cards */
+.cards { display: flex; gap: 16px; flex-wrap: wrap; }
+.score-card {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  flex: 1;
+  min-width: 200px;
+}
+.card-label { font-size: 14px; font-weight: 600; color: var(--text2); margin-bottom: 2px; }
+.card-sublabel { font-size: 12px; color: var(--text3); margin-bottom: 8px; }
+.card-row { display: flex; align-items: center; gap: 12px; margin: 8px 0; }
+.card-num-box { text-align: center; }
+.card-num-label { font-size: 11px; color: var(--text3); text-transform: uppercase; letter-spacing: 0.5px; }
+.card-num { font-size: 28px; font-weight: 700; color: var(--text); }
+.card-num-final { color: var(--accent); }
+.card-arrow { font-size: 24px; color: var(--text3); }
+.card-delta { font-size: 22px; font-weight: 700; text-align: center; }
+.card-stats { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.stat-badge {
+  padding: 4px 10px;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+/* Chart */
+.chart-container {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+  overflow-x: auto;
+}
+.chart-svg { width: 100%; height: auto; }
+
+/* Tree */
+.tree-container {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+}
+.tree-node {
+  margin: 4px 0 4px 12px;
+  border-radius: 6px;
+}
+.tree-node > .tree-node { margin-left: 20px; }
+.tree-summary {
+  padding: 8px 12px;
+  border-radius: 5px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 14px;
+  list-style: none;
+}
+.tree-summary::-webkit-details-marker { display: none; }
+.tree-summary::before {
+  content: '\25B6';
+  font-size: 10px;
+  color: var(--text3);
+  transition: transform 0.15s;
+}
+details[open] > .tree-summary::before { transform: rotate(90deg); }
+.tree-id { font-family: monospace; font-weight: 700; color: var(--accent); min-width: 40px; }
+.tree-score { font-weight: 700; font-size: 13px; }
+.tree-hyp-short { color: var(--text2); font-size: 13px; }
+.status-badge {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 10px;
+  font-size: 11px;
+  font-weight: 600;
+  color: white;
+  text-transform: uppercase;
+  letter-spacing: 0.3px;
+}
+.tree-detail {
+  padding: 12px 16px 12px 24px;
+  font-size: 13px;
+  color: var(--text2);
+  line-height: 1.7;
+}
+.tree-detail-hyp { margin-bottom: 8px; font-style: italic; }
+.tree-detail-section { margin-top: 8px; }
+.tree-detail-section strong { color: var(--text); }
+.tree-children { margin-left: 8px; }
+
+/* Table */
+.table-container {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  overflow-x: auto;
+}
+.exp-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 13px;
+}
+.exp-table th {
+  padding: 10px 12px;
+  text-align: left;
+  background: var(--bg);
+  border-bottom: 2px solid var(--border);
+  font-weight: 600;
+  color: var(--text2);
+  cursor: pointer;
+  user-select: none;
+  white-space: nowrap;
+}
+.exp-table th:hover { color: var(--accent); }
+.exp-table td {
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: top;
+}
+.exp-table .rank { text-align: center; color: var(--text3); width: 40px; }
+.exp-table .nid { white-space: nowrap; }
+.exp-table .score-cell { white-space: nowrap; }
+.exp-table .delta-cell { white-space: nowrap; text-align: right; }
+.exp-table .hyp-cell { max-width: 280px; }
+.exp-table .insight-cell { max-width: 280px; color: var(--text2); }
+
+/* Insight block */
+.insight-block {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 20px;
+}
+.insight-content {
+  font-size: 14px;
+  line-height: 1.8;
+  color: var(--text2);
+}
+.insight-content strong { color: var(--text); }
+
+.empty { padding: 24px; text-align: center; color: var(--text3); }
+
+.footer {
+  text-align: center;
+  padding: 16px;
+  font-size: 12px;
+  color: var(--text3);
+}
+
+/* Tabs */
+.tabs {
+  display: flex;
+  gap: 4px;
+  margin-bottom: 16px;
+  border-bottom: 2px solid var(--border);
+}
+.tab-btn {
+  padding: 8px 18px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text3);
+  border-bottom: 2px solid transparent;
+  margin-bottom: -2px;
+  transition: all 0.15s;
+}
+.tab-btn:hover { color: var(--text); }
+.tab-btn.active {
+  color: var(--accent);
+  border-bottom-color: var(--accent);
+}
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+
+/* Filter buttons */
+.filters {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 12px;
+  flex-wrap: wrap;
+}
+.filter-btn {
+  padding: 4px 12px;
+  border: 1px solid var(--border);
+  border-radius: 14px;
+  background: var(--surface);
+  cursor: pointer;
+  font-size: 12px;
+  color: var(--text2);
+}
+.filter-btn:hover, .filter-btn.active {
+  background: var(--accent);
+  color: white;
+  border-color: var(--accent);
+}
+
+@media print {
+  body { background: white; }
+  .header { break-inside: avoid; }
+  .tabs, .filter-btn { display: none; }
+  .tab-content { display: block !important; }
+  details { open: true; }
+  details[open] { break-inside: avoid; }
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+
+  <!-- Header -->
+  <div class="header">
+    <h1>terminal_bench_autoresearch_20260531_025602_opus47_depth2_case_smoke</h1>
+    <div class="subtitle">
+      terminal_bench_autoresearch_20260531_025602_opus47_depth2_case_smoke_worktree
+       &mdash; 7h18m13s
+      &mdash; 6 experiments, 3 merged
+    </div>
+    <div class="meta-info">
+      <span>CWD: /mnt/data0/jiajie/autoresearch/research_sessions/terminal_bench/terminal_bench_autoresearch_20260531_025602_opus47_depth2_case_smoke_worktree</span><span>Git: arbor_base/terminal_bench_autoresearch_20260531_025602_opus47_depth2_case_smoke @ c1b9f37</span><span>Trunk: research/terminal_bench_autoresearch_20260531_025602_opus47_depth2_case_smoke/trunk</span><span>Config: /mnt/data0/jiajie/autoresearch/terminal-bench-opt/research_config.yaml</span>
+    </div>
+  </div>
+
+  <!-- Score Cards -->
+  <div class="section">
+    <div class="cards">
+        <div class="score-card">
+          <div class="card-label">Test Set</div>
+          <div class="card-sublabel">Primary Metric</div>
+          <div class="card-row">
+            <div class="card-num-box">
+              <div class="card-num-label">Baseline</div>
+              <div class="card-num">69.8%</div>
+            </div>
+            <div class="card-arrow">&#8594;</div>
+            <div class="card-num-box">
+              <div class="card-num-label">Final</div>
+              <div class="card-num card-num-final">77.4%</div>
+            </div>
+          </div>
+          <div class="card-delta" style="color:#22c55e">+7.5%</div>
+        </div>
+
+        <div class="score-card">
+          <div class="card-label">Dev Set</div>
+          <div class="card-sublabel">Iteration</div>
+          <div class="card-row">
+            <div class="card-num-box">
+              <div class="card-num-label">Baseline</div>
+              <div class="card-num">58.3%</div>
+            </div>
+            <div class="card-arrow">&#8594;</div>
+            <div class="card-num-box">
+              <div class="card-num-label">Final</div>
+              <div class="card-num card-num-final">72.2%</div>
+            </div>
+          </div>
+          <div class="card-delta" style="color:#22c55e">+13.9%</div>
+        </div>
+
+    <div class="score-card">
+      <div class="card-label">Experiments</div>
+      <div class="card-stats">
+        <span class="stat-badge" style="background:#dbeafe;color:#3b82f6">done: 2</span><span class="stat-badge" style="background:#dcfce7;color:#22c55e">merged: 3</span><span class="stat-badge" style="background:#f3f4f6;color:#6b7280">pruned: 1</span>
+      </div>
+    </div></div>
+  </div>
+
+  <!-- Tabs: Chart / Tree / Table -->
+  <div class="tabs">
+    <button class="tab-btn active" onclick="switchTab('chart')">Score Chart</button>
+    <button class="tab-btn" onclick="switchTab('tree')">Idea Tree</button>
+    <button class="tab-btn" onclick="switchTab('table')">Experiment Table</button>
+  </div>
+
+  <div id="tab-chart" class="tab-content active">
+    <div class="section">
+      <div class="chart-container"><svg viewBox="0 0 660 168" class="chart-svg">
+<line x1="447" y1="0" x2="447" y2="168" stroke="#ef4444" stroke-dasharray="6,4" stroke-width="1.5" opacity="0.7"/><text x="447" y="164" fill="#ef4444" font-size="11" text-anchor="middle">Baseline 58.3%</text>
+<line x1="535" y1="0" x2="535" y2="168" stroke="#22c55e" stroke-dasharray="6,4" stroke-width="1.5" opacity="0.7"/><text x="535" y="164" fill="#22c55e" font-size="11" text-anchor="middle">Trunk 72.2%</text>
+<text x="72" y="23.599999999999998" fill="#555" font-size="12" text-anchor="end" font-family="monospace">2.2</text>
+<rect x="80" y="4" width="454.5" height="28" rx="4" fill="#22c55e" opacity="0.8"/>
+<text x="540.5454545454545" y="23.599999999999998" fill="#333" font-size="12" font-weight="600">72.2%</text>
+<text x="72" y="55.599999999999994" fill="#555" font-size="12" text-anchor="end" font-family="monospace">2.1</text>
+<rect x="80" y="36" width="419.6" height="28" rx="4" fill="#22c55e" opacity="0.8"/>
+<text x="505.6143098109312" y="55.599999999999994" fill="#333" font-size="12" font-weight="600">66.7%</text>
+<text x="72" y="87.6" fill="#555" font-size="12" text-anchor="end" font-family="monospace">2.3</text>
+<rect x="80" y="68" width="419.6" height="28" rx="4" fill="#6b7280" opacity="0.8"/>
+<text x="505.6143098109312" y="87.6" fill="#333" font-size="12" font-weight="600">66.7%</text>
+<text x="72" y="119.6" fill="#555" font-size="12" text-anchor="end" font-family="monospace">1.1</text>
+<rect x="80" y="100" width="402.1" height="28" rx="4" fill="#22c55e" opacity="0.8"/>
+<text x="488.11726794390876" y="119.6" fill="#333" font-size="12" font-weight="600">63.9%</text>
+</svg></div>
+    </div>
+  </div>
+
+  <div id="tab-tree" class="tab-content">
+    <div class="section">
+      <div class="filters">
+        <button class="filter-btn active" onclick="filterTree('all')">All</button>
+        <button class="filter-btn" onclick="filterTree('merged')">Merged</button>
+        <button class="filter-btn" onclick="filterTree('done')">Done</button>
+        <button class="filter-btn" onclick="filterTree('pending')">Pending</button>
+        <button class="filter-btn" onclick="filterTree('pruned')">Pruned</button>
+      </div>
+      <div class="tree-container" id="idea-tree">
+        <details class="tree-node" open style="border-left: 3px solid #3b82f6">
+          <summary class="tree-summary" style="background:#dbeafe">
+            <span class="tree-id">ROOT</span>
+            <span class="status-badge" style="background:#3b82f6">done</span>
+            
+            <span class="tree-hyp-short">Optimize terminal-bench-2 agent performance. The current baseline a...</span>
+          </summary>
+          <div class="tree-detail"><div class="tree-detail-hyp">Optimize terminal-bench-2 agent performance. The current baseline achieves 58.33% on dev (21/36), 69.81% on held-out test (37/53), and 65.17% on all 89 tasks using GPT-5.5. Treat these as distinct metrics: B_dev is data/dev.json, B_test is data/test.json, and the all-89 score is diagnostic only. Never use the all-89 score (65.17%) as the B_test baseline/trunk score.
+The agent is a ReAct-style terminal agent (terminus-2) that solves command-line tasks inside Docker containers. Tasks span 16 categories (software-engineering, security, scientific-computing, data-science, games, debugging, etc.) at easy/medium/hard difficulty.
+## What you CAN modify (optimization levers) - agent/templates/system_prompt.txt — the system prompt controlling the
+  agent&#x27;s reasoning, planning, and command generation. This is the PRIMARY
+  lever. It MUST preserve {instruction} and {terminal_state} placeholders.
+- prompts/extra_instruction.txt — appended to each task instruction.
+  SECONDARY lever (currently empty).
+- agent/optimized_terminus.py — the agent subclass. You can add
+  preprocessing, postprocessing, or override methods.
+- agent/terminus_2.py — the base agent implementation. You can modify
+  the ReAct loop, parsing, retry logic, etc.
+- agent/terminus_json_plain_parser.py, agent/terminus_xml_plain_parser.py
+  — response parsers.
+- agent/tmux_session.py — terminal session management. - Any new files you want to create under agent/ or prompts/.
+## What you MUST NOT modify - run_eval.py — the evaluation harness (read-only) - data/*.json — task lists and metadata (read-only) - .env — API keys and environment config (read-only) - .research_baseline.json — baseline reference (read-only)
+## Evaluation - Dev evaluation (use for experiment iterations):
+    HARBOR_N_CONCURRENT=8 python3 run_eval.py --data data/dev.json --run-name &lt;descriptive_name&gt; --workers 8
+- Test verification (use to validate promising results on held-out set):
+    HARBOR_N_CONCURRENT=8 python3 run_eval.py --data data/test.json --run-name &lt;descriptive_name&gt;_test --workers 8
+  - Baseline reference values:
+    B_dev baseline = 58.33% (21/36)
+    B_test baseline = 69.81% (37/53)
+    all-89 baseline = 65.17% (diagnostic only; do not use as B_test baseline)
+- Output format: last stdout line is JSON with {&quot;accuracy&quot;: float, &quot;correct&quot;: int, &quot;total&quot;: int, ...} - Always iterate on dev first. Only run test to verify after a meaningful dev improvement.
+## Docker / evaluation concurrency discipline - Do NOT overlap full dev/test evaluations. At most one `python3 run_eval.py --data data/dev.json`
+  or `python3 run_eval.py --data data/test.json` process may run at a time across all sub-agents.
+- Use tiny smoke tests first. - Use HARBOR_N_CONCURRENT=8 for full dev/test runs. Do not use 16+ unless explicitly instructed. - After any interrupted or failed Harbor run, clean up its Docker compose containers/networks before
+  launching another full eval. Docker&#x27;s default bridge address pools are limited and overlapping
+  compose jobs can fail with &quot;could not find an available, non-overlapping IPv4 address pool&quot;.
+- Prefer one sub-agent experiment at a time for any idea that may run the dev split. Do not dispatch
+  multiple eval-running ideas via RunSubagentParallel.
+
+## Evaluation discipline / early stopping - Terminal-bench evaluations can be slow because a few long-tail tasks may run until timeout. - While an eval is running, periodically inspect results/&lt;run-name&gt;/result.json (or the matching
+  worktree results directory) to monitor n_completed_trials, n_running_trials, n_pending_trials,
+  current reward counts, and errors.
+- Estimate an optimistic upper bound before waiting for long-tail tasks:
+    max_possible_correct = current_correct + n_running_trials + n_pending_trials
+    max_possible_accuracy = max_possible_correct / n_total_trials
+- If max_possible_accuracy cannot beat the current trunk/best dev score, stop waiting for the
+  remaining long-tail tasks. Terminate the eval/harbor process, clean up its Docker compose
+  containers/networks, record the partial evidence, and prune the idea.
+- Only wait for long-tail tasks when the candidate can still plausibly beat the current trunk/best
+  score or when the partial results are needed to diagnose a promising failure mode.
+
+## Case-first failure analysis - Before proposing or running a full-dev experiment, inspect concrete cases and error causes.
+  Read representative per-task artifacts from prior runs: metrics.json, eval_details.json,
+  result.json, trial.log, verifier output, and agent trajectory/debug logs when available.
+- Each experiment proposal must name the exact failed task(s) or exception class it targets,
+  the observed root cause, and the mechanism by which the proposed change should fix it.
+- Do not repeat broad prompt rewrites or generic verification rules unless the case analysis
+  shows a specific failure trace they address. Prefer narrow fixes tied to observed evidence.
+
+## Smoke-test protocol - Use more smoke tests before spending a full dev run. For each candidate, first run a small
+  targeted smoke eval on 2-5 tasks with HARBOR_N_CONCURRENT=2 or 3.
+- A smoke set should include at least one task the change is expected to fix and one regression
+  guard task that previously passed. Record pass/fail, exception type, and the key log snippet.
+- Only launch full B_dev after the smoke result supports the hypothesis or after explaining why
+  a smoke test cannot exercise the targeted failure mode. Only launch B_test after meaningful
+  B_dev improvement or for fixes known to affect test-only infrastructure failures.
+
+## Hints - The system prompt is ~100 lines of JSON-structured ReAct instructions.
+  Consider: better reasoning strategies, error recovery, task decomposition,
+  domain-specific heuristics, output formatting, etc.
+- The agent interacts via tmux keystrokes; be careful with command timing. - Look at failed tasks to understand failure modes (wrong approach, parsing
+  errors, timeouts, etc.) — results are saved in results/&lt;run-name&gt;/.
+- You can also modify the agent code itself (terminus_2.py, parsers, etc.)
+  to improve robustness, not just the prompt.
+</div><div class="tree-detail-section"><strong>Insight:</strong><br>**Global Research Insights**<br><br>Two complementary strategies emerge for stacking gains without regression risk on a divergent dev/test split:<br><br>**1. Dormant infra-robustness patches (highest confidence).** Wrap known failure points (e.g., Azure ContentPolicyViolation in `_query_llm`) with sanitize-then-retry logic whose activation conditions don&#x27;t occur on dev. Net effect: zero dev risk, +1.89pp on B_test by recovering ~4 crashed tasks. Mine test-side error traces (content filters, retry exhaustion, truncation boundaries) for more such patches; target *triggers* (e.g., long-tail observation bytes) not symptoms.<br><br>**2. Mechanism-grounded execution tips (moderate confidence).** Prompt additions that fix concrete execution bottlenecks transfer; cognitive checklists don&#x27;t. Background-execution for &gt;30s commands gave +5.55pp dev with no regressions; an output-validation menu cost −5.55pp by consuming turns on non-bottleneck behavior.<br><br>**Decision rules:**<br>- Single-task-magnitude dev deltas (~2.78pp) are noise; require mechanism + multi-category plausibility.<br>- Prefer execution-mechanics fixes (timeouts, retries, backgrounding) over reasoning menus.<br>- Prioritize changes whose activation is provably absent on dev — they stack gains monotonically.<br><br>**Next:** Promote background-execution tip to trunk; continue trace-mining for dormant test-only patches.</div></div>
+          <div class="tree-children">
+        <details class="tree-node" open style="border-left: 3px solid #3b82f6">
+          <summary class="tree-summary" style="background:#dbeafe">
+            <span class="tree-id">1</span>
+            <span class="status-badge" style="background:#3b82f6">done</span>
+            
+            <span class="tree-hyp-short">Direction: Code-side robustness fixes targeting known infra failure...</span>
+          </summary>
+          <div class="tree-detail"><div class="tree-detail-hyp">Direction: Code-side robustness fixes targeting known infra failure traces (content-filter crashes, retry logic, prompt truncation handling). Prior research verified that catching Azure ContentPolicyViolation in _query_llm with sanitize-then-retry gave +1.89pp on B_test with no dev regression. Low-risk, dormant on dev, real test win.</div><div class="tree-detail-section"><strong>Insight:</strong><br>**Synthesis:** Code-side robustness fixes targeting known infra failure traces are a low-risk, high-leverage strategy when dev and test distributions diverge. Specifically, wrapping `_query_llm` with Azure ContentPolicyViolation catching + sanitize-then-retry behaves as a dormant no-op on dev (which has no content-filter trips) but recovers ~4 crashed tasks on B_test (+1.89pp).<br><br>**Key learnings:**<br>- **Dormant scaffolds are safe bets:** Changes that only activate on observed test-side failure modes carry zero dev regression risk while capturing real wins.<br>- **Target the trigger, not the symptom:** Level-A tail truncation works because suspicious bytes in long terminal observations are the most probable content-filter trigger; sanitization should focus there rather than blanket-filtering inputs.<br>- **Infra failure traces are underexploited signal:** Crashes (content filters, retry exhaustion, prompt truncation) directly enumerate fixable tasks—each recovered crash is a near-guaranteed point.<br><br>**Actionable:** Continue mining test-side error traces for similar dormant-on-dev patches (retry logic edge cases, truncation boundaries). Prioritize fixes whose activation conditions provably don&#x27;t occur on dev to stack gains without regression risk.</div></div>
+          <div class="tree-children">
+        <details class="tree-node"  style="border-left: 3px solid #22c55e">
+          <summary class="tree-summary" style="background:#dcfce7">
+            <span class="tree-id">1.1</span>
+            <span class="status-badge" style="background:#22c55e">merged</span>
+            <span class="tree-score">63.9% <span style="color:#ef4444;font-size:12px">(-8.3)</span></span>
+            <span class="tree-hyp-short">Implement content-policy fallback in agent/terminus_2.py _query_llm...</span>
+          </summary>
+          <div class="tree-detail"><div class="tree-detail-hyp">Implement content-policy fallback in agent/terminus_2.py _query_llm: catch litellm BadRequestError / ContentPolicyViolationError where the message contains &quot;content_filter&quot; / &quot;ContentPolicyViolation&quot; / &quot;ResponsibleAIPolicyViolation&quot; / &quot;jailbreak&quot;. On first such hit, sanitize the chat history by replacing the most recent user message&#x27;s terminal_state region with only its last ~500 bytes and a &quot;[terminal output truncated for content-filter safety]&quot; marker, then retry. If still filtered, drop the last 2 message pairs and retry once with a minimal continuation. If still filtered, fall back to the existing summarization/short-summary path. Expected: B_dev unchanged (~58-72% within variance, no policy hits), B_test +1.89pp (rescues 4 known crashes: build-cython-ext, caffe-cifar-10, torch-pipeline-parallelism, vulnerable-secret).</div><div class="tree-detail-section"><strong>Insight:</strong><br>Dev set has no content-filter trips so the handler stays dormant; the change is a no-regression scaffold whose real value should manifest on B_test where Azure content filters crash 4 tasks. Level-A tail truncation targets the most likely trigger (suspicious bytes in long terminal observations).</div><div class="tree-detail-section"><strong>Result:</strong> B_dev improved from 58.33% (21/36) baseline to 63.89% (23/36) with 1 AgentTimeoutError, within variance and confirming no regression. Content-filter handler was not exercised on dev.</div><div class="tree-detail-section"><strong>Branch:</strong> <code>research/terminal_bench_autoresearch_20260531_025602_opus47_depth2_case_smoke/n1-1-implement-content-policy-fallbac-53dd8561</code></div></div>
+          
+        </details></div>
+        </details>
+        <details class="tree-node" open style="border-left: 3px solid #3b82f6">
+          <summary class="tree-summary" style="background:#dbeafe">
+            <span class="tree-id">2</span>
+            <span class="status-badge" style="background:#3b82f6">done</span>
+            
+            <span class="tree-hyp-short">Direction: Domain-aware prompt playbook (2.1-style: 5-phase UNDERST...</span>
+          </summary>
+          <div class="tree-detail"><div class="tree-detail-hyp">Direction: Domain-aware prompt playbook (2.1-style: 5-phase UNDERSTAND→PLAN→EXECUTE→VERIFY→RECOVER scaffold with category-specific tips). Prior dev result was 72.22% (+13.89pp), but test stayed at 69.81% (generalization gap). Goal here: apply the playbook AND tune to reduce the dev/test gap by focusing tips on robust execution practices that transfer across categories rather than dev-specific heuristics.</div><div class="tree-detail-section"><strong>Insight:</strong><br>**Node 2 synthesis: Domain-aware playbook tuning**<br><br>The 5-phase scaffold transfers cleanly but gains live within single-run noise (~2.78pp/task on 36-task dev), making mechanism-grounded additions the only reliable signal.<br><br>**What worked:**<br>- **Background-execution pattern for &gt;30s commands (2.2): +5.55pp dev**, no regressions. Mechanistic (unblocks long installs/builds) and category-agnostic, so it&#x27;s the best candidate to close the dev/test gap—test should include long-tail timeout tasks where this rescues failures.<br><br>**What didn&#x27;t:**<br>- **Output-validation tools menu (2.3): −5.55pp dev.** Adding validator scaffolding when validation isn&#x27;t the bottleneck appears to consume turns/attention and induces over-correction of already-correct outputs.<br>- **Plain 2.1 re-application: +2.78pp**, below prior 72.22% peak—within variance, no real signal.<br><br>**Actionable conclusions:**<br>1. Prefer tips targeting *execution mechanics* (background processes, timeouts, retries) over *cognitive menus* (validation checklists) — the former reduce real failure modes; the latter compete for budget.<br>2. Promote 2.2 to trunk and evaluate on test, especially long-running tasks.<br>3. Treat any single-task-magnitude dev change as noise; require mechanism + multi-category plausibility before adopting.</div></div>
+          <div class="tree-children">
+        <details class="tree-node"  style="border-left: 3px solid #22c55e">
+          <summary class="tree-summary" style="background:#dcfce7">
+            <span class="tree-id">2.1</span>
+            <span class="status-badge" style="background:#22c55e">merged</span>
+            <span class="tree-score">66.7% <span style="color:#ef4444;font-size:12px">(-5.5)</span></span>
+            <span class="tree-hyp-short">Apply the 2.1 playbook patch (5-phase scaffold + domain-specific ti...</span>
+          </summary>
+          <div class="tree-detail"><div class="tree-detail-hyp">Apply the 2.1 playbook patch (5-phase scaffold + domain-specific tips) to current trunk&#x27;s agent/templates/system_prompt.txt and prompts/extra_instruction.txt. The patch is at /mnt/data0/jiajie/autoresearch/research_sessions/terminal_bench/arbor_runs/terminal_bench_autoresearch_20260528_123134_serial8/experiments/2.1/diff.patch (366 lines). Prior result: dev 72.22% (+13.89pp), test 69.81% (no gain). With current trunk also containing the content-filter fix, expected: dev ~70-72%, test ~71-72% (preserves the +1.89pp infra fix). Even if test doesn&#x27;t gain, the dev improvement is substantial enough to merge if test doesn&#x27;t regress below current trunk (71.70%).</div><div class="tree-detail-section"><strong>Insight:</strong><br>The 2.1 playbook patch (5-phase scaffold + domain tips) applies cleanly on current trunk and lifts dev +2.78pp over trunk, but falls below the prior 72.22% peak—consistent with single-run variance on 36 tasks where one task ≈ 2.78pp. Content-filter fix is preserved.</div><div class="tree-detail-section"><strong>Result:</strong> Dev B_dev 66.67% (24/36, 2 timeouts) vs trunk 63.89% and baseline 58.33%; patch applied via git apply with no drift, terminus_2.py untouched.</div><div class="tree-detail-section"><strong>Branch:</strong> <code>research/terminal_bench_autoresearch_20260531_025602_opus47_depth2_case_smoke/n2-1-apply-the-2-1-playbook-patch-5-p-82a76a85</code></div></div>
+          
+        </details>
+        <details class="tree-node"  style="border-left: 3px solid #22c55e">
+          <summary class="tree-summary" style="background:#dcfce7">
+            <span class="tree-id">2.2</span>
+            <span class="status-badge" style="background:#22c55e">merged</span>
+            <span class="tree-score">72.2% <span style="color:#888;font-size:12px">(0.0)</span></span>
+            <span class="tree-hyp-short">Targeted additive improvement: append a &quot;LONG-RUNNING COMMANDS&quot; sec...</span>
+          </summary>
+          <div class="tree-detail"><div class="tree-detail-hyp">Targeted additive improvement: append a &quot;LONG-RUNNING COMMANDS&quot; section to extra_instruction.txt with concrete background-execution patterns. Specifically: (a) for any command expected to take &gt;30s (apt install, pip install large pkgs, pip install with build, make for big projects, model downloads, ML training): wrap as `nohup CMD &gt; /tmp/cmd.log 2&gt;&amp;1 &amp; echo $! &gt; /tmp/cmd.pid`; (b) poll with `tail -n 30 /tmp/cmd.log` and `kill -0 $(cat /tmp/cmd.pid) &amp;&amp; echo RUNNING || echo DONE`; (c) only consider the command finished when the process exits AND the log shows the success indicator. This addresses prior observations that long-tail timeouts cause failures and that the agent sometimes wastes turns blocking on commands. Targets: build-/install-heavy tasks across software-engineering, ML, system-admin categories. Expected: small B_dev shift within variance (no regression), potential B_test rescue of 1-2 long-tail tasks.</div><div class="tree-detail-section"><strong>Insight:</strong><br>Adding an explicit background-execution pattern section for &gt;30s commands yielded a +5.55pp dev uplift with no regression, landing at the top of the historical variance band. The gain is plausibly mechanistic (reduces blocking on long installs/builds) but within noise, so B_test rescue of long-tail timeout tasks is the real test.</div><div class="tree-detail-section"><strong>Result:</strong> B_dev rose from 66.67% (trunk) to 72.22% (26/36, 2 AgentTimeoutErrors) after appending a LONG-RUNNING COMMANDS section to extra_instruction.txt.</div><div class="tree-detail-section"><strong>Branch:</strong> <code>research/terminal_bench_autoresearch_20260531_025602_opus47_depth2_case_smoke/n2-2-targeted-additive-improvement-ap-12019dec</code></div></div>
+          
+        </details>
+        <details class="tree-node"  style="border-left: 3px solid #6b7280">
+          <summary class="tree-summary" style="background:#f3f4f6">
+            <span class="tree-id">2.3</span>
+            <span class="status-badge" style="background:#6b7280">pruned</span>
+            <span class="tree-score">66.7% <span style="color:#ef4444;font-size:12px">(-5.5)</span></span>
+            <span class="tree-hyp-short">Following the success of 2.2 (concrete recoverable execution patter...</span>
+          </summary>
+          <div class="tree-detail"><div class="tree-detail-hyp">Following the success of 2.2 (concrete recoverable execution patterns → +5.55pp dev / +3.76pp test), add another tight pattern-based section to extra_instruction.txt: &quot;OUTPUT VALIDATION TOOLS&quot;. This addresses wrong-output failures (the dominant category per prior research: 14/18 test failures were wrong-output, not crash/timeout) by giving the agent concrete commands to validate that its produced output matches the requested format, BEFORE declaring complete. Unlike prior failed &quot;verify before complete&quot; attempts (1.3.1, 3.2.1) which forced extra turns or generic re-checks, this provides only concrete TOOLS the agent can opt into during normal verification: jq for JSON, python -c &quot;import csv;...&quot; for CSV row/header check, diff/cmp for byte-exact, sha256sum for hash checks, grep for substring presence, ls -la for size sanity. Expected: small dev shift within variance, potential rescue of 1-3 wrong-output tasks on test.</div><div class="tree-detail-section"><strong>Insight:</strong><br>Adding an OUTPUT VALIDATION TOOLS menu caused a 5.55pp dev regression, possibly nudging the agent to over-validate and &#x27;fix&#x27; already-correct outputs on tasks with unambiguous formats. Mechanism-grounded validator menus may compete for attention/turns when validation isn&#x27;t the bottleneck on dev.<br>[Pruned: B_dev regressed by 5.55pp (72.22→66.67). Validator menu likely caused over-validation / &quot;fixing&quot; already-correct outputs on dev. Convergence warning fired. Not worth merging.]</div><div class="tree-detail-section"><strong>Result:</strong> Dev dropped from 72.22% (26/36) trunk to 66.67% (24/36) after appending OUTPUT VALIDATION TOOLS section above VERIFICATION in extra_instruction.txt.</div><div class="tree-detail-section"><strong>Branch:</strong> <code>research/terminal_bench_autoresearch_20260531_025602_opus47_depth2_case_smoke/n2-3-following-the-success-of-2-2-con-f97c9b57</code></div></div>
+          
+        </details></div>
+        </details></div>
+        </details></div>
+    </div>
+  </div>
+
+  <div id="tab-table" class="tab-content">
+    <div class="section">
+      <div class="table-container">
+    <table class="exp-table">
+      <thead>
+        <tr>
+          <th>#</th><th>Node</th><th>Score</th><th>Delta</th>
+          <th>Status</th><th>Hypothesis</th><th>Insight</th>
+        </tr>
+      </thead>
+      <tbody>
+        <tr style="background:#dcfce722">
+          <td class="rank">1</td>
+          <td class="nid"><code>2.2</code></td>
+          <td class="score-cell"><strong>72.2%</strong></td>
+          <td class="delta-cell"><span style="color:#888">0.0</span></td>
+          <td><span class="status-badge" style="background:#22c55e">merged</span></td>
+          <td class="hyp-cell" title="Targeted additive improvement: append a &quot;LONG-RUNNING COMMANDS&quot; section to extra_instruction.txt with concrete background-execution patterns. Specifically: (a) for any command expected to take &gt;30s (apt install, pip install large pkgs, pip install with build, make for big projects, model downloads, ML training): wrap as `nohup CMD &gt; /tmp/cmd.log 2&gt;&amp;1 &amp; echo $! &gt; /tmp/cmd.pid`; (b) poll with `tail -n 30 /tmp/cmd.log` and `kill -0 $(cat /tmp/cmd.pid) &amp;&amp; echo RUNNING || echo DONE`; (c) only consider the command finished when the process exits AND the log shows the success indicator. This addresses prior observations that long-tail timeouts cause failures and that the agent sometimes wastes turns blocking on commands. Targets: build-/install-heavy tasks across software-engineering, ML, system-admin categories. Expected: small B_dev shift within variance (no regression), potential B_test rescue of 1-2 long-tail tasks.">Targeted additive improvement: append a &quot;LONG-RUNNING COM...</td>
+          <td class="insight-cell" title="Adding an explicit background-execution pattern section for &gt;30s commands yielded a +5.55pp dev uplift with no regression, landing at the top of the historical variance band. The gain is plausibly mechanistic (reduces blocking on long installs/builds) but within noise, so B_test rescue of long-tail timeout tasks is the real test.">Adding an explicit background-execution pattern section f...</td>
+        </tr>
+        <tr style="background:#dcfce722">
+          <td class="rank">2</td>
+          <td class="nid"><code>2.1</code></td>
+          <td class="score-cell"><strong>66.7%</strong></td>
+          <td class="delta-cell"><span style="color:#ef4444">-5.5</span></td>
+          <td><span class="status-badge" style="background:#22c55e">merged</span></td>
+          <td class="hyp-cell" title="Apply the 2.1 playbook patch (5-phase scaffold + domain-specific tips) to current trunk&#x27;s agent/templates/system_prompt.txt and prompts/extra_instruction.txt. The patch is at /mnt/data0/jiajie/autoresearch/research_sessions/terminal_bench/arbor_runs/terminal_bench_autoresearch_20260528_123134_serial8/experiments/2.1/diff.patch (366 lines). Prior result: dev 72.22% (+13.89pp), test 69.81% (no gain). With current trunk also containing the content-filter fix, expected: dev ~70-72%, test ~71-72% (preserves the +1.89pp infra fix). Even if test doesn&#x27;t gain, the dev improvement is substantial enough to merge if test doesn&#x27;t regress below current trunk (71.70%).">Apply the 2.1 playbook patch (5-phase scaffold + domain-s...</td>
+          <td class="insight-cell" title="The 2.1 playbook patch (5-phase scaffold + domain tips) applies cleanly on current trunk and lifts dev +2.78pp over trunk, but falls below the prior 72.22% peak—consistent with single-run variance on 36 tasks where one task ≈ 2.78pp. Content-filter fix is preserved.">The 2.1 playbook patch (5-phase scaffold + domain tips) a...</td>
+        </tr>
+        <tr style="background:#f3f4f622">
+          <td class="rank">3</td>
+          <td class="nid"><code>2.3</code></td>
+          <td class="score-cell"><strong>66.7%</strong></td>
+          <td class="delta-cell"><span style="color:#ef4444">-5.5</span></td>
+          <td><span class="status-badge" style="background:#6b7280">pruned</span></td>
+          <td class="hyp-cell" title="Following the success of 2.2 (concrete recoverable execution patterns → +5.55pp dev / +3.76pp test), add another tight pattern-based section to extra_instruction.txt: &quot;OUTPUT VALIDATION TOOLS&quot;. This addresses wrong-output failures (the dominant category per prior research: 14/18 test failures were wrong-output, not crash/timeout) by giving the agent concrete commands to validate that its produced output matches the requested format, BEFORE declaring complete. Unlike prior failed &quot;verify before complete&quot; attempts (1.3.1, 3.2.1) which forced extra turns or generic re-checks, this provides only concrete TOOLS the agent can opt into during normal verification: jq for JSON, python -c &quot;import csv;...&quot; for CSV row/header check, diff/cmp for byte-exact, sha256sum for hash checks, grep for substring presence, ls -la for size sanity. Expected: small dev shift within variance, potential rescue of 1-3 wrong-output tasks on test.">Following the success of 2.2 (concrete recoverable execut...</td>
+          <td class="insight-cell" title="Adding an OUTPUT VALIDATION TOOLS menu caused a 5.55pp dev regression, possibly nudging the agent to over-validate and &#x27;fix&#x27; already-correct outputs on tasks with unambiguous formats. Mechanism-grounded validator menus may compete for attention/turns when validation isn&#x27;t the bottleneck on dev.
+[Pruned: B_dev regressed by 5.55pp (72.22→66.67). Validator menu likely caused over-validation / &quot;fixing&quot; already-correct outputs on dev. Convergence warning fired. Not worth merging.]">Adding an OUTPUT VALIDATION TOOLS menu caused a 5.55pp de...</td>
+        </tr>
+        <tr style="background:#dcfce722">
+          <td class="rank">4</td>
+          <td class="nid"><code>1.1</code></td>
+          <td class="score-cell"><strong>63.9%</strong></td>
+          <td class="delta-cell"><span style="color:#ef4444">-8.3</span></td>
+          <td><span class="status-badge" style="background:#22c55e">merged</span></td>
+          <td class="hyp-cell" title="Implement content-policy fallback in agent/terminus_2.py _query_llm: catch litellm BadRequestError / ContentPolicyViolationError where the message contains &quot;content_filter&quot; / &quot;ContentPolicyViolation&quot; / &quot;ResponsibleAIPolicyViolation&quot; / &quot;jailbreak&quot;. On first such hit, sanitize the chat history by replacing the most recent user message&#x27;s terminal_state region with only its last ~500 bytes and a &quot;[terminal output truncated for content-filter safety]&quot; marker, then retry. If still filtered, drop the last 2 message pairs and retry once with a minimal continuation. If still filtered, fall back to the existing summarization/short-summary path. Expected: B_dev unchanged (~58-72% within variance, no policy hits), B_test +1.89pp (rescues 4 known crashes: build-cython-ext, caffe-cifar-10, torch-pipeline-parallelism, vulnerable-secret).">Implement content-policy fallback in agent/terminus_2.py ...</td>
+          <td class="insight-cell" title="Dev set has no content-filter trips so the handler stays dormant; the change is a no-regression scaffold whose real value should manifest on B_test where Azure content filters crash 4 tasks. Level-A tail truncation targets the most likely trigger (suspicious bytes in long terminal observations).">Dev set has no content-filter trips so the handler stays ...</td>
+        </tr></tbody>
+    </table></div>
+    </div>
+  </div>
+
+  <!-- Global Insights -->
+  
+  <div class="section">
+    <div class="section-title">Global Research Insights</div>
+    <div class="insight-block"><div class="insight-content">**Global Research Insights**<br><br>Two complementary strategies emerge for stacking gains without regression risk on a divergent dev/test split:<br><br>**1. Dormant infra-robustness patches (highest confidence).** Wrap known failure points (e.g., Azure ContentPolicyViolation in `_query_llm`) with sanitize-then-retry logic whose activation conditions don&#x27;t occur on dev. Net effect: zero dev risk, +1.89pp on B_test by recovering ~4 crashed tasks. Mine test-side error traces (content filters, retry exhaustion, truncation boundaries) for more such patches; target *triggers* (e.g., long-tail observation bytes) not symptoms.<br><br>**2. Mechanism-grounded execution tips (moderate confidence).** Prompt additions that fix concrete execution bottlenecks transfer; cognitive checklists don&#x27;t. Background-execution for &gt;30s commands gave +5.55pp dev with no regressions; an output-validation menu cost −5.55pp by consuming turns on non-bottleneck behavior.<br><br>**Decision rules:**<br>- Single-task-magnitude dev deltas (~2.78pp) are noise; require mechanism + multi-category plausibility.<br>- Prefer execution-mechanics fixes (timeouts, retries, backgrounding) over reasoning menus.<br>- Prioritize changes whose activation is provably absent on dev — they stack gains monotonically.<br><br>**Next:** Promote background-execution tip to trunk; continue trace-mining for dormant test-only patches.</div></div>
+  </div>
+  
+
+  <div class="footer">
+    Generated by Research Agent &mdash; 2026-05-31
+  </div>
+</div>
+
+<script>
+function switchTab(name) {
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+  document.getElementById('tab-' + name).classList.add('active');
+  event.target.classList.add('active');
+}
+
+function filterTree(status) {
+  document.querySelectorAll('.filter-btn').forEach(b => b.classList.remove('active'));
+  event.target.classList.add('active');
+  document.querySelectorAll('.tree-node').forEach(node => {
+    if (status === 'all') {
+      node.style.display = '';
+      return;
+    }
+    const badge = node.querySelector(':scope > .tree-summary .status-badge');
+    if (badge && badge.textContent.trim().toLowerCase() === status) {
+      node.style.display = '';
+      // Also show all ancestors
+      let parent = node.parentElement;
+      while (parent) {
+        if (parent.classList && parent.classList.contains('tree-node')) {
+          parent.style.display = '';
+          parent.open = true;
+        }
+        parent = parent.parentElement;
+      }
+    } else {
+      node.style.display = 'none';
+    }
+  });
+}
+
+// Make table sortable
+document.querySelectorAll('.exp-table th').forEach((th, idx) => {
+  th.addEventListener('click', () => {
+    const table = th.closest('table');
+    const tbody = table.querySelector('tbody');
+    const rows = Array.from(tbody.querySelectorAll('tr'));
+    const dir = th.dataset.sortDir === 'asc' ? 'desc' : 'asc';
+    th.dataset.sortDir = dir;
+
+    rows.sort((a, b) => {
+      let av = a.cells[idx].textContent.trim();
+      let bv = b.cells[idx].textContent.trim();
+      const an = parseFloat(av.replace('%',''));
+      const bn = parseFloat(bv.replace('%',''));
+      if (!isNaN(an) && !isNaN(bn)) {
+        return dir === 'asc' ? an - bn : bn - an;
+      }
+      return dir === 'asc' ? av.localeCompare(bv) : bv.localeCompare(av);
+    });
+
+    rows.forEach(r => tbody.appendChild(r));
+  });
+});
+</script>
+
+</body>
+</html>

@@ -1,0 +1,643 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Idea Tree — V3 skill_20cycles (BrowseComp)</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&family=Noto+Sans+SC:wght@300;400;500;700&display=swap');
+:root {
+    --bg: #0f1117; --bg-card: #1a1d27; --bg-card-hover: #22263a;
+    --accent: #6c8cff; --accent-glow: rgba(108,140,255,0.15);
+    --accent2: #ff6c6c; --accent3: #4ecdc4; --accent4: #ffe66d;
+    --text: #e4e7ef; --text-muted: #8b90a0; --border: #2a2e3e;
+    --success: #4ecdc4; --fail: #ff6c6c; --radius: 12px;
+}
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:'Inter','Noto Sans SC',sans-serif; background:var(--bg); color:var(--text); line-height:1.6; }
+
+.top-bar {
+    position:fixed; top:0; left:0; right:0; z-index:100;
+    display:flex; align-items:center; gap:12px;
+    padding:14px 28px;
+    background:rgba(15,17,23,0.92); backdrop-filter:blur(16px);
+    border-bottom:1px solid var(--border);
+}
+.top-bar .logo { font-weight:700; font-size:17px; color:var(--accent); white-space:nowrap; }
+.top-bar .sep { color:var(--border); font-size:20px; }
+.tab-btn {
+    background:transparent; border:1px solid transparent;
+    color:var(--text-muted); font:500 14px 'Inter','Noto Sans SC',sans-serif;
+    padding:7px 18px; border-radius:8px; cursor:pointer; transition:all .2s;
+}
+.tab-btn:hover { color:var(--text); background:var(--bg-card); }
+.tab-btn.active { color:var(--accent); background:var(--accent-glow); border-color:rgba(108,140,255,0.3); }
+.top-bar .info { margin-left:auto; font-size:12px; color:var(--text-muted); font-family:'JetBrains Mono',monospace; }
+
+.page { display:none; padding:80px 20px 40px; }
+.page.active { display:block; }
+
+.tree-header { max-width:1180px; margin:0 auto 20px; padding:0 8px; }
+.tree-header h1 {
+    font-size:28px; font-weight:700;
+    background:linear-gradient(135deg,var(--accent),#a78bfa);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent;
+    margin-bottom:6px;
+}
+.tree-header .sub { font-size:14px; color:var(--text-muted); }
+
+.legend {
+    display:flex; gap:16px; flex-wrap:wrap; padding:12px 20px;
+    background:var(--bg-card); border:1px solid var(--border); border-radius:var(--radius);
+    max-width:1180px; margin:0 auto 20px; font-size:12px;
+}
+.legend-item { display:flex; align-items:center; gap:5px; }
+.legend-dot { width:12px; height:12px; border-radius:3px; border:2px solid; }
+.leg-merged { border-color:var(--success); background:rgba(78,205,196,0.15); }
+.leg-done { border-color:var(--accent); background:rgba(108,140,255,0.15); }
+.leg-pruned { border-color:var(--fail); background:rgba(255,108,108,0.15); }
+.leg-pending { border-color:var(--accent4); background:rgba(255,230,109,0.15); }
+.leg-best { border-color:#a78bfa; background:rgba(167,139,250,0.18); }
+
+.tree-scroll { overflow-x:auto; overflow-y:visible; padding:20px 0 40px; min-height:300px; }
+.itree { display:inline-flex; flex-direction:column; align-items:center; min-width:100%; padding:0 20px; }
+.itree ul { padding:0; margin:0; list-style:none; display:flex; justify-content:center; position:relative; padding-top:30px; }
+.itree > ul { padding-top:0; }
+.itree li { display:flex; flex-direction:column; align-items:center; position:relative; padding:30px 5px 0; }
+.itree li::before, .itree li::after {
+    content:''; position:absolute; top:0; right:50%;
+    border-top:2px solid var(--border); width:50%; height:30px;
+}
+.itree li::after { right:auto; left:50%; border-left:2px solid var(--border); }
+.itree li:first-child::before { border:0 none; }
+.itree li:last-child::after { border:0 none; }
+.itree li:last-child::before { border-right:2px solid var(--border); border-radius:0 5px 0 0; }
+.itree li:first-child::after { border-radius:5px 0 0 0; }
+.itree li:only-child { padding-top:30px; }
+.itree li:only-child::before { display:block; border:0 none; border-left:2px solid var(--border); width:0; left:50%; right:auto; height:30px; }
+.itree li:only-child::after { display:none; }
+.itree ul ul::before { content:''; position:absolute; top:0; left:50%; border-left:2px solid var(--border); width:0; height:30px; }
+.itree > ul > li { padding-top:0; }
+.itree > ul > li::before, .itree > ul > li::after { display:none; }
+
+.inode {
+    position:relative; padding:8px 10px;
+    background:var(--bg-card); border:2px solid var(--border); border-radius:8px;
+    cursor:pointer; transition:all .2s ease; text-align:center; white-space:normal;
+}
+.inode:hover { transform:translateY(-3px); box-shadow:0 6px 24px rgba(0,0,0,0.5); z-index:10; }
+.inode.d0 { min-width:240px; max-width:320px; padding:12px 16px; }
+.inode.d1 { min-width:130px; max-width:180px; }
+.inode.d2 { min-width:120px; max-width:170px; }
+.inode.st-merged { border-color:var(--success); }
+.inode.st-best { border-color:#a78bfa; box-shadow:0 0 0 1px rgba(167,139,250,0.25); }
+.inode.st-best:hover { box-shadow:0 6px 24px rgba(167,139,250,0.4); }
+.inode.st-done { border-color:var(--accent); }
+.inode.st-pruned { border-color:var(--fail); opacity:0.7; }
+.inode.st-pruned:hover { opacity:1; box-shadow:0 6px 24px rgba(255,108,108,0.25); }
+.inode.st-pending { border-color:var(--accent4); }
+.inode .n-id { font-family:'JetBrains Mono',monospace; font-size:12px; font-weight:700; color:var(--accent); }
+.inode.d0 .n-id { font-size:14px; }
+.inode .n-sc { font-family:'JetBrains Mono',monospace; font-size:15px; font-weight:700; margin:2px 0; }
+.inode.d2 .n-sc { font-size:14px; }
+.n-sc.sc-up { color:var(--success); }
+.n-sc.sc-mid { color:var(--accent4); }
+.n-sc.sc-down { color:var(--fail); }
+.inode .n-st {
+    font-size:9px; padding:1px 5px; border-radius:3px; font-weight:700;
+    display:inline-block; margin:2px 0; letter-spacing:0.3px;
+}
+.n-st.st-merged { background:rgba(78,205,196,0.18); color:var(--success); }
+.n-st.st-best { background:rgba(167,139,250,0.2); color:#a78bfa; }
+.n-st.st-done { background:rgba(108,140,255,0.18); color:var(--accent); }
+.n-st.st-pruned { background:rgba(255,108,108,0.15); color:var(--fail); }
+.n-st.st-pending { background:rgba(255,230,109,0.18); color:var(--accent4); }
+.inode .n-lbl {
+    font-size:10.5px; color:var(--text-muted); margin-top:2px; line-height:1.3;
+    overflow:hidden; display:-webkit-box; -webkit-line-clamp:3; -webkit-box-orient:vertical;
+}
+.inode.d0 .n-lbl { font-size:12px; -webkit-line-clamp:3; }
+
+.itip {
+    display:none; position:fixed; z-index:9999;
+    background:#1a1d2a; border:1px solid rgba(108,140,255,0.35);
+    border-radius:12px; padding:16px 18px;
+    width:480px; max-height:480px; overflow-y:auto;
+    box-shadow:0 12px 48px rgba(0,0,0,0.65); pointer-events:none;
+}
+.itip.vis { display:block; }
+.itip .t-hd { display:flex; align-items:center; gap:8px; margin-bottom:8px; flex-wrap:wrap; }
+.itip .t-id { font-family:'JetBrains Mono',monospace; font-size:16px; font-weight:700; color:var(--accent); }
+.itip .t-sc { font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:700; }
+.itip .t-hyp { font-size:12.5px; color:var(--text); line-height:1.55; margin-bottom:10px; padding-bottom:8px; border-bottom:1px solid var(--border); }
+.itip .t-ins { font-size:12.5px; color:var(--text-muted); line-height:1.65; }
+.itip .t-ins b { color:var(--text); }
+.itip .t-res { font-size:12px; color:var(--accent3); margin-top:10px; padding-top:8px; border-top:1px solid var(--border); font-family:'JetBrains Mono',monospace; line-height:1.5; }
+
+/* === DETAIL PANEL === */
+.dp-overlay { display:none; position:fixed; inset:0; z-index:1000; background:rgba(0,0,0,0.45); backdrop-filter:blur(3px); }
+.dp-overlay.vis { display:block; }
+.dp { position:fixed; top:0; right:-560px; bottom:0; z-index:1001; width:540px; max-width:92vw;
+    background:#13151f; border-left:1px solid var(--border); box-shadow:-8px 0 48px rgba(0,0,0,0.65);
+    overflow-y:auto; transition:right .3s cubic-bezier(.4,0,.2,1);
+}
+.dp.vis { right:0; }
+.dp-head { position:sticky; top:0; z-index:10; display:flex; align-items:center; gap:12px; flex-wrap:wrap;
+    padding:20px 24px 16px; background:#13151f; border-bottom:1px solid var(--border); }
+.dp-head .dp-id { font-family:'JetBrains Mono',monospace; font-size:22px; font-weight:700; color:var(--accent); }
+.dp-head .dp-sc { font-family:'JetBrains Mono',monospace; font-size:18px; font-weight:700; }
+.dp-close { margin-left:auto; background:transparent; border:1px solid var(--border);
+    color:var(--text-muted); font-size:18px; width:36px; height:36px;
+    border-radius:8px; cursor:pointer; transition:all .2s;
+    display:flex; align-items:center; justify-content:center; }
+.dp-close:hover { background:var(--bg-card-hover); color:var(--text); border-color:var(--accent); }
+.dp-body { padding:0 24px 32px; }
+.dp-sect { margin:16px 0; padding:14px 16px; background:rgba(15,17,23,0.6);
+    border:1px solid var(--border); border-radius:10px; }
+.dp-sect-title { display:flex; align-items:center; gap:8px; font-size:12px; font-weight:700; color:var(--text-muted);
+    text-transform:uppercase; letter-spacing:0.5px; margin-bottom:10px; padding-bottom:8px;
+    border-bottom:1px solid rgba(255,255,255,0.05); }
+.dp-sect-title .icon { font-size:15px; }
+.dp-sect-content { font-size:13.5px; color:var(--text); line-height:1.75; }
+.dp-sect-content b { color:var(--accent); }
+.dp-sect.sect-hyp { border-left:3px solid var(--accent); }
+.dp-sect.sect-insight { border-left:3px solid var(--accent3); }
+.dp-sect.sect-result { border-left:3px solid var(--accent4); }
+.dp-sect.sect-detail { border-left:3px solid #a78bfa; }
+.dp-sect.sect-children { border-left:3px solid var(--border); }
+.dp-children-grid { display:flex; flex-wrap:wrap; gap:6px; margin-top:4px; }
+.dp-child-link { display:inline-flex; align-items:center; gap:4px;
+    padding:4px 10px; border-radius:6px;
+    background:var(--bg-card); border:1px solid var(--border);
+    color:var(--text-muted); font:500 12px 'JetBrains Mono',monospace;
+    cursor:pointer; transition:all .15s; text-decoration:none; }
+.dp-child-link:hover { color:var(--accent); border-color:rgba(108,140,255,0.4); background:var(--accent-glow); }
+.dp-child-link .cl-st { width:8px; height:8px; border-radius:2px; flex-shrink:0; }
+.cl-st.st-merged { background:var(--success); }
+.cl-st.st-best { background:#a78bfa; }
+.cl-st.st-done { background:var(--accent); }
+.cl-st.st-pruned { background:var(--fail); opacity:0.6; }
+.cl-st.st-pending { background:var(--accent4); }
+.dp-parent-link { display:inline-flex; align-items:center; gap:6px;
+    color:var(--accent); font-size:13px; cursor:pointer; text-decoration:none; margin-bottom:12px; opacity:0.8; }
+.dp-parent-link:hover { opacity:1; text-decoration:underline; }
+
+/* === ANALYSIS PAGE === */
+.analysis-wrap { max-width:1100px; margin:0 auto; padding:0 8px; }
+.analysis-wrap h1 { font-size:28px; margin-bottom:6px;
+    background:linear-gradient(135deg,var(--accent),#a78bfa);
+    -webkit-background-clip:text; -webkit-text-fill-color:transparent; }
+.analysis-wrap .sub { color:var(--text-muted); font-size:14px; margin-bottom:24px; }
+.kpi-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(180px,1fr)); gap:14px; margin:16px 0 28px; }
+.kpi { background:var(--bg-card); border:1px solid var(--border); border-radius:10px; padding:16px 18px; }
+.kpi .k-lbl { font-size:11px; color:var(--text-muted); text-transform:uppercase; letter-spacing:0.5px; margin-bottom:6px; }
+.kpi .k-val { font-family:'JetBrains Mono',monospace; font-size:22px; font-weight:700; color:var(--accent); }
+.kpi .k-sub { font-size:11px; color:var(--text-muted); margin-top:4px; }
+.kpi.up .k-val { color:var(--success); }
+.kpi.down .k-val { color:var(--fail); }
+.kpi.warn .k-val { color:var(--accent4); }
+
+.section-card { background:var(--bg-card); border:1px solid var(--border); border-radius:12px;
+    padding:22px 26px; margin:18px 0; }
+.section-card h2 { font-size:18px; margin-bottom:12px; color:var(--text); }
+.section-card h2 .icon { margin-right:8px; }
+.section-card p { font-size:14px; color:var(--text); line-height:1.75; margin-bottom:10px; }
+.section-card ul { padding-left:20px; margin:6px 0 12px; }
+.section-card li { font-size:13.5px; color:var(--text); line-height:1.75; margin-bottom:6px; }
+.section-card b { color:var(--accent); }
+.section-card .em-success { color:var(--success); font-weight:600; }
+.section-card .em-fail { color:var(--fail); font-weight:600; }
+.section-card .em-warn { color:var(--accent4); font-weight:600; }
+
+.score-table { width:100%; border-collapse:collapse; margin:12px 0; font-size:13px; }
+.score-table th, .score-table td { padding:8px 10px; border-bottom:1px solid var(--border); text-align:left; }
+.score-table th { color:var(--text-muted); font-size:11px; text-transform:uppercase; letter-spacing:0.5px; font-weight:600; }
+.score-table td.num { font-family:'JetBrains Mono',monospace; font-weight:600; text-align:right; }
+.score-table tr:hover { background:rgba(108,140,255,0.04); }
+.delta-up { color:var(--success); }
+.delta-down { color:var(--fail); }
+.delta-flat { color:var(--text-muted); }
+.bar-cell { position:relative; }
+.bar-cell .bar { display:inline-block; height:14px; vertical-align:middle; border-radius:3px; margin-right:8px;
+    background:linear-gradient(90deg, rgba(108,140,255,0.6), rgba(167,139,250,0.6)); }
+.bar-cell.best .bar { background:linear-gradient(90deg, rgba(78,205,196,0.7), rgba(167,139,250,0.8)); }
+.bar-cell.bad .bar { background:linear-gradient(90deg, rgba(255,108,108,0.6), rgba(255,108,108,0.3)); }
+
+.callout { border-left:4px solid var(--accent3); background:rgba(78,205,196,0.06);
+    padding:14px 18px; border-radius:0 10px 10px 0; margin:14px 0; font-size:13.5px; line-height:1.75; }
+.callout.warn { border-left-color:var(--accent4); background:rgba(255,230,109,0.06); }
+.callout.fail { border-left-color:var(--fail); background:rgba(255,108,108,0.06); }
+.callout b { color:var(--accent); }
+
+::-webkit-scrollbar { width:6px; height:6px; }
+::-webkit-scrollbar-track { background:var(--bg); }
+::-webkit-scrollbar-thumb { background:var(--border); border-radius:3px; }
+</style>
+</head>
+<body>
+
+<div class="top-bar">
+    <span class="logo">Idea Tree · V3 skill_20cycles</span>
+    <span class="sep">|</span>
+    <button class="tab-btn active" onclick="switchTab('tree',this)">Idea Tree</button>
+    <button class="tab-btn" onclick="switchTab('analysis',this)">实验分析</button>
+    <span class="info">点击节点查看详情 · 悬浮快速预览</span>
+</div>
+
+<!-- ============================================== -->
+<!-- TREE PAGE -->
+<!-- ============================================== -->
+<div id="page-tree" class="page active">
+    <div class="tree-header">
+        <h1>V3 Idea Tree — skill_20cycles (BrowseComp)</h1>
+        <div class="sub">5 个根节点 · 20 cycles 配额（实际探索 9 个节点）· baseline dev 50% / test 32.7% · 最优 dev <b>62.5%</b> / test <b>50.7%</b> (5.4) · 总耗时 10h06m · <b style="color:var(--success);">5.4 已合并进 trunk</b></div>
+    </div>
+    <div class="legend">
+        <div class="legend-item"><div class="legend-dot leg-best"></div><span>最优（候选合并）</span></div>
+        <div class="legend-item"><div class="legend-dot leg-done"></div><span>已完成 / 高于 baseline</span></div>
+        <div class="legend-item"><div class="legend-dot leg-pruned"></div><span>低于 baseline / 剪枝</span></div>
+        <div class="legend-item"><div class="legend-dot leg-pending"></div><span>待探索</span></div>
+    </div>
+    <div class="tree-scroll"><div class="itree" id="v3-tree"></div></div>
+</div>
+
+<!-- ============================================== -->
+<!-- ANALYSIS PAGE -->
+<!-- ============================================== -->
+<div id="page-analysis" class="page">
+    <div class="analysis-wrap">
+        <h1>V3 skill_20cycles · 实验汇报</h1>
+        <div class="sub">汇报范围：本次 BrowseComp 优化 run（docs/total_test/research_log/v3-withskill_20cycles）· 含 Idea Tree 解读、与同期论文的方法论对照、以及对 framework 的迭代建议。</div>
+
+        <div class="kpi-grid">
+            <div class="kpi"><div class="k-lbl">Baseline (dev 40Q)</div><div class="k-val">50.0%</div><div class="k-sub">o3 ReAct 起点</div></div>
+            <div class="kpi up"><div class="k-lbl">最优 dev (5.4)</div><div class="k-val">62.5%</div><div class="k-sub">+12.5pp · 25/40</div></div>
+            <div class="kpi"><div class="k-lbl">Baseline (test 300Q)</div><div class="k-val">32.7%</div><div class="k-sub">o3 ReAct trunk · ~3h</div></div>
+            <div class="kpi up"><div class="k-lbl">最终 test (5.4)</div><div class="k-val">50.7%</div><div class="k-sub"><b>+18.0pp</b> · 已合并</div></div>
+            <div class="kpi up"><div class="k-lbl">合并次数</div><div class="k-val">1</div><div class="k-sub">5.4 → trunk 62.5%</div></div>
+            <div class="kpi"><div class="k-lbl">探索节点 / 总耗时</div><div class="k-val">9 / 10h</div><div class="k-sub">5 done · 1 merged · 3 pruned</div></div>
+        </div>
+
+        <div class="section-card">
+            <h2><span class="icon">🎯</span>一、Run 总览</h2>
+            <p><b>任务：</b>沿用 BrowseComp 多 hop 检索基准，要求 meta agent 在不修改 evaluator 与数据的前提下，提升 ReAct agent 的准确率。本次 baseline 已升级为新的 o3 ReAct 单 agent（dev 50% / test 32.7%）。</p>
+            <p><b>资源与产出：</b>预算 max-cycles=20，实际总耗时 <b>10h06m</b>。Meta agent 在 ROOT 下生成 5 个根节点，并对其中得分最优的节点 5 展开 4 个子节点（5.1–5.4）。最终状态：<b>5 done · 1 merged (5.4) · 3 pruned (1, 3, 4)</b>。</p>
+            <p><b>结论一句话：</b><span class="em-success">本次 run 获得完整的端到端成功</span>——5.4 的 Judge-with-override 在 dev 上达到 62.5% (+12.5pp)、在独立 test set 上验证为 <b>50.7% (+18.0pp)</b>，并已成功合并进 trunk。同时这条方案与 2026-04-13 刚发的 Princeton AggAgent 论文高度一致（详见第七节）。</p>
+        </div>
+
+        <div class="section-card">
+            <h2><span class="icon">📊</span>二、节点得分一览</h2>
+            <table class="score-table">
+                <thead><tr><th>节点</th><th>方向</th><th>状态</th><th class="num">B_dev</th><th class="num">Δ vs trunk</th><th class="num">分数条</th></tr></thead>
+                <tbody>
+                    <tr><td>1</td><td>让 agent 同时跟踪多个候选答案 + 逐轮打 PASS/FAIL 表</td><td>✂ pruned</td><td class="num">42.5%</td><td class="num delta-down">−7.5pp</td><td class="bar-cell bad"><span class="bar" style="width:85px;"></span></td></tr>
+                    <tr><td>2</td><td>答完之后起一个“挥师”反驳自己（同模型）</td><td>≈ done</td><td class="num">52.5%</td><td class="num delta-flat">+2.5pp</td><td class="bar-cell"><span class="bar" style="width:105px;"></span></td></tr>
+                    <tr><td>3</td><td>先从 Wikipedia “某类型名单”拉出候选集再逐个筛</td><td>✂ pruned</td><td class="num">45.0%</td><td class="num delta-down">−5.0pp</td><td class="bar-cell bad"><span class="bar" style="width:90px;"></span></td></tr>
+                    <tr><td>4</td><td>拆成子问题各自查 → 取候选交集</td><td>✂ pruned</td><td class="num">25.0%</td><td class="num delta-down">−25pp</td><td class="bar-cell bad"><span class="bar" style="width:50px;"></span></td></tr>
+                    <tr><td>5</td><td>同题跑 4 遇独立 agent + 裁判选一个</td><td>↑ done</td><td class="num">55.0%</td><td class="num delta-up">+5.0pp</td><td class="bar-cell"><span class="bar" style="width:110px;"></span></td></tr>
+                    <tr><td>5.1</td><td>4 个 agent 各担一种搜索风格（枚举/反证/深读/践意）</td><td>✗ done</td><td class="num">47.5%</td><td class="num delta-down">−2.5pp</td><td class="bar-cell bad"><span class="bar" style="width:95px;"></span></td></tr>
+                    <tr><td>5.2</td><td>裁判不只看摘要，还能自己 search/visit 8 次验证</td><td>↑ done</td><td class="num">57.5%</td><td class="num delta-up">+7.5pp</td><td class="bar-cell"><span class="bar" style="width:115px;"></span></td></tr>
+                    <tr><td>5.3</td><td>修一个小 bug：裁判写“Candidate 2”被 grader 判错</td><td>≈ done</td><td class="num">52.5%</td><td class="num delta-flat">+2.5pp</td><td class="bar-cell"><span class="bar" style="width:105px;"></span></td></tr>
+                    <tr><td><b style="color:var(--success);">5.4</b></td><td><b>允许裁判自己再查（20 步）并出一个全新答案，必须他自己验证全 PASS 才能交</b></td><td><b style="color:var(--success);">★ merged</b></td><td class="num">62.5%</td><td class="num delta-up"><b>+12.5pp dev / +18.0pp test</b></td><td class="bar-cell best"><span class="bar" style="width:125px;"></span></td></tr>
+                </tbody>
+            </table>
+        </div>
+
+        <div class="section-card">
+            <h2><span class="icon">🔍</span>三、核心发现 + 胜出方案</h2>
+            <div class="callout">
+                <b>Root insight：The binding constraint is candidate-set retrieval coverage, not reasoning/judging sophistication.</b><br>
+                所有干预的天花板都由"<b>正确实体有没有进入候选池</b>"决定，下游的重排/验证/裁判精细化都只是在挪椅子。
+            </div>
+            <p style="margin-top:12px;"><b>胜出方案 — 节点 5.4 (Judge-with-override)：</b>
+                起点是 N=4 同构 ReAct ensemble + judge 投票 (节点 5, 55%)；
+                5.4 给 judge <b>20 步自带工具预算 + override 权限</b>——4 个候选都不满足 constraint 时，judge 自己再搜并提新答案（必须自己跑出全 PASS 才能交）。
+                Override 在 ~10% 题上 fire，把 ensemble 顶到 <b>62.5% (dev) / 50.7% (test, +18pp)</b>。
+            </p>
+            <p style="margin-top:8px;color:var(--text-muted);font-size:13px;">其余 4 条主路 (结构化 belief table / 同模型 falsifier / Wikipedia 枚举 / decompose-intersect) 全部低于 baseline → 印证"瓶颈不是裁判精细度"这个 insight。</p>
+        </div>
+
+        <div class="section-card">
+            <h2><span class="icon">🌳</span>四、附带发现：meta agent 的 prompt-following bug</h2>
+            <p>config 设了 <code>max_depth=2</code>，prompt 也明确要求 "depth-1 应是抽象 axis（verification / retrieval / orchestration），具体 mechanism push 到 depth-2"。但实际 idea tree 里 <b>节点 1–5 都被以完整 mechanism spec 直接挂在 depth-1 并当 leaf dispatch</b>（只有节点 5 因为后期要做兄弟变体，<i>事后</i>被当成内部节点）。</p>
+            <p><b>后果：</b>(1) "verification axis 整体失败" 这种 axis-level 判断只能用语言（root insight）记，<b>无法用树结构 enforce</b>，所以 5.x 阶段 meta agent 不会主动意识到自己"重回 verification axis 是矛盾"；(2) 节点 1+2 失败后没有触发 1.x/2.x 子节点，因为它们已被当作 leaf "完成"了。</p>
+            <div class="callout warn">
+                <b>修复方向：</b>(a) 在 <code>TreeAddNode</code> 加结构化校验，max_depth ≤ 2 且 parent=ROOT 时 hypothesis 必须是 "axis/direction" 语义；(b) 在 <code>RunSubagent</code> 加 leaf-only 约束；(c) prompt 加 1-shot 示例展示正确树形态。
+            </div>
+        </div>
+
+        <div class="section-card" style="border-color:rgba(167,139,250,0.4); background:linear-gradient(180deg, rgba(167,139,250,0.05), var(--bg-card));">
+            <h2 style="color:#a78bfa;"><span class="icon">📄</span>五、外部对照：与同期论文 AggAgent 撞车</h2>
+            <p>本次胜出方案 <b>5.4 Judge-with-override</b> 与 Princeton NLP 组 2026-04-13 刚发的论文 <b><a href="https://arxiv.org/abs/2604.11753" style="color:#a78bfa;" target="_blank">"Agentic Aggregation for Parallel Scaling of Long-Horizon Agentic Tasks"</a></b>（Lee et al.）<b>核心机制高度一致</b>：</p>
+            <ul>
+                <li>都把 aggregation agent 视为<b>独立 agent</b>，给它工具去探索 trajectory + 外部环境；</li>
+                <li>都打破 "聚合只能从 N 个候选选" 的限制；</li>
+                <li>论文报 <b>+5.3% avg / +10.3% on deep research</b>；我们 5.4 报 +12.5pp dev / +18pp test。</li>
+            </ul>
+            <div class="callout">
+                <b>意义：</b>外部学术对照证明 meta agent 自主探索能产出与同期顶会论文同等水位的研究方案。论文是<b>专门为这思想设计</b>，我们是 <b>meta agent 在 root insight 引导下、从 5.1/5.2/5.3 连续失败逐步推理出来的</b>——后者的"链式 ideate 工作流"本身就是 V3 的产物。
+            </div>
+        </div>
+
+        <div class="section-card">
+            <h2><span class="icon">🚧</span>六、对 framework 的可改进点</h2>
+            <ul>
+                <li><b>B_test timeout 必须解耦：</b>5.4 第一次合并时被 GitMergeBranch 的 600s 硬编码 timeout 拒绝（5.4 单题 ~5× 算力，300 题需数小时），靠手动 background 跑才完成。建议 B_test 评测异步化 / 允许子集门控。</li>
+                <li><b>Prompt-following enforce：</b>把 "depth-1 = abstract axis" 的约束做到 tool 层（见第四节）。</li>
+                <li><b>跨 run 的 insight 持久化：</b>V2-2 已经验证 "子问题分解 + 投机并行 query" 在 BrowseComp 上有效，V3 在同任务从零开始没有复用，浪费前 4 个根节点的 cycles。</li>
+                <li><b>40 题 dev 噪声太大：</b>5.3 亲自证明 ±5pp 是 baseline noise（同代码摇了 5pp）。建议关键节点重测 N 次取 median。</li>
+            </ul>
+        </div>
+
+        <div class="section-card">
+            <h2><span class="icon">✅</span>七、汇报小结</h2>
+            <ol style="padding-left:22px; line-height:1.9; font-size:14px;">
+                <li><b>端到端成功：</b>5.4 dev 62.5% (+12.5pp)，test 50.7% (+18pp)，已合并进 trunk。</li>
+                <li><b>研究价值得到外部佐证：</b>与刚发的 Princeton AggAgent 论文方法论高度一致。</li>
+                <li><b>暴露 framework bug：</b>meta agent 没遵守 max_depth=2 下 "depth-1 = abstract axis" 的 prompt 规定（见第四节）。</li>
+                <li><b>下一步：</b>(a) tool 层 enforce depth-1 axis 约束；(b) 把 V2-2 "子问题分解" 与 V3 "judge override" 组合实验；(c) 跨 run 复用 ROOT insight；(d) 在新 trunk (62.5%) 上发起下一轮 run。</li>
+            </ol>
+        </div>
+    </div>
+</div>
+
+<div class="itip" id="tooltip"></div>
+<div class="dp-overlay" id="dpOverlay"></div>
+<div class="dp" id="dpanel">
+    <div class="dp-head" id="dpHead"></div>
+    <div class="dp-body" id="dpBody"></div>
+</div>
+
+<script>
+// ============================================================
+// V3 skill_20cycles 数据
+// ============================================================
+const V3 = {
+  trunk: 62.5, baseline: 50, root: 'ROOT',
+  nodes: {
+    'ROOT': {
+      c:['1','2','3','4','5'], s:'done', p:62.5, d:0,
+      lbl:'BrowseComp ReAct\nbaseline dev 50% / test 32.7%\n→ trunk dev 62.5% / test 50.7% (合并后)',
+      hyp:'优化 BrowseComp 搜索 agent 准确率。当前 pipeline 是最小 ReAct loop（GPTAgent + SearchTool + VisitTool）。Evaluator (o3) 在 bc_val (40Q) 上做 dev 迭代，bc_test (300Q) 做合并门控。Substring-match grader（含金答即对）。不可改 run_eval.py 与数据。',
+      ins:'<b>核心：唯一突破天花板的方向是"扩大候选集 + 让 judge 拥有超出候选集的搜索权限"。</b><br><br>• 候选集检索覆盖率是<b>真正的瓶颈</b>，不是 reasoning/judging 的精细度。<br>• Prompt-only 自我修正（结构化置信表 / abstain gate）：模型只换包装不换答案 (42.5%)。<br>• 同模型对抗式 falsifier：共享失败模式，几乎只确认 trunk (52.5%)。<br>• Wikipedia 列表枚举：长尾目标不在列表里 + o3 JSON 计划 50% 空响应 (45%)。<br>• 问题分解 + 子问题求交：摧毁合取消歧信号 (25%)。<br>• Persona 多样化 ensemble：单 agent 风格弱化，diversity ≠ coverage (47.5%)。<br><br><b>有效</b>：N=4 同构 ensemble + judge 带工具预算 + 约束 PASS 门控 + 候选集 override (62.5%)，override 在 ~10% 题上触发。',
+      res:'B_dev: 50% (baseline) → 62.5% (5.4, +12.5pp) · B_test: 32.7% → 50.7% (5.4, +18.0pp) · 5.4 已合并进 trunk'
+    },
+    '1': {
+      c:[], s:'pruned', p:42.5, d:1,
+      lbl:'让 agent 同时跟踪多个候选答案\n(每轮打分 PASS/FAIL)',
+      hyp:'重构 agent loop：开头先把问题拆成一串原子约束（比如“出生于1990年后的美国作家”这种）；同时维护 ≥2 个候选答案，每调一次搜索/访问后给“候选×约束”表格逐格打 PASS / FAIL / UNKNOWN。只有在某候选全 PASS 且没有同等通过的兄弟时才交答案。思路是“不让 agent 在只满足部分约束时就莽撞”。',
+      ins:'<b>Prompt-only 的"结构化置信表"无法克服模型对第一个貌合理候选的承诺偏好</b>——它只是把同一个错误答案换上 PASS/FAIL 表的外衣。每轮表格还吃掉 token 预算，进一步减少有效工具轮次。强制约束门控可能需要独立的 judge 模型。<br><br><i>[Pruned: 被 5.4 ensemble 超越]</i>',
+      res:'17/40 = 42.5%（−7.5pp vs baseline）。仅 4/23 失败转为 refuse，19/23 仍是自信的错实体。'
+    },
+    '2': {
+      c:[], s:'done', p:52.5, d:1,
+      lbl:'答完之后再请一个\n“挥师”反驳自己',
+      hyp:'主 ReAct agent 出答后，再起一个“Devil’s Advocate”子价色（同模型 + 同工具，≤3 主动去找“能反驳这个答案”的证据 或 “更好的替代答案”，返回 {确认 / 替换为 X / abstain}。非确认则把挥师的笔记注回主 agent 重跑。思路是“用一个存心振错的角色打破确认偏差”。',
+      ins:'<b>同模型 + 同工具的对抗式 falsifier 大多只是确认原答案</b>——共享失败模式（够不到的证据、相同的约束检查方式）使 falsifier 复现 trunk 的结论。要打破确认偏差很可能需要不同模型 / 工具预算，或更严格的"默认 abstain"策略。',
+      res:'21/40 = 52.5%（+2.5pp vs baseline，远低于 +10pp 目标，仅 1 题净翻正）。'
+    },
+    '3': {
+      c:[], s:'pruned', p:45, d:1,
+      lbl:'先列出该类型的所有候选\n(报讯、路上列表)',
+      hyp:'每题开局先让一个 LLM 看出“要找什么类型的东西 + ×2 硬筛选条件”（如“摩托车品牌 + 1990年代 + 意大利”），用 “list of <type>” / Wikipedia category 页反向拉出一个 ≥10 个候选名的“名单”，注入主 agent 上下文让它逐个筛。思路是“先拉出哈德门名单、再逐个验证”，避免“猜名字”式搜索。',
+      ins:'<b>失败原因双重：</b>(1) Wikipedia list/category 页根本不包含 BrowseComp 的长尾目标（Sankomota / Ellison Bay / Morris Museum / Air City 都没进候选集）；(2) o3 通过 Chat Completions 的 JSON-only planner 调用经常空响应，<b>~50% 题目跳过了检索阶段</b>。在能 fire 的题目上又没召回目标实体，纯增加延迟/token。',
+      res:'18/40 = 45%（−5pp vs baseline）。Enumerator 仅在 12/40 题上产出候选集，0 个含目标实体。'
+    },
+    '4': {
+      c:[], s:'pruned', p:25, d:1,
+      lbl:'拆成子问题各自查\n再取交集 (灾难)',
+      hyp:'让 planner 把多 hop 问题拆成 K 个独立的“集合型”子问题（例如“所有 1990s 美剧女主” 交 “出生在旗帜含龙的城市”），每个子问题开一个独立 sub-agent 返回 ≥5 个候选名，然后用集合交集取唯一幸存者。思路是“各自独立 → 不会共享偏见”。',
+      ins:'<b>把 BrowseComp 拆成独立 set-valued 子问题摧毁了"合取消歧"信号</b>——单个约束往往可枚举出数千实体，交集要么为空要么验证器选错候选。跨上下文隔离做到了，但代价是<b>合取约束（让答案唯一可定位的关键）</b>被破坏。',
+      res:'10/40 = 25%（−25pp vs baseline，<b>灾难性</b>，几乎砍半）。'
+    },
+    '5': {
+      c:['5.1','5.2','5.3','5.4'], s:'done', p:55, d:1,
+      lbl:'同题独立跑 4 遍\n+ 裁判选一个',
+      hyp:'同一道题，同一个 system prompt，但开 4 个全独立的 ReAct agent 并行跑（各自从零开始、轨迹互不可见），最后一个 JUDGE LLM 拿这 4 份《答案 + 证据摘要》按两个信号选终版：(a) 多路是否收敛到同一答案；(b) 哪个答案覆盖了更多约束。裁判只能从 4 个候选中选或 abstain，不允许凭空发明。思路是“用独立采样抵消单轨迹偏差”。',
+      ins:'<b>独立 N=4 ensemble 带 structural judge 有效，但天花板由"候选集检索覆盖"决定，而非 judge 的精细度或轨迹多样性</b>：<br>• 5.1 persona 多样化反挫——风格约束让单 agent 变弱<br>• 5.2 / 5.3 升级 judge 的 evidence + 解析仅获微弱提升——所有 4 run 都漏掉的实体，judge 再多验证也救不回<br>• <b>5.4 让 judge 拥有 override + 自带工具预算</b>是真正的解锁——在 ~10% 题上触发并贡献净正向，验证 "must pick from N candidates" 才是真正绑定约束<br>→ <b>Ensemble 应为 coverage 服务，不为 diversity；compute 投入到更强的单 agent + tool-empowered judge with override authority</b>。',
+      res:'22/40 = 55%（+5pp vs baseline，未达 +10pp 目标，约 4× wallclock）。'
+    },
+    '5.1': {
+      c:[], s:'pruned', p:47.5, d:2,
+      lbl:'4 个 agent 各担一种风格\n(枚举/反证/深读/践意)',
+      hyp:'起点是节点 5，但让 4 个 agent 各担一种搜索风格：R1 先跑 list/category 枚举；R2 每次搜索都加否定/排除词；R3 少搜多讻深读页面；R4 换多语言、换 paraphrase。同一个 JUDGE 取这 4 份输出。思路是“强制采样走不同路径→覆盖更多页面”。',
+      ins:'<b>persona 特定的搜索策略反挫</b>：受约束的 persona 把预算浪费在风格强制但不适合的 action 上，产出个体更弱的候选；judge 又难可靠过滤。<b>确认 BrowseComp 的天花板是检索-工具可达性，不是 action 分布的多样性</b>。',
+      res:'19/40 = 47.5%（−2.5pp vs baseline，比同构 5 低 7.5pp）。'
+    },
+    '5.2': {
+      c:[], s:'done', p:57.5, d:2,
+      lbl:'裁判不只看摘要\n还能自己查 8 次',
+      hyp:'起点同节点 5（4 个同构 agent），但 JUDGE 环节从“只看摘要”升级为“拿得到证据 + 事后可以自己 search/visit 最多 8 次”：先建原子约束 checklist，能读每个 run 的完整调用 trace，遇到 UNKNOWN 格子自己补查；最后选 verified-PASS 最多的候选（平局看独立验证支持，不许“多数投票”默认赢）。思路是“让裁判有他自己的动手能力，别被多数人带偏”。',
+      ins:'<b>给 judge 自带工具预算</b>相比 summary-judge ensemble 提升微弱；主导天花板仍是<b>候选集检索</b>——当 4 个 run 都漏掉实体，judge 再多验证也无法 recover。同时存在 judge 偶尔输出 "Candidate N" 字面量的解析 bug（损失数个 pp）。',
+      res:'23/40 = 57.5%（+7.5pp vs baseline，未达 60% 阈值）。'
+    },
+    '5.3': {
+      c:[], s:'done', p:52.5, d:2,
+      lbl:'修一个小 bug：\n裁判写 “Candidate 2” 被判错',
+      hyp:'5.2 里裁判有时写 “FINAL_ANSWER: Candidate 2” 而不是写出实体名，子串匹配 grader 会把它判错。用 regex 把“Candidate N”反查出该 run 的预测名填回。同时在 prompt 里加一个“错：Candidate 2 / 对：Sankomota”的反例。',
+      ins:'<b>parser fix 正确实现但本 run 几乎不触发</b>——judge 大多已经直接写 verbatim 答案，2 次抽取失败的样例是空 judge 文本（fix 救不了）。Run-to-run ensemble 方差 (~±5pp) 主导任何小修补的提升 → <b>40 题 dev 集对小幅 fix 缺乏分辨力</b>。',
+      res:'21/40 = 52.5%（低于 5.2 报告的 57.5%，远低于 60% 合并阈值，被噪声主导）。'
+    },
+    '5.4': {
+      c:[], s:'merged', p:62.5, d:2,
+      lbl:'★ 裁判可以自己出新答案\n(20 步预算 · 已合并)',
+      hyp:'接着 5.2 再进一步：如果 4 个候选里没一个能全 PASS，<b>允许裁判从头再 search/visit—20 步预算</b>事后可以 emit 一个 4 个 agent 都没找到过的新答案——但这个新答案必须在裁判自己的 trajectory 里全 PASS 才能提交。思路是“别把裁判锁死在 4 候选里——当他们都错时，裁判是个拿到了额外失败信息的“第 5 个 agent””。',
+      ins:'<b>给 judge override authority + 自带工具预算 + 约束 PASS 门控</b>，正好打破"<b>必须从 N=4 候选里选</b>"的天花板——在相关失败的题目上 override 触发并贡献有意义的净正向 (4/40 = 10% 题触发)。验证 "must pick from candidates" 是真正的 binding constraint。<br><br>✅ <b>合并成功</b>：dev +12.5pp 满足 ≥60% 阈值，独立 B_test 进一步验证为 <b>50.7% (+18.0pp)</b>，已合并进 trunk，trunk_score 从 50% 提升到 62.5%。这是 V3 本次 run 唯一被合并的节点。',
+      res:'25/40 = 62.5% (B_dev, +12.5pp vs baseline, +5pp vs 5.2)。Override 在 4/40 (10%) 题上触发。B_test 独立验证 = <b>50.7%</b> (+18.0pp vs 32.7% baseline)。★ 已合并进 trunk。'
+    }
+  }
+};
+
+// ============================================================
+// 渲染逻辑
+// ============================================================
+const statusLabels = { merged:'已合并', best:'最优·候选合并', done:'已完成', pruned:'低于 baseline', pending:'待探索' };
+
+function scoreClass(score, trunk, baseline) {
+    if (score === null || score === undefined) return '';
+    if (score > trunk) return 'sc-up';
+    if (score >= baseline - 1) return 'sc-mid';
+    return 'sc-down';
+}
+
+function buildTree(containerId, data) {
+    const el = document.getElementById(containerId);
+    if (!el) return;
+
+    function makeNode(id) {
+        const n = data.nodes[id];
+        if (!n) return null;
+        const li = document.createElement('li');
+        const div = document.createElement('div');
+        div.className = `inode d${n.d} st-${n.s}`;
+        div.dataset.tree = containerId;
+        div.dataset.node = id;
+
+        let scoreHtml = '';
+        if (n.p !== null && n.p !== undefined) {
+            scoreHtml = `<div class="n-sc ${scoreClass(n.p, data.trunk, data.baseline)}">${n.p}%</div>`;
+        }
+
+        const stLabel = statusLabels[n.s] || n.s;
+        const lblHtml = n.lbl.replace(/\n/g, '<br>');
+        div.innerHTML = `<div class="n-id">${id}</div>${scoreHtml}<div class="n-st st-${n.s}">${stLabel}</div><div class="n-lbl">${lblHtml}</div>`;
+
+        div.addEventListener('mouseenter', onNodeEnter);
+        div.addEventListener('mouseleave', onNodeLeave);
+        div.addEventListener('click', onNodeClick);
+        li.appendChild(div);
+
+        if (n.c && n.c.length > 0) {
+            const ul = document.createElement('ul');
+            n.c.forEach(cid => {
+                const child = makeNode(cid);
+                if (child) ul.appendChild(child);
+            });
+            li.appendChild(ul);
+        }
+        return li;
+    }
+
+    const rootUl = document.createElement('ul');
+    rootUl.appendChild(makeNode(data.root));
+    el.innerHTML = '';
+    el.appendChild(rootUl);
+}
+
+// Tooltip
+const tip = document.getElementById('tooltip');
+let tipTimer = null;
+
+function onNodeEnter(e) {
+    clearTimeout(tipTimer);
+    const div = e.currentTarget;
+    const nodeId = div.dataset.node;
+    const n = V3.nodes[nodeId];
+    if (!n) return;
+
+    let html = '<div class="t-hd">';
+    html += `<span class="t-id">${nodeId}</span>`;
+    if (n.p !== null && n.p !== undefined) {
+        html += `<span class="t-sc ${scoreClass(n.p, V3.trunk, V3.baseline)}">${n.p}%</span>`;
+    }
+    html += `<span class="n-st st-${n.s}">${statusLabels[n.s] || n.s}</span>`;
+    html += '</div>';
+    if (n.hyp) html += `<div class="t-hyp">${escHtml(n.hyp)}</div>`;
+    if (n.ins) html += `<div class="t-ins">${n.ins}</div>`;
+    if (n.res) html += `<div class="t-res">📊 ${escHtml(n.res)}</div>`;
+
+    tip.innerHTML = html;
+    tip.classList.add('vis');
+    positionTip(div);
+}
+
+function onNodeLeave() {
+    tipTimer = setTimeout(() => tip.classList.remove('vis'), 120);
+}
+
+function positionTip(anchor) {
+    const r = anchor.getBoundingClientRect();
+    const tw = 480, maxH = 480;
+    let left = r.right + 14;
+    let top = r.top;
+    if (left + tw > window.innerWidth - 10) left = r.left - tw - 14;
+    if (left < 10) { left = Math.max(10, r.left + r.width / 2 - tw / 2); top = r.bottom + 14; }
+    if (top + maxH > window.innerHeight - 10) top = window.innerHeight - maxH - 10;
+    if (top < 70) top = 70;
+    tip.style.left = left + 'px';
+    tip.style.top = top + 'px';
+}
+
+function escHtml(s) {
+    return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+
+// Detail panel
+let currentDetail = null;
+const dpOverlay = document.getElementById('dpOverlay');
+const dpanel = document.getElementById('dpanel');
+const dpHead = document.getElementById('dpHead');
+const dpBody = document.getElementById('dpBody');
+
+function onNodeClick(e) {
+    e.stopPropagation();
+    openDetail(e.currentTarget.dataset.node);
+}
+
+function openDetail(nodeId) {
+    const n = V3.nodes[nodeId];
+    if (!n) return;
+    currentDetail = nodeId;
+    tip.classList.remove('vis');
+
+    let headHtml = `<span class="dp-id">${nodeId}</span>`;
+    if (n.p !== null && n.p !== undefined) {
+        headHtml += `<span class="dp-sc ${scoreClass(n.p, V3.trunk, V3.baseline)}">${n.p}%</span>`;
+    }
+    headHtml += `<span class="n-st st-${n.s}" style="font-size:12px;padding:3px 10px;">${statusLabels[n.s] || n.s}</span>`;
+    headHtml += `<button class="dp-close" onclick="closeDetail()">✕</button>`;
+    dpHead.innerHTML = headHtml;
+
+    let bodyHtml = '';
+    const parentId = findParent(nodeId);
+    if (parentId) {
+        bodyHtml += `<a class="dp-parent-link" onclick="openDetail('${parentId}')">← 返回 ${parentId}</a>`;
+    }
+    if (n.hyp) {
+        bodyHtml += `<div class="dp-sect sect-hyp"><div class="dp-sect-title"><span class="icon">💡</span> 假设 / Hypothesis</div><div class="dp-sect-content">${escHtml(n.hyp)}</div></div>`;
+    }
+    if (n.ins) {
+        bodyHtml += `<div class="dp-sect sect-insight"><div class="dp-sect-title"><span class="icon">🔍</span> 核心发现 / Insight</div><div class="dp-sect-content">${n.ins}</div></div>`;
+    }
+    if (n.res) {
+        bodyHtml += `<div class="dp-sect sect-result"><div class="dp-sect-title"><span class="icon">📊</span> 实验结果 / Result</div><div class="dp-sect-content" style="font-family:'JetBrains Mono',monospace; font-size:14px; font-weight:600;">${escHtml(n.res)}</div></div>`;
+    }
+    if (n.c && n.c.length > 0) {
+        const childLinks = n.c.map(cid => {
+            const cn = V3.nodes[cid];
+            if (!cn) return '';
+            const label = cn.lbl.replace(/\n/g, ' ');
+            const scoreStr = cn.p !== null && cn.p !== undefined ? ` ${cn.p}%` : '';
+            return `<a class="dp-child-link" onclick="openDetail('${cid}')"><span class="cl-st st-${cn.s}"></span>${cid}${scoreStr} ${label}</a>`;
+        }).join('');
+        bodyHtml += `<div class="dp-sect sect-children"><div class="dp-sect-title"><span class="icon">🌿</span> 子节点 / Children</div><div class="dp-children-grid">${childLinks}</div></div>`;
+    }
+
+    dpBody.innerHTML = bodyHtml;
+    dpOverlay.classList.add('vis');
+    dpanel.classList.add('vis');
+    dpBody.scrollTop = 0;
+}
+
+function closeDetail() {
+    dpOverlay.classList.remove('vis');
+    dpanel.classList.remove('vis');
+    currentDetail = null;
+}
+
+function findParent(nodeId) {
+    for (const [id, n] of Object.entries(V3.nodes)) {
+        if (n.c && n.c.includes(nodeId)) return id;
+    }
+    return null;
+}
+
+dpOverlay.addEventListener('click', closeDetail);
+
+function switchTab(which, btn) {
+    document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+    document.getElementById('page-' + which).classList.add('active');
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    if (btn) btn.classList.add('active');
+    tip.classList.remove('vis');
+    closeDetail();
+}
+
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') closeDetail();
+});
+
+buildTree('v3-tree', V3);
+</script>
+</body>
+</html>

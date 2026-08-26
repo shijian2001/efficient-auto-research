@@ -1,0 +1,72 @@
+name: Deploy site (project page + docs)
+
+# Builds two things and publishes them to one GitHub Pages site:
+#   - project_page/ (Vite/React) -> served at the site root   (/Arbor/)
+#   - docs/         (MkDocs)      -> served under              (/Arbor/docs/)
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# Allow only one concurrent deployment; don't cancel an in-progress run.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # ── Docs: MkDocs Material -> _site/docs ──────────────────────────
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Build docs
+        run: |
+          python -m pip install --upgrade pip
+          pip install "mkdocs-material>=9.5" "mkdocs-static-i18n>=1.2"
+          mkdocs build --strict -d _site/docs
+
+      # ── Live demo: arbor replay --demo --html -> _site/demo.html ─────
+      # Regenerated from source on every deploy so the hosted, zero-install
+      # demo always matches the shipped code (no committed artifact to go stale).
+      - name: Build live demo page
+        run: |
+          pip install .
+          arbor replay --demo --html --no-open --out _site/demo.html
+
+      # ── Project page: Vite/React -> _site (root) ─────────────────────
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: project_page/package-lock.json
+      - name: Build project page
+        working-directory: project_page
+        run: |
+          npm ci
+          npm run build
+      - name: Place landing page at site root
+        run: cp -R project_page/dist/. _site/
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

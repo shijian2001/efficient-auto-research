@@ -1,0 +1,8 @@
+__pycache__/
+*.pyc
+.arbor/
+.autoresearch/
+.research_agent/
+.coordinator/
+results/
+cache_old_*/

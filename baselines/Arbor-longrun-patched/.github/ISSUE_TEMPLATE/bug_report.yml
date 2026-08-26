@@ -1,0 +1,131 @@
+name: 🐞 Bug report / 缺陷报告
+description: Report something that is broken or behaving unexpectedly. / 报告一个无法工作或行为异常的问题。
+title: "[Bug]: "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug! Please fill in the fields below so we can reproduce it quickly.
+        感谢你花时间反馈问题！请尽量填写下列字段，以便我们快速复现。
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight checklist / 提交前检查
+      options:
+        - label: I searched existing issues and didn't find a duplicate. / 我已搜索现有 issue，没有重复。
+          required: true
+        - label: I checked the docs and configuration guide. / 我已查阅文档与配置指南。
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: Arbor version / Arbor 版本
+      description: "Output of `arbor version`. / `arbor version` 的输出。"
+      placeholder: "e.g. 0.1.0"
+    validations:
+      required: true
+
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened? / 发生了什么？
+      description: A clear description of the bug, plus what you expected instead. / 清晰描述问题，以及你期望的正确行为。
+      placeholder: When I run ..., Arbor ... but I expected ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce / 复现步骤
+      description: The exact commands / inputs, ideally minimal. / 精确的命令或输入，尽量最小化。
+      placeholder: |
+        1. arbor setup ...
+        2. arbor "..." --cwd ...
+        3. ...
+    validations:
+      required: true
+
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider / 后端类型
+      description: The `provider` field from your config. / 配置中的 `provider` 字段。
+      options:
+        - auto
+        - openai-responses
+        - openai-chat
+        - anthropic
+        - litellm (legacy / 旧)
+        - other / 其他
+        - not sure / 不确定
+    validations:
+      required: true
+
+  - type: input
+    id: model
+    attributes:
+      label: Model / 模型
+      placeholder: "e.g. deepseek-reasoner, qwen3.7-max, claude-sonnet-4-20250514"
+    validations:
+      required: true
+
+  - type: input
+    id: base-url
+    attributes:
+      label: Base URL / endpoint / 端点
+      description: The endpoint you point at (leave blank if using the official API). / 你所指向的端点（使用官方 API 可留空）。
+      placeholder: "e.g. https://api.deepseek.com"
+    validations:
+      required: false
+
+  - type: textarea
+    id: config-show
+    attributes:
+      label: "Config (`arbor config show`) / 配置"
+      description: "Paste the output of `arbor config show` — keys are masked automatically, but double-check before posting. / 粘贴 `arbor config show` 的输出——密钥会自动打码，但发布前请再确认一遍。"
+      render: yaml
+    validations:
+      required: false
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / error output / 日志与报错
+      description: The full error message or relevant log lines. / 完整报错信息或相关日志。
+      render: shell
+    validations:
+      required: false
+
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system / 操作系统
+      options:
+        - macOS
+        - Linux
+        - Windows (WSL)
+        - Windows (native)
+        - other / 其他
+    validations:
+      required: true
+
+  - type: input
+    id: python
+    attributes:
+      label: Python version / Python 版本
+      description: "Output of `python --version`. / `python --version` 的输出。"
+      placeholder: "e.g. 3.12.3"
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: contribute
+    attributes:
+      label: Contribution / 贡献
+      options:
+        - label: I'm willing to open a PR to fix this. / 我愿意提交 PR 修复它。
+          required: false

@@ -1,0 +1,14 @@
+{
+  "name": "arbor",
+  "owner": {
+    "name": "RUC-NLPIR",
+    "url": "https://github.com/RUC-NLPIR"
+  },
+  "plugins": [
+    {
+      "name": "arbor",
+      "source": "./",
+      "description": "Run Arbor's autonomous research workflow inside Claude Code with your own model (keyless). Installs the Arbor skill suite and the `arbor mcp` tools in one step."
+    }
+  ]
+}

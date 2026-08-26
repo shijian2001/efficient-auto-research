@@ -1,0 +1,19 @@
+# Configures the grouping of GitHub's auto-generated release notes.
+# PRs are sorted into categories by their labels; see:
+# https://docs.github.com/en/repositories/releasing-projects-on-github/automatically-generated-release-notes
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+      - duplicate
+  categories:
+    - title: 🚀 Features
+      labels: [feature, enhancement, feat]
+    - title: 🐛 Bug Fixes
+      labels: [bug, fix, bugfix]
+    - title: 📖 Documentation
+      labels: [docs, documentation]
+    - title: 🛠 Maintenance
+      labels: [chore, ci, refactor, dependencies]
+    - title: Other Changes
+      labels: ["*"]

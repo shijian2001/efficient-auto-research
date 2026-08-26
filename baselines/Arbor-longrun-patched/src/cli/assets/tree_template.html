@@ -1,0 +1,320 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>arbor · hypothesis tree replay</title>
+<style>
+  :root{
+    --bg:#0b0e14; --bg2:#0d1117; --panel:#161b22; --panel2:#1b212b;
+    --border:#2a313c; --border2:#30363d; --fg:#e3e9f0; --dim:#8b949e; --dim2:#6e7681;
+    --cyan:#39c5cf; --green:#3fb950; --yellow:#d29922; --magenta:#bc8cff;
+    --red:#f85149; --blue:#58a6ff;
+    --grad:linear-gradient(95deg,#39c5cf 0%,#58a6ff 45%,#bc8cff 100%);
+    --ui:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    --mono:"SFMono-Regular",Consolas,"Liberation Mono",Menlo,monospace;
+  }
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%}
+  body{background:radial-gradient(1200px 600px at 70% -10%,#11161f 0%,var(--bg) 60%);
+    color:var(--fg);font-family:var(--ui);font-size:15px;line-height:1.5;
+    display:flex;flex-direction:column;height:100vh;overflow:hidden}
+  .mono{font-family:var(--mono);font-feature-settings:"tnum" 1}
+
+  header{display:flex;align-items:baseline;gap:14px;flex-wrap:wrap;
+    padding:16px 24px 10px;border-bottom:1px solid var(--border);flex:0 0 auto}
+  .brand{font-weight:800;font-size:1.45em;letter-spacing:.2px;
+    background:var(--grad);-webkit-background-clip:text;background-clip:text;color:transparent}
+  .tagline{color:var(--dim);font-size:.88em}
+  .runmeta{margin-left:auto;text-align:right;color:var(--dim);font-size:.8em;max-width:52ch}
+  .runmeta b{color:var(--fg);font-weight:600}
+
+  .scorebar{display:flex;align-items:center;gap:24px;flex-wrap:wrap;
+    padding:12px 24px;border-bottom:1px solid var(--border);background:var(--bg2);flex:0 0 auto}
+  .stat{display:flex;flex-direction:column;gap:1px}
+  .stat .k{font-size:.7em;text-transform:uppercase;letter-spacing:.6px;color:var(--dim2)}
+  .stat .v{font-size:1.02em;font-weight:650}
+  .best .v{font-size:1.8em;line-height:1;color:var(--green);text-shadow:0 0 18px rgba(63,185,80,.35)}
+  .best .v .x{font-size:.5em;color:var(--dim);font-weight:500;margin-left:1px}
+  .legend{margin-left:auto;display:flex;gap:13px;flex-wrap:wrap;font-size:.76em;color:var(--dim)}
+  .legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:5px;vertical-align:middle}
+
+  main{flex:1 1 auto;overflow:auto;padding:14px 20px}
+  svg{display:block}
+
+  .edge{fill:none;stroke:var(--border2);stroke-width:2;
+    transition:stroke .4s,opacity .5s;opacity:0}
+  .edge.shown{opacity:.9}
+  .edge.merged{stroke:var(--green);stroke-width:2.4}
+  .edge.pruned{stroke:var(--dim2);stroke-dasharray:4 4;opacity:.55}
+
+  .node{opacity:0;transition:opacity .5s ease}
+  .node.born{opacity:1}
+  .node.pruned{opacity:.5}
+  .card{fill:var(--panel2);stroke:var(--border2);stroke-width:1.5;rx:9;
+    transition:stroke .4s,fill .4s}
+  .node.proposed .card{stroke:var(--yellow);stroke-dasharray:4 3}
+  .node.running  .card{stroke:var(--magenta)}
+  .node.done     .card{stroke:var(--blue)}
+  .node.merged   .card{stroke:var(--green);fill:#15241a;
+    filter:drop-shadow(0 0 8px rgba(63,185,80,.45))}
+  .node.pruned   .card{stroke:var(--dim2);stroke-dasharray:4 4}
+  .node.failed   .card{stroke:var(--red)}
+  .node.root .card{fill:#11202c;stroke:var(--cyan)}
+
+  .dot{transition:fill .4s}
+  .node.proposed .dot{fill:var(--yellow)} .node.running .dot{fill:var(--magenta)}
+  .node.done .dot{fill:var(--blue)} .node.merged .dot{fill:var(--green)}
+  .node.pruned .dot{fill:var(--dim2)} .node.failed .dot{fill:var(--red)}
+  .node.root .dot{fill:var(--cyan)}
+  .ring{fill:none;stroke:none}
+  .node.running .ring{stroke:var(--magenta);animation:pulse 1.3s ease-out infinite}
+  @keyframes pulse{0%{r:7px;opacity:.7}100%{r:18px;opacity:0}}
+
+  .nid{font-family:var(--mono);font-size:13px;font-weight:700;fill:var(--fg)}
+  .node.pruned .nid{fill:var(--dim)}
+  .score{font-family:var(--mono);font-size:13px;font-weight:700;fill:var(--green);text-anchor:end}
+  .node.pruned .score,.node.proposed .score,.node.running .score{fill:var(--dim)}
+  .node.done .score{fill:var(--blue)}
+  .hyp{font-size:12.5px;fill:var(--dim)}
+  .node.merged .hyp,.node.done .hyp{fill:var(--fg)}
+
+  footer{display:flex;align-items:center;gap:16px;padding:11px 24px;
+    border-top:1px solid var(--border);background:var(--bg2);flex:0 0 auto}
+  button.play{appearance:none;border:1px solid var(--border2);background:var(--panel2);
+    color:var(--fg);width:38px;height:38px;border-radius:50%;cursor:pointer;font-size:14px;
+    display:grid;place-items:center;transition:background .15s,border-color .15s}
+  button.play:hover{background:#232c3a;border-color:var(--cyan)}
+  .scrub{flex:1;display:flex;align-items:center;gap:12px}
+  input[type=range]{flex:1;accent-color:var(--cyan);cursor:pointer;height:4px}
+  .clock{font-family:var(--mono);font-size:.84em;color:var(--dim);min-width:10ch}
+  .speeds{display:flex;gap:6px}
+  .speeds button{appearance:none;border:1px solid var(--border2);background:transparent;
+    color:var(--dim);padding:4px 9px;border-radius:7px;cursor:pointer;font-size:.8em;font-weight:600}
+  .speeds button.on{color:var(--bg);background:var(--cyan);border-color:var(--cyan)}
+</style>
+</head>
+<body>
+<header>
+  <span class="brand">arbor</span>
+  <span class="tagline">Grow evidence, not logs.</span>
+  <div class="runmeta">
+    <div><b id="m-run">—</b> <span id="m-model" class="mono"></span></div>
+    <div id="m-task"></div>
+  </div>
+</header>
+
+<div class="scorebar">
+  <div class="stat best"><span class="k">best</span>
+    <span class="v"><span id="s-best">—</span><span class="x" id="s-x"></span></span></div>
+  <div class="stat"><span class="k">baseline</span><span class="v mono" id="s-base">—</span></div>
+  <div class="stat"><span class="k">branches</span><span class="v mono" id="s-branches">0</span></div>
+  <div class="stat"><span class="k">merged</span><span class="v mono" id="s-merged">0</span></div>
+  <div class="stat"><span class="k">pruned</span><span class="v mono" id="s-pruned">0</span></div>
+  <div class="legend">
+    <span><i style="background:var(--yellow)"></i>proposed</span>
+    <span><i style="background:var(--magenta)"></i>running</span>
+    <span><i style="background:var(--blue)"></i>kept</span>
+    <span><i style="background:var(--green)"></i>merged</span>
+    <span><i style="background:var(--dim2)"></i>pruned</span>
+  </div>
+</div>
+
+<main><svg id="svg" preserveAspectRatio="xMinYMin meet"><g id="edges"></g><g id="nodes"></g></svg></main>
+
+<footer>
+  <button class="play" id="play" title="play / pause">▮▮</button>
+  <div class="scrub">
+    <input type="range" id="seek" min="0" max="1000" value="0">
+    <span class="clock"><span id="t-now">0:00</span> / <span id="t-end">0:00</span></span>
+  </div>
+  <div class="speeds" id="speeds"></div>
+</footer>
+
+<script>
+const DATA = __ARBOR_DATA__;
+
+// ── model: fold events into per-node state at a virtual clock ────────────────
+const META = DATA.meta || {};
+const EVENTS = (DATA.events || []).filter(e => e && typeof e.ts === "number");
+const T0 = EVENTS.length ? EVENTS[0].ts : 0;
+const TEND = EVENTS.length ? EVENTS[EVENTS.length-1].ts : 0;
+const DURATION = Math.max(0.001, TEND - T0);
+const MIN = (META.metric_direction === "minimize");
+const BASE = (typeof META.baseline_score === "number") ? META.baseline_score : null;
+const ROOT = "·root·";   // synthetic trunk for nodes proposed against the baseline
+
+function buildTopology(){
+  const nodes = new Map();
+  const ensure = id => { if(!nodes.has(id)) nodes.set(id,{id,parent:ROOT,hyp:"",born:Infinity}); return nodes.get(id); };
+  nodes.set(ROOT,{id:ROOT,parent:null,hyp:"baseline",born:T0,synthetic:true});
+  for(const e of EVENTS){
+    const d = e.data||{};
+    if(e.type==="idea.proposed" && d.node_id){
+      const n = ensure(d.node_id);
+      n.hyp = (d.hypothesis||"").replace(/\s+/g," ").trim();
+      n.born = Math.min(n.born, e.ts); n.rawParent = d.parent_id;
+    } else if(d.node_id){ const n = ensure(d.node_id); n.born = Math.min(n.born, e.ts); }
+  }
+  for(const n of nodes.values()){
+    if(n.id===ROOT) continue;
+    n.parent = (n.rawParent && nodes.has(n.rawParent) && n.rawParent!==n.id) ? n.rawParent : ROOT;
+  }
+  return nodes;
+}
+const NODES = buildTopology();
+
+function stateAt(t){
+  const st = new Map();
+  for(const id of NODES.keys()) st.set(id,{state:"unborn",score:null});
+  st.get(ROOT).state = "root"; st.get(ROOT).score = BASE;
+  let best = null;
+  const better = s => best===null || (MIN ? s<best : s>best);
+  for(const e of EVENTS){
+    if(e.ts - T0 > t) break;
+    const d = e.data||{}, id = d.node_id; if(!id || !st.has(id)) continue;
+    const s = st.get(id);
+    switch(e.type){
+      case "idea.proposed": s.state="proposed"; break;
+      case "executor.start": s.state="running"; break;
+      case "executor.end":
+        if(typeof d.score==="number"){ s.score=d.score; if(better(d.score)) best=d.score; }
+        if(s.state==="running") s.state=(d.status||"done"); break;
+      case "idea.completed":
+        if(typeof d.score==="number"){ s.score=d.score; if(better(d.score)) best=d.score; }
+        s.state=(d.status||"done"); break;
+      case "idea.merged":
+        if(typeof d.to_score==="number"){ s.score=d.to_score; if(better(d.to_score)) best=d.to_score; }
+        s.state="merged"; break;
+      case "idea.pruned": s.state="pruned"; break;
+    }
+  }
+  return {st,best};
+}
+
+// ── layout: tidy left→right tree (depth = column, leaves spread down rows) ────
+// Geometry is in logical units inside a fixed viewBox, so it never depends on
+// the measured element size (the old bug: clientHeight 0 → everything collapsed).
+const CARD_W=210, CARD_H=50, COL=270, ROW=70, PADX=24, PADY=20;
+function layout(){
+  const children = new Map();
+  for(const n of NODES.values()){
+    if(n.id===ROOT) continue;
+    if(!children.has(n.parent)) children.set(n.parent,[]);
+    children.get(n.parent).push(n.id);
+  }
+  for(const arr of children.values()) arr.sort((a,b)=>NODES.get(a).born-NODES.get(b).born);
+  const pos = new Map(); let leaf = 0; let maxDepth = 0;
+  (function walk(id,depth){
+    maxDepth = Math.max(maxDepth, depth);
+    const kids = children.get(id)||[];
+    if(!kids.length){ pos.set(id,{depth,row:leaf++}); return; }
+    let sum=0; for(const k of kids){ walk(k,depth+1); sum+=pos.get(k).row; }
+    pos.set(id,{depth,row:sum/kids.length});
+  })(ROOT,0);
+  const rows = Math.max(1, leaf);
+  return {pos,children,maxDepth,
+          width: PADX*2 + (maxDepth+1)*COL + (CARD_W-COL>0?CARD_W-COL:0),
+          height: PADY*2 + rows*ROW};
+}
+const L = layout();
+const VW = Math.max(L.width, PADX*2 + CARD_W), VH = L.height;
+
+function nodeXY(id){
+  const p = L.pos.get(id);
+  return { x: PADX + p.depth*COL, y: PADY + p.row*ROW + (ROW-CARD_H)/2 };
+}
+function trunc(s,n){ s=s||""; return s.length<=n?s:s.slice(0,n-1)+"…"; }
+function fmtScore(v){ return v===null||v===undefined?"—":(Math.round(v*100)/100).toString(); }
+function fmtClock(sec){ sec=Math.max(0,sec); const m=Math.floor(sec/60),s=Math.floor(sec%60); return m+":"+String(s).padStart(2,"0"); }
+
+// ── build SVG once ───────────────────────────────────────────────────────────
+const svg = document.getElementById("svg");
+svg.setAttribute("viewBox", `0 0 ${VW} ${VH}`);
+svg.setAttribute("width", VW); svg.setAttribute("height", VH);
+const gN = document.getElementById("nodes"), gE = document.getElementById("edges");
+const NS = "http://www.w3.org/2000/svg";
+const mk = (t,a)=>{const x=document.createElementNS(NS,t);for(const k in a)x.setAttribute(k,a[k]);return x;};
+const nodeEls = new Map(), edgeEls = new Map();
+
+function buildSVG(){
+  for(const n of NODES.values()){
+    const c = nodeXY(n.id);
+    if(n.parent){
+      const p = nodeXY(n.parent);
+      const x1=p.x+CARD_W, y1=p.y+CARD_H/2, x2=c.x, y2=c.y+CARD_H/2, mx=(x1+x2)/2;
+      const e = mk("path",{class:"edge", d:`M${x1},${y1} C${mx},${y1} ${mx},${y2} ${x2},${y2}`});
+      gE.appendChild(e); edgeEls.set(n.id,e);
+    }
+    const g = mk("g",{class:"node", transform:`translate(${c.x},${c.y})`});
+    g.appendChild(mk("rect",{class:"card", x:0, y:0, width:CARD_W, height:CARD_H, rx:9}));
+    g.appendChild(mk("circle",{class:"ring", cx:0, cy:CARD_H/2, r:7}));
+    g.appendChild(mk("circle",{class:"dot", cx:0, cy:CARD_H/2, r:6, stroke:"var(--bg)", "stroke-width":2}));
+    const nid = mk("text",{class:"nid", x:14, y:19}); nid.textContent = n.synthetic ? "baseline" : n.id;
+    const sc = mk("text",{class:"score", x:CARD_W-12, y:19});
+    const hyp = mk("text",{class:"hyp", x:14, y:38});
+    hyp.textContent = trunc(n.synthetic ? "starting point" : n.hyp, 30);
+    const title = mk("title",{}); title.textContent = n.synthetic ? "baseline" : n.hyp; g.appendChild(title);
+    g.appendChild(nid); g.appendChild(sc); g.appendChild(hyp);
+    gN.appendChild(g); nodeEls.set(n.id,{g,sc});
+  }
+}
+
+function render(t){
+  const {st,best} = stateAt(t);
+  let merged=0, pruned=0, born=0;
+  for(const [id,info] of st){
+    const ui = nodeEls.get(id); if(!ui) continue;
+    const isBorn = info.state!=="unborn";
+    ui.g.setAttribute("class","node "+info.state+(isBorn?" born":""));
+    ui.sc.textContent = (info.score!=null && info.state!=="proposed" && info.state!=="running")
+      ? fmtScore(info.score)+(MIN?"":"×") : "";
+    if(id!==ROOT && isBorn) born++;
+    if(id!==ROOT && info.state==="merged") merged++;
+    if(info.state==="pruned"||info.state==="failed") pruned++;
+    const e = edgeEls.get(id);
+    if(e){
+      const parentBorn = st.get(NODES.get(id).parent)?.state!=="unborn";
+      e.setAttribute("class","edge"+((isBorn&&parentBorn)?" shown":"")
+        +(info.state==="merged"?" merged":"")
+        +((info.state==="pruned"||info.state==="failed")?" pruned":""));
+    }
+  }
+  document.getElementById("s-best").textContent = best===null?"—":fmtScore(best);
+  document.getElementById("s-x").textContent = (best===null||MIN)?"":"×";
+  document.getElementById("s-branches").textContent = born;
+  document.getElementById("s-merged").textContent = merged;
+  document.getElementById("s-pruned").textContent = pruned;
+  document.getElementById("t-now").textContent = fmtClock(t);
+}
+
+// ── playback engine ──────────────────────────────────────────────────────────
+let clock=0, playing=true, speed=12, last=null;
+const seek=document.getElementById("seek"), playBtn=document.getElementById("play");
+function setClock(t){ clock=Math.max(0,Math.min(DURATION,t)); seek.value=Math.round(clock/DURATION*1000); render(clock); }
+function tick(ts){
+  if(last===null) last=ts;
+  const dt=(ts-last)/1000; last=ts;
+  if(playing){ setClock(clock+dt*speed); if(clock>=DURATION){ playing=false; updatePlay(); } }
+  requestAnimationFrame(tick);
+}
+function updatePlay(){ playBtn.textContent = playing ? "▮▮" : "▶"; }
+playBtn.onclick=()=>{ if(clock>=DURATION) setClock(0); playing=!playing; last=null; updatePlay(); };
+seek.oninput=()=>{ playing=false; updatePlay(); setClock(seek.value/1000*DURATION); };
+
+const speeds=[1,4,12,40]; const sbox=document.getElementById("speeds");
+speeds.forEach(s=>{ const b=document.createElement("button"); b.textContent=s+"×";
+  if(s===speed)b.className="on";
+  b.onclick=()=>{ speed=s; [...sbox.children].forEach(c=>c.className=(c===b?"on":"")); };
+  sbox.appendChild(b); });
+
+// ── boot ─────────────────────────────────────────────────────────────────────
+document.getElementById("m-run").textContent = META.run_name||"session";
+document.getElementById("m-model").textContent = META.model||"";
+document.getElementById("m-task").textContent = trunc(META.task||"", 110);
+document.getElementById("s-base").textContent = BASE===null?"—":fmtScore(BASE)+(MIN?"":"×");
+document.getElementById("t-end").textContent = fmtClock(DURATION);
+buildSVG(); setClock(0); updatePlay(); requestAnimationFrame(tick);
+</script>
+</body>
+</html>

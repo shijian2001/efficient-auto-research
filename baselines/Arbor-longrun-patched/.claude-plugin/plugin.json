@@ -1,0 +1,25 @@
+{
+  "name": "arbor",
+  "version": "0.1.0",
+  "description": "Run Arbor's hypothesis-tree research workflow inside Claude Code using your own model — no API key. Bundles the Arbor Agent Skill suite and registers the keyless `arbor mcp` tools (Idea Tree, evaluation, worktrees, guarded merges, reports).",
+  "author": {
+    "name": "RUC-NLPIR"
+  },
+  "homepage": "https://github.com/RUC-NLPIR/Arbor",
+  "repository": "https://github.com/RUC-NLPIR/Arbor",
+  "license": "Apache-2.0",
+  "keywords": [
+    "research",
+    "agent",
+    "autonomous-research",
+    "optimization",
+    "mcp",
+    "skills"
+  ],
+  "mcpServers": {
+    "arbor": {
+      "command": "arbor",
+      "args": ["mcp"]
+    }
+  }
+}

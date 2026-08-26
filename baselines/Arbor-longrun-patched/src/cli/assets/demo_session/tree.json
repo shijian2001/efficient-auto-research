@@ -1,0 +1,67 @@
+{
+  "root_id": "root",
+  "meta": {
+    "metric_direction": "maximize",
+    "baseline_score": 1.0,
+    "trunk_score": 13.1,
+    "metric_name": "speedup_vs_baseline"
+  },
+  "nodes": {
+    "root": {
+      "id": "root",
+      "parent_id": null,
+      "hypothesis": "baseline solver.py",
+      "status": "merged",
+      "score": 1.0,
+      "code_ref": "main"
+    },
+    "n1": {
+      "id": "n1",
+      "parent_id": "root",
+      "hypothesis": "Vectorize pairwise distances with numpy broadcasting",
+      "status": "merged",
+      "score": 3.2,
+      "code_ref": "arbor/n1-vectorize"
+    },
+    "n2": {
+      "id": "n2",
+      "parent_id": "n1",
+      "hypothesis": "Replace brute force with scipy.spatial.cKDTree",
+      "status": "merged",
+      "score": 8.7,
+      "code_ref": "arbor/n2-ckdtree"
+    },
+    "n3": {
+      "id": "n3",
+      "parent_id": "n2",
+      "hypothesis": "JIT-compile a custom distance kernel with numba @njit",
+      "status": "pruned",
+      "score": 6.1,
+      "code_ref": "arbor/n3-numba"
+    },
+    "n4": {
+      "id": "n4",
+      "parent_id": "n2",
+      "hypothesis": "Batch all query points into one cKDTree.query call",
+      "status": "merged",
+      "score": 11.4,
+      "code_ref": "arbor/n4-batch"
+    },
+    "n5": {
+      "id": "n5",
+      "parent_id": "n4",
+      "hypothesis": "Use float32 + C-contiguous arrays to cut memory bandwidth",
+      "status": "merged",
+      "score": 13.1,
+      "code_ref": "arbor/n5-float32"
+    },
+    "n6": {
+      "id": "n6",
+      "parent_id": "n4",
+      "hypothesis": "Approximate NN via random-projection trees",
+      "status": "pruned",
+      "score": null,
+      "code_ref": "arbor/n6-approx"
+    }
+  }
+}

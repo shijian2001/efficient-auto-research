@@ -1,0 +1,117 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 420" width="1280" height="420" role="img" aria-label="Arbor — Optimize anything">
+  <title>Arbor — Optimize anything</title>
+  <desc>Animated banner: the Arbor wordmark with a light sweep, above the line "Optimize" followed by a rotating list of words.</desc>
+
+  <defs>
+    <!-- Backgrounds -->
+    <linearGradient id="bg" x1="0" y1="0" x2="0" y2="1">
+      <stop offset="0" stop-color="#08130f"/>
+      <stop offset="1" stop-color="#0b1d18"/>
+    </linearGradient>
+    <radialGradient id="glow" cx="0.5" cy="0.18" r="0.75">
+      <stop offset="0" stop-color="#1d6b58" stop-opacity="0.55"/>
+      <stop offset="1" stop-color="#1d6b58" stop-opacity="0"/>
+    </radialGradient>
+
+    <!-- Wordmark fill -->
+    <linearGradient id="ink" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#9af0d2"/>
+      <stop offset="0.5" stop-color="#4fd1b5"/>
+      <stop offset="1" stop-color="#2bb89a"/>
+    </linearGradient>
+
+    <!-- Light sweep -->
+    <linearGradient id="sheen" x1="0" y1="0" x2="1" y2="0">
+      <stop offset="0" stop-color="#ffffff" stop-opacity="0"/>
+      <stop offset="0.5" stop-color="#ffffff" stop-opacity="0.85"/>
+      <stop offset="1" stop-color="#ffffff" stop-opacity="0"/>
+    </linearGradient>
+
+    <!-- Clip the rotating words to a single line -->
+    <clipPath id="rollClip">
+      <rect x="650" y="286" width="600" height="64"/>
+    </clipPath>
+
+    <!-- Clip the sheen to the letterforms of "Arbor" -->
+    <clipPath id="arborClip">
+      <text x="640" y="210" text-anchor="middle"
+            font-family="'Helvetica Neue', Helvetica, Arial, sans-serif"
+            font-size="150" font-weight="800" letter-spacing="2">Arbor</text>
+    </clipPath>
+
+    <style>
+      .roll {
+        animation: roll 12s cubic-bezier(.22,1,.36,1) infinite;
+      }
+      @keyframes roll {
+        0%,      12.667% { transform: translateY(0); }
+        16.667%, 29.333% { transform: translateY(-58px); }
+        33.333%, 46.0%   { transform: translateY(-116px); }
+        50.0%,   62.667% { transform: translateY(-174px); }
+        66.667%, 79.333% { transform: translateY(-232px); }
+        83.333%, 96.0%   { transform: translateY(-290px); }
+        100%             { transform: translateY(-348px); }
+      }
+
+      .sweep {
+        animation: sweep 5.5s ease-in-out infinite;
+      }
+      @keyframes sweep {
+        0%   { transform: translateX(-360px) rotate(-18deg); }
+        30%  { transform: translateX(1000px) rotate(-18deg); }
+        100% { transform: translateX(1000px) rotate(-18deg); }
+      }
+
+      .pulse  { animation: pulse 4s ease-in-out infinite; }
+      .pulse2 { animation: pulse 4s ease-in-out infinite; animation-delay: 1.3s; }
+      .pulse3 { animation: pulse 4s ease-in-out infinite; animation-delay: 2.6s; }
+      @keyframes pulse {
+        0%, 100% { opacity: 0.18; }
+        50%      { opacity: 0.5; }
+      }
+    </style>
+  </defs>
+
+  <!-- Backdrop -->
+  <rect x="2" y="2" width="1276" height="416" rx="28" fill="url(#bg)" stroke="#1c3a32" stroke-width="1.5"/>
+  <rect x="2" y="2" width="1276" height="416" rx="28" fill="url(#glow)"/>
+
+  <!-- Faint hypothesis-tree motif -->
+  <g stroke="#4fd1b5" stroke-width="1.5" fill="none" opacity="0.9">
+    <path class="pulse"  d="M150 330 L120 250 M150 330 L185 255"/>
+    <path class="pulse2" d="M1130 330 L1100 250 M1130 330 L1165 255"/>
+  </g>
+  <g fill="#4fd1b5">
+    <circle class="pulse"  cx="150" cy="330" r="4"/>
+    <circle class="pulse2" cx="120" cy="250" r="3.5"/>
+    <circle class="pulse3" cx="185" cy="255" r="3.5"/>
+    <circle class="pulse2" cx="1130" cy="330" r="4"/>
+    <circle class="pulse"  cx="1100" cy="250" r="3.5"/>
+    <circle class="pulse3" cx="1165" cy="255" r="3.5"/>
+  </g>
+
+  <!-- Wordmark + light sweep -->
+  <g clip-path="url(#arborClip)">
+    <rect x="420" y="80" width="440" height="160" fill="url(#ink)"/>
+    <g clip-path="url(#arborClip)">
+      <rect class="sweep" x="0" y="60" width="120" height="300" fill="url(#sheen)"/>
+    </g>
+  </g>
+
+  <!-- Subtitle: "Optimize" + rotating words -->
+  <text x="628" y="332" text-anchor="end"
+        font-family="'Helvetica Neue', Helvetica, Arial, sans-serif"
+        font-size="46" font-weight="600" fill="#9fb8b1">Optimize</text>
+
+  <g clip-path="url(#rollClip)">
+    <g class="roll">
+      <text x="664" y="332" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="46" font-weight="800" fill="#4fd1b5">anything.</text>
+      <text x="664" y="390" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="46" font-weight="800" fill="#4fd1b5">ML models.</text>
+      <text x="664" y="448" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="46" font-weight="800" fill="#4fd1b5">data pipelines.</text>
+      <text x="664" y="506" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="46" font-weight="800" fill="#4fd1b5">hypotheses.</text>
+      <text x="664" y="564" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="46" font-weight="800" fill="#4fd1b5">Kaggle scores.</text>
+      <text x="664" y="622" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="46" font-weight="800" fill="#4fd1b5">research.</text>
+      <text x="664" y="680" font-family="'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="46" font-weight="800" fill="#4fd1b5">anything.</text>
+    </g>
+  </g>
+</svg>

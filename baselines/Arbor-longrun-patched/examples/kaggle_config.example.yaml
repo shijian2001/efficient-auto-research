@@ -1,0 +1,36 @@
+# ─────────────────────────────────────────────────────────────────────────────
+# AutoResearch — Kaggle / MLE-bench example config
+#
+# Save this as research_config.yaml in your competition repo, then launch the
+# interactive CLI from that directory:
+#
+#   cd ./your-competition
+#   arbor
+#
+# The ONE line that switches the agent into competition mode is `plugin:`.
+# Everything the kaggle domain needs — eval protocol, protected data dirs,
+# required submission.csv, longer executor timeouts — comes from the plugin.
+# See docs/plugins.md for how plugins work and how to write your own.
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Select the built-in Kaggle/MLE plugin (arbor/plugins/mle_kaggle.yaml).
+# Omit `plugin:` for a general, domain-agnostic run.
+plugin: mle_kaggle
+
+# Pick one of the plugin's named profiles (optional). Each is a preset bundle of
+# config overrides — e.g. cycle count / depth / timeouts tuned for a budget.
+# Available in mle_kaggle: mle_bench_lite (see the plugin file).
+plugin_profile: mle_bench_lite
+
+llm:
+  provider: anthropic
+  model: claude-sonnet-4-20250514
+  reasoning_effort: high
+
+# Your YAML still wins over the plugin's overrides/profile (and CLI wins over
+# all). Uncomment to override a profile value for this run:
+# max_cycles: 12
+
+ui:
+  interaction_mode: auto   # auto | direction | review | collaborative
+  # webui_port: 8765        # expose the read-only browser monitor
