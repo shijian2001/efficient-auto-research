@@ -19,9 +19,12 @@ upstream.
 
 The frozen model track owns all model-generation parameters. Client-supplied
 sampling, reasoning, logprobability, structured-output, seed, and parallel-tool
-parameters are stripped before the track is injected. `messages`, `tools`, and
-`tool_choice` remain protocol payload so a native tool Agent can express its
-actions without changing the shared model configuration.
+parameters are stripped before the track is injected. Temperature is always
+forced to `1.0` for every upstream request. Output-token caps
+(`max_output_tokens`, `max_completion_tokens`, and `max_tokens`) are deliberately
+removed from legacy configurations and are never sent upstream. `messages`,
+`tools`, and `tool_choice` remain protocol payload so a native tool Agent can
+express its actions without changing the shared model configuration.
 
 For `tool_choice=auto`, an upstream text response is returned unchanged. For an
 explicitly required function call, a response without `tool_calls` is returned

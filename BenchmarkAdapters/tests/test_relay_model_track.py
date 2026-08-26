@@ -77,7 +77,8 @@ def test_relay_strips_all_client_generation_parameters(monkeypatch, tmp_path: Pa
     assert rewritten["model"] == "gpt-5.5"
     assert rewritten["reasoning_effort"] == "high"
     assert rewritten["temperature"] == 1.0
-    assert rewritten["max_tokens"] == 512
+    assert "max_tokens" not in rewritten
+    assert "max_tokens" in relay._request_telemetry()
     assert rewritten["tools"] == [_tool()]
     assert rewritten["tool_choice"] == "auto"
     for name in (
@@ -93,6 +94,30 @@ def test_relay_strips_all_client_generation_parameters(monkeypatch, tmp_path: Pa
     ):
         assert name not in rewritten
         assert name in relay._request_telemetry()
+
+
+def test_relay_forces_temperature_one_without_track_temperature(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setenv("UPSTREAM_BASE_URL", "https://upstream.example/v1")
+    monkeypatch.setenv("UPSTREAM_API_KEY", "test-key")
+    monkeypatch.setenv("LLM_FORCE_MODEL", "gpt-5.5")
+    monkeypatch.setenv("LLM_FORCE_PARAMETERS_JSON", '{"reasoning_effort":"high"}')
+    monkeypatch.setenv("LLM_MAX_RETRIES", "0")
+    monkeypatch.setenv("LLM_TOKEN_LOG_PATH", str(tmp_path / "telemetry.jsonl"))
+    name = f"relay_temperature_track_{uuid.uuid4().hex}"
+    spec = importlib.util.spec_from_file_location(name, SERVER)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[name] = module
+    spec.loader.exec_module(module)
+    rewritten = module._rewrite_body(
+        {
+            "model": "agent-selected-model",
+            "messages": [{"role": "user", "content": "hello"}],
+            "temperature": 0.7,
+        },
+        "/chat/completions",
+    )
+    assert rewritten["temperature"] == 1.0
 
 
 def test_auto_tool_choice_preserves_upstream_text(monkeypatch, tmp_path: Path) -> None:

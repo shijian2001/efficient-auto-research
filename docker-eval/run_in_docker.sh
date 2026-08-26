@@ -139,7 +139,7 @@ if [ -z "$LLM_FORCE_PARAMETERS_JSON" ]; then
   exit 2
 fi
 LLM_UPSTREAM_TIMEOUT=${LLM_UPSTREAM_TIMEOUT:-}   # 空 = 不限
-LLM_MAX_RETRIES=${LLM_MAX_RETRIES:-0}
+LLM_MAX_RETRIES=${LLM_MAX_RETRIES:-20}
 LLM_MAX_UPSTREAM_CALLS=${LLM_MAX_UPSTREAM_CALLS:-}
 LLM_SKIP_UPSTREAM_READY=${LLM_SKIP_UPSTREAM_READY:-0}
 
@@ -190,6 +190,23 @@ docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
 HOST_RELAY_LOG=$TOKEN_LOG_DIR/relay_${AGENT}_${COMP}_gpu${GPU_ID}.log
 RELAY_PYTHON=${RELAY_PYTHON:-${EAR}/mle-bench-lite/.venv/bin/python}
 test -x "$RELAY_PYTHON" || { echo "Host relay Python is not installed: $RELAY_PYTHON" >&2; exit 2; }
+# Do not impose a model-output cap from legacy campaign configs. Keep the
+# effective model track in the launch manifest aligned with the relay.
+LLM_FORCE_PARAMETERS_JSON=$(
+  LLM_FORCE_PARAMETERS_JSON="$LLM_FORCE_PARAMETERS_JSON" "$RELAY_PYTHON" - <<'PY'
+import json
+import os
+
+parameters = json.loads(os.environ["LLM_FORCE_PARAMETERS_JSON"])
+if not isinstance(parameters, dict):
+    raise SystemExit("LLM_FORCE_PARAMETERS_JSON must be a JSON object")
+for field in ("max_output_tokens", "max_completion_tokens", "max_tokens"):
+    parameters.pop(field, None)
+parameters["temperature"] = 1.0
+print(json.dumps(parameters, sort_keys=True, separators=(",", ":")))
+PY
+)
+test -n "$LLM_FORCE_PARAMETERS_JSON" || { echo "Model parameters became empty after normalization" >&2; exit 2; }
 case "$CLASH_PROXY" in
   http://127.0.0.1:*|http://localhost:*)
     CLASH_PROXY_PORT=${CLASH_PROXY##*:}
@@ -520,8 +537,9 @@ $INNER_CMD"
     # Arbor is vendored beneath this benchmark repository and may itself have
     # a nested .git directory. Freeze the outer benchmark commit explicitly so
     # that the adapter source cannot be shadowed by that inner repository.
-    ARBOR_SOURCE_REPO=${ARBOR_SOURCE_REPO:-$EAR}
-    ARBOR_SOURCE_SUBTREE=${ARBOR_SOURCE_SUBTREE:-baselines/Arbor}
+    ARBOR_SOURCE_REPO=${ARBOR_SOURCE_REPO:-$EAR/baselines/Arbor-longrun-patched}
+    ARBOR_SOURCE_SUBTREE=${ARBOR_SOURCE_SUBTREE:-.}
+    ARBOR_SOURCE_ALLOW_DIRTY=${ARBOR_SOURCE_ALLOW_DIRTY:-1}
     ARBOR_SOURCE_DIR=${ARBOR_SOURCE_REPO}/${ARBOR_SOURCE_SUBTREE}
     ARBOR_OUTPUT_DIR=${ARBOR_OUTPUT_DIR:-${EAR}/run-logs/${RUN_TAG}_Arbor_${COMP}_gpu${GPU_ID}}
     mkdir -p "$ARBOR_OUTPUT_DIR"
@@ -541,8 +559,7 @@ $INNER_CMD"
     ARBOR_SOURCE_SNAPSHOT_ROOT=${ARBOR_SOURCE_SNAPSHOT_ROOT:-${EAR}/cache/arbor-source-snapshots}
     mkdir -p "$ARBOR_SOURCE_SNAPSHOT_ROOT"
     ARBOR_SOURCE_SNAPSHOT=$(mktemp -d "${ARBOR_SOURCE_SNAPSHOT_ROOT}/${RUN_TAG}_${COMP}.XXXXXX")
-    git -C "$ARBOR_SOURCE_REPO" archive "$ARBOR_SOURCE_COMMIT:$ARBOR_SOURCE_SUBTREE" \
-      | tar -x -C "$ARBOR_SOURCE_SNAPSHOT"
+    archive_tracked_source "$ARBOR_SOURCE_DIR" "$ARBOR_SOURCE_SNAPSHOT" "$ARBOR_SOURCE_COMMIT"
     for required_adapter_file in src/mle/run.py src/mle/eval_runner.py src/mle/adapter.py src/mle/state_store.py; do
       if [ ! -f "$ARBOR_SOURCE_SNAPSHOT/$required_adapter_file" ]; then
         echo "Arbor archived commit is missing adapter file: $required_adapter_file" >&2

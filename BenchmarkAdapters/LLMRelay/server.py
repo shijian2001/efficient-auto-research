@@ -62,13 +62,26 @@ UPSTREAM_BASE_URL = os.environ.get("UPSTREAM_BASE_URL", "").rstrip("/")
 UPSTREAM_API_KEY = os.environ.get("UPSTREAM_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
 FORCE_MODEL = os.environ.get("LLM_FORCE_MODEL", "").strip()
 try:
-    FORCE_PARAMETERS = json.loads(os.environ.get("LLM_FORCE_PARAMETERS_JSON", "{}"))
+    _configured_force_parameters = json.loads(
+        os.environ.get("LLM_FORCE_PARAMETERS_JSON", "{}")
+    )
 except json.JSONDecodeError as exc:
     raise RuntimeError("LLM_FORCE_PARAMETERS_JSON is invalid") from exc
-if not isinstance(FORCE_PARAMETERS, dict):
+if not isinstance(_configured_force_parameters, dict):
     raise RuntimeError("LLM_FORCE_PARAMETERS_JSON must be an object")
+# Output caps are intentionally not part of the benchmark model track. Remove
+# them defensively even if an older launcher or config still supplies one.
+_OUTPUT_CAP_FIELDS = frozenset({"max_output_tokens", "max_completion_tokens", "max_tokens"})
+FORCE_PARAMETERS = {
+    name: value
+    for name, value in _configured_force_parameters.items()
+    if name not in _OUTPUT_CAP_FIELDS
+}
 REASONING_EFFORT = str(FORCE_PARAMETERS.get("reasoning_effort", ""))
-TEMPERATURE = str(FORCE_PARAMETERS.get("temperature", "")).strip()
+# Sampling is a shared benchmark control: every upstream request uses exactly
+# temperature=1.0, regardless of client or legacy model-track settings.
+FORCE_PARAMETERS["temperature"] = 1.0
+TEMPERATURE = "1.0"
 _timeout_raw = os.environ.get("LLM_UPSTREAM_TIMEOUT", "").strip()
 UPSTREAM_TIMEOUT: float | None = float(_timeout_raw) if _timeout_raw else None
 UPSTREAM_PROXY = os.environ.get("LLM_UPSTREAM_PROXY", "").strip() or None

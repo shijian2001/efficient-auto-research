@@ -189,6 +189,12 @@ class RelayProcess:
             }
         )
         parameters = dict(self.model_parameters or {})
+        # Output-token caps are not part of the shared benchmark model track.
+        # Strip legacy values before serializing the relay environment so the
+        # effective request and its recorded model-track digest agree.
+        for field in ("max_output_tokens", "max_completion_tokens", "max_tokens"):
+            parameters.pop(field, None)
+        parameters["temperature"] = 1.0
         upstream_api = self._resolved_upstream_api()
         if self.reasoning_effort is not None:
             parameters.setdefault("reasoning_effort", self.reasoning_effort)
