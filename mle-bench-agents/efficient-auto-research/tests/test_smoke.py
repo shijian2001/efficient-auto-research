@@ -2,6 +2,7 @@
 
 import sys
 import tempfile
+from contextlib import contextmanager
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
@@ -10,34 +11,50 @@ from agent.engine.graph import SearchGraph, Attempt
 from agent.engine.thompson import select_parent
 
 
+@contextmanager
+def _isolated_numpy_seed(seed: int = 0):
+    """Thompson sampling draws from the global numpy RNG; pin and restore it.
+
+    Suite order otherwise leaks into select_parent and can collapse exploration
+    (the self-observation test then fails as {'best': 200}).
+    """
+    state = np.random.get_state()
+    np.random.seed(seed)
+    try:
+        yield
+    finally:
+        np.random.set_state(state)
+
+
 def test_graph_and_thompson():
-    graph = SearchGraph()
+    with _isolated_numpy_seed(0):
+        graph = SearchGraph()
 
-    a1 = Attempt(id="a1", plan="xgboost", code="...", metric=0.79,
-                 embedding=np.random.randn(100))
-    a2 = Attempt(id="a2", plan="neural net", code="...", error="OOM",
-                 parent_id="a1", embedding=np.random.randn(100))
-    a3 = Attempt(id="a3", plan="xgboost tuned", code="...", metric=0.82,
-                 parent_id="a1", embedding=np.random.randn(100))
+        a1 = Attempt(id="a1", plan="xgboost", code="...", metric=0.79,
+                     embedding=np.random.randn(100))
+        a2 = Attempt(id="a2", plan="neural net", code="...", error="OOM",
+                     parent_id="a1", embedding=np.random.randn(100))
+        a3 = Attempt(id="a3", plan="xgboost tuned", code="...", metric=0.82,
+                     parent_id="a1", embedding=np.random.randn(100))
 
-    graph.add_attempt(a1)
-    graph.add_attempt(a2)
-    graph.add_attempt(a3)
+        graph.add_attempt(a1)
+        graph.add_attempt(a2)
+        graph.add_attempt(a3)
 
-    assert len(graph.attempts) == 3
-    assert len(graph.get_children("a1")) == 2
-    assert a3.metric > a1.metric  # a3 improved over a1
-    assert a2.metric is None       # a2 has no metric (error)
+        assert len(graph.attempts) == 3
+        assert len(graph.get_children("a1")) == 2
+        assert a3.metric > a1.metric  # a3 improved over a1
+        assert a2.metric is None       # a2 has no metric (error)
 
-    # Thompson sampling should work
-    selections = {}
-    for _ in range(100):
-        parent = select_parent(graph)
-        selections[parent] = selections.get(parent, 0) + 1
+        # Thompson sampling should work
+        selections = {}
+        for _ in range(100):
+            parent = select_parent(graph)
+            selections[parent] = selections.get(parent, 0) + 1
 
-    # All candidates should be explored (early graph is uninformative → exploratory)
-    assert len(selections) >= 3, f"Expected diverse selection, got {selections}"
-    print(f"Selections: {selections}")
+        # All candidates should be explored (early graph is uninformative → exploratory)
+        assert len(selections) >= 3, f"Expected diverse selection, got {selections}"
+        print(f"Selections: {selections}")
 
 
 def test_self_observation_exploits_fresh_best():
@@ -58,10 +75,13 @@ def test_self_observation_exploits_fresh_best():
     graph.add_attempt(Attempt(id="best", plan="great idea", code="...", metric=0.90,
                               parent_id="root", embedding=rng.normal(size=100)))
 
-    counts = {}
-    for _ in range(200):
-        chosen = select_parent(graph)
-        counts[chosen] = counts.get(chosen, 0) + 1
+    # select_parent draws from the global numpy RNG; pin it so suite order cannot
+    # collapse exploration into {'best': 200}.
+    with _isolated_numpy_seed(1):
+        counts = {}
+        for _ in range(200):
+            chosen = select_parent(graph)
+            counts[chosen] = counts.get(chosen, 0) + 1
 
     best_share = counts.get("best", 0) / 200
     print(f"Self-observation selections: {counts} (best share={best_share:.2f})")

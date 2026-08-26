@@ -1,31 +1,50 @@
-"""EAR repository-domain backend preserving its native KTS scheduler."""
+"""EAR Terminal AO launcher: hand the task to EAR's native repository mode.
+
+This launcher does what the codex/claude launchers do — prepare the environment
+and the task, start the Agent, wait for it to finish, collect the artifact. It
+does not contain a search loop, a candidate prompt, or a selection rule: all of
+that lives inside EAR (`agent/run_repo.py`, `agent/engine/repo_domain.py`,
+`agent/engine/domain.py`), which runs its own Kernel Thompson Sampling loop over
+diff-shaped candidates and decides for itself what to try and when to stop.
+
+The adapter's only responsibilities here are the two things EAR must not know:
+which paths this benchmark declares editable, and how to reach the host-owned
+DEV evaluator. The evaluator is injected as a plain callable, so EAR never
+learns that Harbor exists.
+
+The task text is the canonical `terminal-bench-ao` specification — byte-for-byte
+the same string codex and claude receive — so no Agent gets a task framing the
+others do not.
+"""
 
 from __future__ import annotations
 
 import argparse
-import json
 import os
-import random
-import time
 from pathlib import Path
 
-import numpy as np
-
-from agent.engine.graph import Attempt, SearchGraph
-from agent.engine.thompson import select_parent
-from agent.llm import query as llm_query
+from agent.run_repo import run_repo_search
 
 from ...protocol import write_json_exclusive
-from .repository_tools import (
-    apply_candidate_diff,
-    candidate_prompt,
-    commit_for_head,
-    embedding_for_text,
-    evaluate_dev,
-    extract_unified_diff,
-    git,
-)
+from ...task_specs import task_spec_text
 from .model_config import outer_model_parameters
+from .repository_tools import ALLOWED_PATHS, evaluate_dev
+
+
+def _dev_evaluator(dev_command: str):
+    """Adapt the host DEV capability to EAR's injected-evaluator contract.
+
+    `evaluate_dev` performs the adapter-side integrity checks (the response
+    carries the required fields and the frozen 36-task denominator). EAR
+    receives only a score plus the opaque payload.
+    """
+    from agent.engine.repo_domain import EvaluationResult
+
+    def evaluate(workspace: Path) -> EvaluationResult:
+        payload = evaluate_dev(workspace, dev_command)
+        return EvaluationResult(score=float(payload["pass_rate"]), feedback=payload)
+
+    return evaluate
 
 
 def run_native_loop(
@@ -42,102 +61,35 @@ def run_native_loop(
     result_path = output_dir / "native-result.json"
     if result_path.exists():
         raise RuntimeError(f"refusing to overwrite EAR result: {result_path}")
-    random.seed(seed)
-    np.random.seed(seed)
-    graph = SearchGraph()
-    baseline_commit = commit_for_head(workspace)
-    commits: dict[str, str] = {}
-    diffs: dict[str, str] = {}
-    feedback: dict[str, dict[str, object]] = {}
-    history: list[dict[str, object]] = []
-    started = time.monotonic()
+
     model_parameters = outer_model_parameters()
-    stagnation = 0
-    best_reward: float | None = None
-    for step in range(max_steps):
-        elapsed = time.monotonic() - started
-        if elapsed >= timeout:
-            break
-        parent_id = select_parent(graph, stagnation=stagnation, metric_sign=1)
-        parent = graph.attempts.get(parent_id) if parent_id else None
-        parent_commit = commits.get(parent.id, baseline_commit) if parent else baseline_commit
-        strategy = "new-root" if parent is None else "g3-kts-improve"
-        system, user = candidate_prompt(
-            strategy=strategy,
-            parent_diff=diffs.get(parent.id) if parent else None,
-            parent_feedback=feedback.get(parent.id) if parent else None,
-            history=history,
-        )
-        attempt_started = time.monotonic()
-        try:
-            query_parameters = {}
-            if model_parameters.get("temperature") is not None:
-                query_parameters["temperature"] = float(model_parameters["temperature"])
-            response, input_tokens, output_tokens = llm_query(
-                system, user, model=model, **query_parameters
-            )
-            diff_text = extract_unified_diff(response)
-            commit = apply_candidate_diff(workspace, parent_commit, diff_text)
-            dev = evaluate_dev(workspace, dev_command)
-            reward = float(dev["pass_rate"])
-            attempt = Attempt(
-                id=f"ear-{step:04d}",
-                plan=strategy,
-                code=diff_text,
-                metric=reward,
-                parent_id=parent.id if parent else None,
-                embedding=embedding_for_text(diff_text),
-            )
-            graph.add_attempt(attempt)
-            commits[attempt.id] = commit
-            diffs[attempt.id] = diff_text
-            feedback[attempt.id] = dev
-            if best_reward is None or reward > best_reward:
-                best_reward = reward
-                stagnation = 0
-            else:
-                stagnation += 1
-            history.append(
-                {
-                    "id": attempt.id,
-                    "reward": reward,
-                    "parent_id": parent_id,
-                    "strategy": strategy,
-                    "input_tokens": input_tokens,
-                    "output_tokens": output_tokens,
-                    "elapsed_seconds": time.monotonic() - attempt_started,
-                    "candidate_digest": str(dev["candidate_digest"]),
-                }
-            )
-        except Exception as exc:
-            git("reset", "--hard", parent_commit, workspace=workspace, check=False)
-            attempt = Attempt(
-                id=f"ear-{step:04d}",
-                plan=strategy,
-                code="",
-                error=f"{type(exc).__name__}: {exc}",
-                parent_id=parent.id if parent else None,
-            )
-            graph.add_attempt(attempt)
-            stagnation += 1
-            history.append(
-                {"id": attempt.id, "error": attempt.error, "parent_id": parent_id, "strategy": strategy}
-            )
-    best = max(
-        (attempt for attempt in graph.attempts.values() if attempt.metric is not None),
-        key=lambda attempt: float(attempt.metric),
-        default=None,
+    temperature = model_parameters.get("temperature")
+
+    payload = run_repo_search(
+        workspace=workspace,
+        task_description=task_spec_text("terminal-bench-ao"),
+        editable_paths=tuple(ALLOWED_PATHS),
+        evaluator=_dev_evaluator(dev_command),
+        output_dir=output_dir,
+        model=model,
+        max_steps=max_steps,
+        timeout=timeout,
+        # DEV pass rate: higher is better.
+        metric_sign=1,
+        temperature=None if temperature is None else float(temperature),
+        seed=seed,
     )
-    if best is not None:
-        git("reset", "--hard", commits[best.id], workspace=workspace)
-    payload = {
-        "native_loop": "EAR G3 repository loop",
-        "native_selection": "agent.engine.thompson.select_parent",
-        "attempts": history,
-        "best_attempt": best.id if best else None,
-        "best_dev_pass_rate": best.metric if best else None,
-        "elapsed_seconds": time.monotonic() - started,
-    }
+    # Integrity check: the report must show that the run really went through
+    # EAR's Kernel Thompson Sampling selector rather than some fallback path.
+    # This is the whole point of the launcher — if it ever stops holding, the
+    # Agent was not driving its own control loop and the result is not an EAR
+    # result.
+    if payload.get("native_selection") != "agent.engine.thompson.select_parent":
+        raise RuntimeError(
+            "EAR did not run its native Kernel Thompson Sampling loop: "
+            f"native_selection={payload.get('native_selection')!r}"
+        )
+
     write_json_exclusive(result_path, payload)
     return payload
 
