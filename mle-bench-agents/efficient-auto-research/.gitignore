@@ -5,6 +5,7 @@ __pycache__/
 results/
 *.log
 cache/
+build/
 
 # Eval artifacts (per-run outputs, never version these — can be >1GB)
 docker_runs/

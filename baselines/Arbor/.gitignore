@@ -28,6 +28,7 @@ site/
 # Arbor runtime artifacts
 .arbor/
 research_sessions/
+cache/
 *.log
 
 # Editor / OS

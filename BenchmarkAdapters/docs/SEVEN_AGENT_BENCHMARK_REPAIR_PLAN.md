@@ -848,6 +848,10 @@ BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters terminal-direct-smoke --
   若干 nested Agent 源树仍 dirty，正式 preflight 会拒那些格子。
 - 当前可以生成**结构正确、失败保留分母的横向 scorecard**，但里面的零分是“正式结果缺失计零”，不是七个 Agent 已完成的实验成绩。
 - 只有在干净 commit 上完成 MLE 七家 × 至少 3 seeds、AO 五家 × 至少 3 outer seeds 的真实长跑后，才能发布有效正式比分并把 readiness 升级为 `formal_protocol_ready`。起跑清单见第 17 节。
+- **本轮不追上游。** 七家用 2026-08-27 磁盘上已有的 checkout 跑（含未提交补丁）。身份表见
+  [`ON_DISK_AGENT_VERSIONS.md`](ON_DISK_AGENT_VERSIONS.md)。EAR 钉 G3
+  `7cd9ed5`；Arbor 用当前修过 bug 的树，12h MLE 用 `Arbor-longrun-patched`；
+  AiScientist AO 用工作区里已有的 `TerminalTaskSubagent`。
 
 ## 17. 后面怎么起正式实验
 
@@ -898,9 +902,16 @@ BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters terminal-direct-smoke --
    `model-track.placeholder.json` 只留作模板，正式命令不要指向它。
    API key 仍走环境变量，不要写进 JSON。若 relay 不在 6200，复制该文件到仓库外再改 URL。
 
-5. **干净 pinned 源码**。正式 `formal_source_clean` 要求 adapter 仓库和该 Agent 的 `install_path` 都 `git status` 干净。当前会挡正式入口的 dirty 树包括：内层 EAR（`ear/g3` 工作区有未跟踪的 repo-mode 文件）、`baselines/MLEvolve`、`baselines/Arbor`、`baselines/EvoMaster`、`baselines/AiScientist`。EAR 的正式 AO/MLE 源仍钉在 `ear/g3@7cd9ed5`；repo-mode 新文件目前只 vendored 在外层 `full4090`，若正式格子要从内层 checkout 跑，需要先决定是把这些文件提交进 `ear/g3` 还是改 registry 指向外层 vendored 树。
+5. **源码身份按磁盘冻结，不升级、不 reset。** 2026-08-27 已把当时工作区补丁做成各家内层
+   **本地 commit**（不推 Arbor / AiScientist / MLEvolve / EvoMaster 官方远端）。身份表见
+   [`ON_DISK_AGENT_VERSIONS.md`](ON_DISK_AGENT_VERSIONS.md)。
+   外层 `full4090` 本身已经 vendored 这些 Baseline 源码；推 `full4090` 就是推到
+   `shijian2001/efficient-auto-research`。EAR 代际标签仍是 G3 `7cd9ed5`。
 
-6. **Arbor MLE provenance**。registry 记的是 `baselines/Arbor`，launcher 实际跑 `baselines/Arbor-longrun-patched`。开 Arbor MLE 正式格之前先按 `ARBOR_MLE_ADAPTER_REPAIR.md` 把 identity 改到真正执行的那棵树，否则 manifest commit 审计对不上。
+6. **Arbor 两棵树都记。** registry 的 `install_path` 是 `baselines/Arbor`
+   （HEAD `bd78027` + 13 个本机 bugfix，dirty）；MLE docker 实际从
+   `baselines/Arbor-longrun-patched`（HEAD `a51a1fe`，干净）快照。12h 长跑用后一棵。
+   成绩单同时写下两棵树的 commit；不要把其中一棵当过时目录删掉。
 
 7. **格子级 formal-preflight 必须全绿**，再允许该格子消耗 API：
 

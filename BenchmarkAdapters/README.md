@@ -160,9 +160,9 @@ Optimizer Design 还要求先晋级受保护的双 held-out baseline 记录；�
 
 ## 后面怎么起实验
 
-现在还不能开正式长跑。先把 schema-v2 资产、真实 model-track、venv、干净 pinned
-源码补齐，再对每个进表格子做一次真实 smoke。操作清单（比较集合、CLI、variant、
-fail-closed 条件）写在
+现在还不能开正式长跑。先把 schema-v2 资产、真实 model-track、venv 补齐，再对每个
+进表格子做一次真实 smoke。Agent 版本按 2026-08-27 磁盘冻结（不追上游），见
+`BenchmarkAdapters/docs/ON_DISK_AGENT_VERSIONS.md`。操作清单写在
 `BenchmarkAdapters/docs/SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md` 第 17 节。
 
 进表格子是 **MLE 七家 + Terminal AO 五家**，不是 14 格。AO 必须带显式 variant 的

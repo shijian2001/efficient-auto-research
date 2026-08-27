@@ -64,6 +64,7 @@ checkpoints/
 logs/
 *.pid
 *.out
+llm_token_usage.jsonl
 
 # ===== Project Specific =====
 cache/

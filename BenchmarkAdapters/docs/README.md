@@ -20,7 +20,9 @@ can currently produce formal scores. Current checkout status:
 - `BenchmarkAdapters/.venv` includes PyYAML.
 - Nested Agent checkouts are still dirty; formal preflight will refuse those
   cells until each `install_path` is a clean pinned commit. Do not reset
-  Arbor / AiScientist / EvoMaster working trees without an explicit pin.
+  Arbor / AiScientist / EvoMaster working trees and do not pull upstream.
+  This campaign freezes the 2026-08-27 on-disk checkouts (including uncommitted
+  patches). Identities: `ON_DISK_AGENT_VERSIONS.md`.
 
 Arbor MLE uses `arbor-benchmark-patched`. Terminal AO uses
 `ai-scientist-terminal-variant` for AiScientist; MLEvolve and ML-Master 2.0

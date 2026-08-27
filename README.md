@@ -12,7 +12,9 @@ MLEvolve、Arbor、Codex、Claude Code、ML-Master 2.0 和 AiScientist。Adapter
 
 下面的 EAR/MLEvolve 六题内容属于历史研究，不是当前 22 题 × 7 Agent 的正式结果。
 当前 EAR 代码基准为 `mle-bench-agents/efficient-auto-research@ear/g3@7cd9ed5`；G4-G7
-实验分支仍保留作历史记录。
+实验分支仍保留作历史记录。七家本轮**不追上游**，按 2026-08-27 磁盘 checkout 跑
+（含未提交补丁）；身份表见
+[`BenchmarkAdapters/docs/ON_DISK_AGENT_VERSIONS.md`](BenchmarkAdapters/docs/ON_DISK_AGENT_VERSIONS.md)。
 
 - **LLM：** gpt-5.5（relay 端点，reasoning_effort=high），经本地转发代理统一接入
 - **硬件：** 256 vCPU / 251GB RAM / 8× RTX 4090
