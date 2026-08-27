@@ -988,7 +988,12 @@ def _ml_master_command(request: MleLiteRequest) -> CommandSpec:
     description = public_task_dir(request) / "description.md"
     executable = AGENTS[request.agent].execution_path / ".venv" / "bin" / "python"
     require_file(executable, "ML-Master 2 Python executable")
-    workspace_dir = request.output_dir.resolve() / "workspace"
+    # Upstream run.py drives a single --task through its batch path with a
+    # hard-coded id of "task_0" (baselines/EvoMaster/run.py:527), and
+    # set_run_dir then builds the workspace at run_dir/workspaces/<task_id>
+    # rather than run_dir/workspace (evomaster/core/playground.py:336-343).
+    # The wrapper must look where the run actually promotes best_submission.
+    workspace_dir = request.output_dir.resolve() / "workspaces" / "task_0"
     native_argv = (
             str(executable),
             "run.py",
