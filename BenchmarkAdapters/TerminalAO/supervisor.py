@@ -18,6 +18,7 @@ from ..process import run_command
 from ..protocol import BenchmarkMode, sha256_file, write_json_exclusive
 from ..records import BenchmarkRunResult, RunManifest, RunStatus
 from ..registry import AGENTS, ROOT
+from ..run_logs import index_run
 from ..task_specs import task_spec_digest
 from ..LLMRelay import RelayProcess, route_command_through_relay
 from .baseline import BaselineManifest, tree_digest
@@ -219,6 +220,17 @@ def summarize_token_log(path: Path) -> dict[str, int | None]:
         name: (value if name not in complete or complete[name] else None)
         for name, value in totals.items()
     }
+
+
+def _index_ao_run(agent: str, run_id: str, output_dir: Path) -> None:
+    """Mirror this AO run into the browsable run-logs index (see run_logs.py)."""
+    index_run(
+        benchmark_id="terminal-ao",
+        agent=agent,
+        task_id="held-out-53",
+        run_id=run_id,
+        run_dir=output_dir,
+    )
 
 
 def _run_terminal_ao_once(
@@ -458,6 +470,7 @@ def _run_terminal_ao_once(
             or f"native launcher exited with code {launcher_result.return_code}",
         )
         result.write(output_dir / "result.json")
+        _index_ao_run(agent, manifest.run_id, output_dir)
         return result
     gate = SealedTestGate(output_dir / "sealed/test-consumed.json")
     gate.consume(
@@ -528,6 +541,7 @@ def _run_terminal_ao_once(
         },
     )
     result.write(output_dir / "result.json")
+    _index_ao_run(agent, manifest.run_id, output_dir)
     return result
 
 

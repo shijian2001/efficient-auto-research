@@ -408,7 +408,12 @@ def _workspace_sandbox_argv(
         raise AdapterError(f"sandbox relay socket does not exist: {relay_socket}")
     resolver_path = relay_socket.parent / "resolv.conf"
     resolver_path.write_text("nameserver 10.0.2.3\n", encoding="utf-8")
-    codex_home = workspace.workspace_dir.parent / "codex-home"
+    # Persistent home for whatever the CLI records about its own run. Claude Code
+    # writes its session transcript under $HOME/.claude; Codex keeps state under
+    # CODEX_HOME. Both live here so the evidence outlives the sandbox.
+    agent_home = workspace.workspace_dir.parent / "agent-home"
+    (agent_home / "claude").mkdir(parents=True, exist_ok=True)
+    codex_home = agent_home / "codex"
     codex_home.mkdir(parents=True, exist_ok=True)
     auth_path = codex_home / "auth.json"
     if not auth_path.exists():
@@ -476,10 +481,6 @@ def _workspace_sandbox_argv(
         "--tmpfs",
         "/tmp",
         "--dir",
-        "/tmp/home",
-        "--dir",
-        "/tmp/codex-home",
-        "--dir",
         "/tmp/xdg-cache",
         "--dir",
         "/tmp/xdg-config",
@@ -495,6 +496,9 @@ def _workspace_sandbox_argv(
         "--bind",
         str(workspace.workspace_dir),
         "/workspace",
+        "--bind",
+        str(agent_home),
+        "/agent-home",
         "--ro-bind",
         str(workspace.public_dir),
         "/workspace/input",
@@ -507,9 +511,6 @@ def _workspace_sandbox_argv(
         "--ro-bind",
         str(relay_socket),
         "/relay/agent.sock",
-        "--bind",
-        str(codex_home),
-        "/tmp/codex-home",
     ]
     current = Path("/")
     for part in benchmark_python_home.parent.parts[1:]:
@@ -742,8 +743,12 @@ def _workspace_command(
     )
     environment.update(
         {
-            "CODEX_HOME": "/tmp/codex-home",
-            "HOME": "/tmp/home",
+            # /tmp is a tmpfs inside the jail, so anything an Agent writes under
+            # its home -- Claude Code's session transcript, Codex's own state --
+            # would disappear with the sandbox. Bind both to the run directory,
+            # which is what the native-mle launchers already do.
+            "CODEX_HOME": "/agent-home/codex",
+            "HOME": "/agent-home/claude",
             "LANG": "C.UTF-8",
             "LC_ALL": "C.UTF-8",
             "PATH": "/benchmark-venv/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
@@ -806,14 +811,13 @@ def _workspace_command(
         executable = _required_executable("claude")
         native_argv = (
             "--print",
-            # Without a streamed transcript this cell records a score and nothing
-            # else: --print --bare emits only the closing sentence, so the run log
-            # came to 1.9 KB against Codex's 166 KB on the same task and no
-            # attempt, command or error could be reconstructed afterwards.
-            "--output-format",
-            "stream-json",
-            "--verbose",
-            "--no-session-persistence",
+            # No --no-session-persistence and no imposed --output-format: Claude
+            # Code writes its own session transcript under $HOME/.claude, exactly
+            # as it does outside this harness. Keeping that is strictly weaker
+            # interference than asking it to stream a different format, and it
+            # matches how the other Agents are recorded -- they write their own
+            # logs and the cell simply collects them. HOME is bound to a real
+            # directory below so the transcript survives the run.
             "--model",
             request.model,
             "--permission-mode",

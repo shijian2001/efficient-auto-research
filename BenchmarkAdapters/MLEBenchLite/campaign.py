@@ -21,6 +21,7 @@ from ..gpu_locks import gpu_allocation
 from ..protocol import BenchmarkMode, FormalProtocol, canonical_json, sha256_file
 from ..records import BenchmarkRunResult, RunManifest, RunStatus
 from ..registry import AGENT_RUNTIME_IMAGES, AGENTS, ROOT
+from ..run_logs import index_run
 from ..task_specs import task_spec_digest
 from ..thin_registry import require_clean_upstream_source
 from .adapter import MleLiteAdapter, MleLiteRequest
@@ -341,9 +342,23 @@ def run_campaign_cell(
         hardware=_hardware,
     )
     manifest.validate()
+    # Publish into run-logs/index/ whatever the outcome: a failed or timed-out
+    # cell is the one whose logs get looked at, so it must be as easy to find as
+    # a successful one.
+    def publish_index() -> None:
+        index_run(
+            benchmark_id="mle-bench-lite",
+            agent=cell.agent,
+            task_id=cell.task_id,
+            run_id=manifest.run_id,
+            run_dir=cell.run_dir,
+        )
+
     try:
         request = generate_ml_master_config(request)
-        return run_formal_mle(request=request, manifest=manifest, run_dir=cell.run_dir, log_path=cell.run_dir / "agent.log")
+        outcome = run_formal_mle(request=request, manifest=manifest, run_dir=cell.run_dir, log_path=cell.run_dir / "agent.log")
+        publish_index()
+        return outcome
     except Exception as exc:
         if not (cell.run_dir / "manifest.json").exists():
             manifest.write(cell.run_dir / "manifest.json")
@@ -386,6 +401,7 @@ def run_campaign_cell(
             failure_reason=failure_text,
         )
         result.write(cell.run_dir / "result.json")
+        publish_index()
         return result
 
 
