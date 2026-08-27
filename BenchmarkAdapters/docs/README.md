@@ -12,8 +12,12 @@ can currently produce formal scores. Current checkout status:
 - MLE-Bench Lite `data_manifest.json` is schema 2 (digest
   `6b9bcf44f6f28c965d3da3eb76cfaf24ebb61c384ace4cd82a4a354ffc1db04a`), frozen
   from this host's `mle-bench-data/` prepared trees.
-- Terminal AO protocol is still schema 1 until a 40-char
-  `benchmark_source_commit` is supplied to `terminal-ao-protocol`.
+- Terminal AO protocol is schema 2 as of 2026-08-27: `benchmark_source_commit`
+  `2fd12b88aafdd04a52c298e3940bcb189f9766d6`, `inner_model`
+  `configured-by-model-track`, digest
+  `17ab0e360eeac0453d53b4fa0ac60574581b700f26976a97c8de6f85ee433662`.
+  `require_formal_contract()` passes. How that commit was established (indirect
+  evidence, not a local git read): `ON_DISK_AGENT_VERSIONS.md`.
 - Shared model-track for this host: `configs/model-track.gpt-5.6-terra-host-relay.json`
   (gpt-5.6-terra, temperature 1.0, reasoning_effort high, relay
   `http://127.0.0.1:6200/v1`) — the track for the upcoming campaign. The earlier

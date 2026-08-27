@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from BenchmarkAdapters.contracts import AdapterError
+from BenchmarkAdapters.formal_contract import ModelTrackConfig
 from BenchmarkAdapters.protocol import sha256_file
 from BenchmarkAdapters.registry import ROOT
 from BenchmarkAdapters.TerminalAO.baseline import BaselineManifest, tree_digest
@@ -35,6 +36,15 @@ ASSET_DIR = ROOT / "terminal-bench-2/ao_protocol"
 
 def _protocol() -> TerminalAOProtocol:
     return TerminalAOProtocol.load(ASSET_DIR / "protocol.json")
+
+
+def _model_config() -> ModelTrackConfig:
+    """The shared model track the evaluator binds its inner model to."""
+    return ModelTrackConfig.load(
+        ROOT / "BenchmarkAdapters/configs/model-track.gpt-5.6-terra-host-relay.json",
+        formal=True,
+        require_terminal_inner=True,
+    )
 
 
 def test_frozen_split_is_deterministic_disjoint_and_complete() -> None:
@@ -177,11 +187,19 @@ def test_missing_rewards_and_errors_are_zero_in_fixed_denominator() -> None:
 
 def test_sealed_test_can_be_consumed_only_once(tmp_path: Path) -> None:
     gate = SealedTestGate(tmp_path / "test-consumed.json")
-    gate.consume(protocol_digest="a" * 64, harness_digest="b" * 64)
+    consume_args = {
+        "protocol_digest": "a" * 64,
+        "split_digest": "c" * 64,
+        "harness_digest": "b" * 64,
+        "outer_run_index": 0,
+    }
+    gate.consume(**consume_args)
     payload = json.loads((tmp_path / "test-consumed.json").read_text())
     assert payload["test_consumed"] is True
+    assert payload["split_digest"] == "c" * 64
+    assert payload["outer_run_index"] == 0
     with pytest.raises(AdapterError, match="already been consumed"):
-        gate.consume(protocol_digest="a" * 64, harness_digest="b" * 64)
+        gate.consume(**consume_args)
 
 
 def test_harbor_evaluator_uses_candidate_wrapper_and_only_requested_split(
@@ -193,6 +211,7 @@ def test_harbor_evaluator_uses_candidate_wrapper_and_only_requested_split(
         split_name="dev",
         harness_dir=protocol.baseline_source,
         jobs_dir=tmp_path / "jobs",
+        model_config=_model_config(),
     )
     text = " ".join(command.argv)
     split = FrozenSplit.load(protocol.split_path)
@@ -239,6 +258,7 @@ def test_harbor_result_parser_uses_task_name_and_reward_with_fixed_denominator(
         split_name="dev",
         candidate_digest="a" * 64,
         jobs_dir=tmp_path / "jobs",
+        model_config=_model_config(),
     )
     assert record.expected_tasks == 36
     assert record.passed == 1

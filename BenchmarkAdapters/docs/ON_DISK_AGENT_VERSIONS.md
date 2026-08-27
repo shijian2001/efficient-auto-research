@@ -63,3 +63,19 @@ Codex / Claude Code 没有独立 nested git。`git -C baselines/Codex rev-parse 
 
 - MLE-Bench Lite：七家都进表。
 - Terminal AO：EAR、Arbor、Codex、Claude Code、AiScientist。MLEvolve 与 ML-Master 2.0 不进表。
+
+## Terminal AO benchmark 来源（2026-08-27 补）
+
+AO protocol schema 2 需要 40 位 `benchmark_source_commit`。本机
+`terminal-bench-2/` 没有 `.git`，该哈希按下述证据推定：
+
+- `terminal-bench-2/config/dataset_source.toml` 记录 2026-08-01 用
+  `harbor download terminal-bench@2.0` 下载，89 题。
+- 上游 `harbor-framework/terminal-bench-2` 最后一次 push 是 2026-04-30，
+  早于下载日，因此下载时 HEAD 稳定在
+  `2fd12b88aafdd04a52c298e3940bcb189f9766d6`（"Add task metadata to task manifests"）。
+- 该 commit 的 tree 与本地 `datasets/terminal-bench-2/` 的 89 个任务目录名
+  **逐一比对完全一致**。
+
+这是间接推定，不是从本地 git 直接读出的。若日后拿到直接记录与此不符，
+应重新生成 protocol 并作废受影响的成绩。
