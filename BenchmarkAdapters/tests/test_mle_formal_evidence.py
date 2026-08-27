@@ -268,7 +268,7 @@ def test_mle_hashed_failed_task_remains_zero_in_22_task_denominator(
     assert TASKS[0] not in aggregate["raw_scores_by_seed_and_task"]["0"]
 
 
-def test_mle_prepared_and_archive_hashes_detect_tampering(
+def test_mle_data_root_structure_and_archive_hashes_are_enforced(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     data_root = tmp_path / "data"
@@ -306,13 +306,31 @@ def test_mle_prepared_and_archive_hashes_detect_tampering(
     monkeypatch.setattr(
         "BenchmarkAdapters.MLEBenchLite.membership.load_data_manifest", lambda: manifest
     )
+    monkeypatch.setattr(
+        "BenchmarkAdapters.MLEBenchLite.membership.upstream_checksums_path",
+        lambda task_id: data_root / task_id / "checksums.yaml",
+    )
+    for task_id in TASKS:
+        (data_root / task_id / "checksums.yaml").write_text("zip: x\n", encoding="utf-8")
     assert validate_lite_data_root(data_root) == TASKS
     verify_task_archive(data_root, TASKS[0])
-    public_file = data_root / TASKS[0] / "prepared/public/input.txt"
-    public_file.write_text("tampered", encoding="utf-8")
-    with pytest.raises(AdapterError, match="prepared public asset drift"):
+
+    # Content drift inside a prepared tree is no longer this function's job:
+    # upstream mlebench prepare owns per-file checksums, and re-hashing 135 GB
+    # before every cell cost more than it caught. What must still fail closed is
+    # structural: data that is missing, empty, or has no upstream checksum record.
+    public_dir = data_root / TASKS[0] / "prepared/public"
+    (public_dir / "input.txt").unlink()
+    with pytest.raises(AdapterError, match="prepared public data is empty"):
         validate_lite_data_root(data_root)
-    public_file.write_text(TASKS[0], encoding="utf-8")
+    (public_dir / "input.txt").write_text(TASKS[0], encoding="utf-8")
+
+    (data_root / TASKS[0] / "checksums.yaml").unlink()
+    with pytest.raises(AdapterError, match="upstream mle-bench checksums are missing"):
+        validate_lite_data_root(data_root)
+    (data_root / TASKS[0] / "checksums.yaml").write_text("zip: x\n", encoding="utf-8")
+
+    # The per-cell source archive is still verified by content.
     archive = data_root / TASKS[0] / f"{TASKS[0]}.zip"
     archive.write_bytes(b"same-size-tamper".ljust(archive.stat().st_size, b"x"))
     with pytest.raises(AdapterError, match="archive"):

@@ -132,17 +132,24 @@ AO 一次独占 8 卡（`dev_concurrency=8`），所以 5 家只能串行：
   `model_parameters`，relay 会抛
   `RuntimeError: relay model parameters must be configured explicitly`。
   调试用 `--dry-run`；实跑一律用 `mle-cell`。
-- **资产校验现在带缓存。** `validate_lite_data_root` 要按内容哈希全部 22 题的
-  prepared public+private 树，一轮读 135 GB；本机这组盘在满负载下只有约
-  16 MB/s，单次要按小时算，而 154 格原本每格都要重付一次。
+- **prepared 数据的完整性由上游负责，我们不再重复校验。**
+  原先 `validate_lite_data_root` 会按内容重新哈希全部 22 题的 prepared
+  public+private 树：一轮读约 135 GB，本机这组盘满负载只有约 16 MB/s，单次要按
+  小时算，而 154 格每格都要重付一次。
 
-  现在按「stat 指纹（每文件 size/mtime/inode）+ manifest digest」缓存校验结论，
-  存在 `cache/mle-asset-verification/`（已被 `.gitignore` 覆盖，不会弄脏工作区）。
-  指纹变了就重新按内容哈希，所以改动、替换、换 manifest 都会立即失效——
-  实测同长度篡改仍会被抓出 `MLE prepared public asset drift`。
-  想强制全量重读：`MLE_ASSET_VERIFY=full`。
+  这层是我们自己加的（`cc6b84f`），上游 mle-bench 本来就在
+  `mlebench prepare` 时为每个 competition 生成并核对 public/private 的逐文件
+  checksum，存在 `competitions/<task>/checksums.yaml`（22 题全都有）。等于同一件事
+  做了两遍，而且我们这遍做了 154 次。
 
-  各格自己的源码归档校验（`verify_task_archive`）只哈希本格那一个，不是全量，
-  不走这个缓存。
+  现在只做结构检查：prepared public/private 存在、非符号链接、非空，且上游
+  checksums.yaml 在位。实测 **0.70 秒**（原先一小时以上）。
+
+  仍然按内容校验的部分没变：每格自己的源码归档 `verify_task_archive`
+  （只哈希本格那一个），以及 `data_manifest.json` 记录的身份——成绩单绑定的
+  东西一个没少。要重新逐文件校验 prepared 数据，跑上游
+  `mlebench prepare`（不加 `--skip-verification`），或显式的
+  `mle-freeze-assets`。
+
 - **N=1 没有误差棒。** `repetition_summary` 只给 `mean`，
   standard_deviation / standard_error / ci95 全为 `null`。排名不得表述为显著差异。
