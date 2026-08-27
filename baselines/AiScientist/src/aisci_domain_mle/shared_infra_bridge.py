@@ -50,6 +50,18 @@ def mle_runtime_extra_mounts() -> tuple[SessionMount, ...]:
 
 
 def domain_llm_profile_file() -> str:
+    # Honour AISCI_LLM_PROFILE_FILE, the override this project already defines.
+    # `aisci ... --llm-profile-file` exports it (aisci_app/cli.py), the shared
+    # resolver reads it (aisci_agent_runtime/llm_profiles._resolve_profile_path),
+    # and the paper domain picks it up because it never passes profile_file at
+    # all. Only this MLE helper hard-coded a path derived from the source tree,
+    # and because an explicit profile_file wins over the environment, the flag
+    # was silently ignored here: every MLE phase looked for the caller's profile
+    # inside the repo's own config/llm_profiles.yaml and failed with
+    # "Unknown LLM profile: <name>". Local pin for this campaign, not upstreamed.
+    override = os.environ.get("AISCI_LLM_PROFILE_FILE", "").strip()
+    if override:
+        return str(Path(override).expanduser().resolve())
     return str((domain_repo_root() / "config" / "llm_profiles.yaml").resolve())
 
 

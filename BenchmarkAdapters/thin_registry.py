@@ -56,7 +56,7 @@ THIN_CLASSIFICATIONS = {
 # Identities and what each local commit contains: docs/ON_DISK_AGENT_VERSIONS.md
 UPSTREAM_REVISIONS = {
     "arbor": "92c6fd5c22c8a291796d39730605ac0eb8ba07c5",
-    "ai-scientist": "61522b79c09748749a80b1c0d7214d8b67751ecb",
+    "ai-scientist": "aae385b12b0d1e5ad928c6f988a769cfb173b3e7",
     "ml-master-2": "07a80dac7f9edad18f2d97bcbffc0585e06d5b46",
 }
 

@@ -87,3 +87,10 @@ AO protocol schema 2 需要 40 位 `benchmark_source_commit`。本机
 `ubuntu:24.04`），但 Dockerfile 没声明，参数失效，构建只能拉内网基础镜像。
 补这一行之后可以用上游自己的脚本构建出 MLE 运行镜像。`UPSTREAM_REVISIONS`
 已同步更新。补丁只在本机 pin，未回上游。
+
+`61522b7` → `aae385b`：让 MLE 域尊重 `AISCI_LLM_PROFILE_FILE`。
+`--llm-profile-file` 会导出这个变量，共享解析器读它，paper 域也因为不传
+`profile_file` 而自然生效——只有 `domain_llm_profile_file()` 硬返回源码树里的
+固定路径，而显式参数优先级高于环境变量，于是该 flag 在 MLE 路径上被静默忽略，
+每个阶段都到上游自带的 `config/llm_profiles.yaml` 里找我们生成的 profile，
+报 `Unknown LLM profile: benchmark-model`。同样只在本机 pin。
