@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from BenchmarkAdapters.contracts import AdapterError
+from BenchmarkAdapters.formal_contract import ModelTrackConfig
 from BenchmarkAdapters.MLEBenchLite.aggregate import aggregate_seeds, calculate_seed_metrics
 from BenchmarkAdapters.MLEBenchLite.adapter import MleLiteAdapter, MleLiteRequest
 from BenchmarkAdapters.MLEBenchLite.campaign import (
@@ -30,6 +31,14 @@ from BenchmarkAdapters.MLEBenchLite.membership import (
 )
 from BenchmarkAdapters.registry import ROOT
 from BenchmarkAdapters.registry import AGENTS
+
+
+def _model_config() -> ModelTrackConfig:
+    """The shared model track every formal MLE cell binds its model to."""
+    return ModelTrackConfig.load(
+        ROOT / "BenchmarkAdapters/configs/model-track.gpt-5.6-terra-host-relay.json",
+        formal=True,
+    )
 
 
 def test_frozen_lite_registry_contains_exactly_22_prepared_tasks() -> None:
@@ -130,11 +139,20 @@ def test_failures_remain_in_seed_denominator_and_raw_scores_are_not_averaged() -
     assert "valid_rate" in aggregate["metrics"]
 
 
-def test_formal_aggregate_requires_three_unique_seeds() -> None:
+def test_formal_aggregate_requires_configured_n1_or_n3_unique_seeds() -> None:
     tasks = ("a",)
     one = calculate_seed_metrics(seed=0, task_ids=tasks, reports={})
-    with pytest.raises(AdapterError, match="at least three"):
-        aggregate_seeds([one])
+    # N=1 and N=3 are both configured reporting modes; anything else is refused.
+    assert aggregate_seeds([one])["reporting_label"] == "single_run"
+    three = [one] + [
+        calculate_seed_metrics(seed=seed, task_ids=tasks, reports={}) for seed in (1, 2)
+    ]
+    assert aggregate_seeds(three)["reporting_label"] == "avg_at_3"
+    with pytest.raises(AdapterError, match="N=1 or N=3"):
+        aggregate_seeds([one, calculate_seed_metrics(seed=1, task_ids=tasks, reports={})])
+    # A seed set that does not fill the declared repetitions is refused.
+    with pytest.raises(AdapterError, match="N=1 or N=3"):
+        aggregate_seeds([one], outer_repetitions=3)
     with pytest.raises(AdapterError, match="duplicate"):
         aggregate_seeds([one, one, one])
 
@@ -147,6 +165,7 @@ def test_formal_protocol_builds_complete_seven_agent_grid(tmp_path: Path) -> Non
         "grader_worker",
         "mlebench_lock",
         "official_low_split",
+        "task_spec",
     }
     cells = campaign_cells(protocol, tmp_path)
     assert len(cells) == 7 * 3 * 22
@@ -172,12 +191,19 @@ def test_every_mle_launcher_declares_one_explicit_final_artifact(
         if agent == "ml-master-2"
         else None
     )
+    # Every launcher now requires an explicit model, and Arbor's MLE cell is only
+    # reachable through its registered patched variant.
+    model_config = _model_config()
     request = MleLiteRequest(
         agent=agent,
         competition_id="spooky-author-identification",
         data_root=ROOT / "mle-bench-data",
         output_dir=tmp_path / agent,
         config_path=config_path,
+        model=model_config.outer_model_id,
+        agent_variant=(
+            "arbor-benchmark-patched" if agent == "arbor" else "default"
+        ),
         dry_run=True,
     )
     command = MleLiteAdapter(agent).build_command(request)
@@ -213,7 +239,15 @@ def test_native_wrappers_publish_only_declared_final_path(tmp_path: Path) -> Non
     assert (master_output / "submission.csv").read_text() == "id,y\n1,2\n"
 
 
-def test_campaign_aggregate_keeps_missing_runs_in_denominator(tmp_path: Path) -> None:
+def test_campaign_aggregate_refuses_incomplete_formal_evidence(tmp_path: Path) -> None:
+    """A cell without complete formal evidence must stop the aggregate.
+
+    Earlier behaviour folded a missing run into the denominator as a failure.
+    That silently turned "we never ran this cell" into "this cell scored zero",
+    which is a different claim. The aggregate is now fail-closed: every declared
+    task must present both result.json and an immutable manifest.json, or no
+    scorecard is produced at all.
+    """
     protocol = build_mle_protocol(seeds=(0, 1, 2))
     task_id = protocol.task_ids[0]
     for seed in protocol.seeds:
@@ -241,10 +275,10 @@ def test_campaign_aggregate_keeps_missing_runs_in_denominator(tmp_path: Path) ->
                 }
             )
         )
-    aggregate = aggregate_campaign(protocol, tmp_path, "codex")
-    assert aggregate["metrics"]["valid_rate"]["mean"] == pytest.approx(1 / 22)
-    assert aggregate["total_failures"] == 63
-    assert aggregate["raw_scores_averaged_across_tasks"] is False
+    # Only one of the 22 declared tasks has any evidence, and even that one is
+    # missing its manifest, so the aggregate must refuse rather than score.
+    with pytest.raises(AdapterError, match="missing formal evidence"):
+        aggregate_campaign(protocol, tmp_path, "codex")
 
 
 def test_failed_official_grade_preserves_published_artifact_hash(
@@ -282,6 +316,7 @@ def test_failed_official_grade_preserves_published_artifact_hash(
         protocol=protocol,
         data_root=tmp_path,
         formal=False,
+        model_config=_model_config(),
     )
     assert result.status.value == "invalid_artifact"
     assert result.artifact_path is not None
@@ -313,6 +348,7 @@ def test_formal_cell_uses_wall_clock_not_one_step_default(tmp_path: Path, monkey
         protocol=protocol,
         data_root=tmp_path,
         formal=False,
+        model_config=_model_config(),
     )
     request = captured["request"]
     assert request.timeout_seconds == protocol.wall_clock_seconds
