@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 import subprocess
 import stat
 from pathlib import Path
@@ -51,6 +52,51 @@ def load_data_manifest(path: Path = DEFAULT_DATA_MANIFEST) -> dict[str, object]:
     if payload.get("split_digest") != split_digest():
         raise AdapterError("MLE data manifest split digest differs from the frozen Lite split")
     return {**payload, "manifest_digest": expected_digest}
+
+
+def _tree_stat_fingerprint(root: Path) -> str:
+    """Cheap identity for a prepared tree: path, size, mtime and inode per file.
+
+    This is a stat walk, not a read, so it costs milliseconds where hashing the
+    same tree costs minutes. It is only ever used to decide whether a previously
+    verified full-content hash is still valid; the recorded manifest digests are
+    still what the campaign is bound to.
+    """
+    parts: list[str] = []
+    for path in sorted(root.resolve().rglob("*")):
+        info = path.lstat()
+        if stat.S_ISDIR(info.st_mode):
+            continue
+        parts.append(
+            f"{path.relative_to(root.resolve()).as_posix()}:{info.st_size}:"
+            f"{info.st_mtime_ns}:{info.st_ino}"
+        )
+    return hashlib.sha256("\n".join(parts).encode("utf-8")).hexdigest()
+
+
+def _asset_cache_path(data_root: Path) -> Path:
+    key = hashlib.sha256(str(data_root.resolve()).encode("utf-8")).hexdigest()[:16]
+    return ROOT / "cache" / "mle-asset-verification" / f"{key}.json"
+
+
+def _load_asset_cache(path: Path) -> dict[str, str]:
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _store_asset_cache(path: Path, payload: dict[str, str]) -> None:
+    try:
+        path.parent.mkdir(parents=True, exist_ok=True)
+        temporary = path.with_suffix(".tmp")
+        temporary.write_text(json.dumps(payload, sort_keys=True, indent=2), encoding="utf-8")
+        temporary.replace(path)
+    except OSError:
+        # A cache we cannot persist is a performance loss, never a correctness
+        # problem: the next run simply re-verifies from content.
+        pass
 
 
 def _tree_file_hashes(root: Path) -> dict[str, str]:
@@ -152,14 +198,40 @@ def validate_lite_data_root(
             "run the explicit mle-freeze-assets maintenance command"
         )
     records = {str(item["task_id"]): item for item in manifest["tasks"]}
+    # Full-content verification of all 22 prepared trees reads well over 100 GB,
+    # which every cell would otherwise repay before its Agent even starts. Cache
+    # the verdict against a stat fingerprint (size/mtime/inode per file) plus the
+    # manifest digest: any edit, replacement or manifest change invalidates it and
+    # the content hashes are recomputed. Set MLE_ASSET_VERIFY=full to force the
+    # complete re-read.
+    manifest_digest = str(manifest.get("manifest_digest", ""))
+    force_full = os.environ.get("MLE_ASSET_VERIFY", "").strip().lower() == "full"
+    cache_path = _asset_cache_path(data_root)
+    cache = {} if force_full else _load_asset_cache(cache_path)
+    updated = dict(cache)
     for task_id in expected:
         public = data_root / task_id / "prepared/public"
         private = data_root / task_id / "prepared/private"
         record = records[task_id]
+        fingerprint = hashlib.sha256(
+            "|".join(
+                (
+                    manifest_digest,
+                    task_id,
+                    _tree_stat_fingerprint(public),
+                    _tree_stat_fingerprint(private),
+                )
+            ).encode("utf-8")
+        ).hexdigest()
+        if cache.get(task_id) == fingerprint:
+            continue
         if _tree_file_hashes(public) != record.get("prepared_public_files"):
             raise AdapterError(f"MLE prepared public asset drift: {task_id}")
         if _tree_file_hashes(private) != record.get("prepared_private_files"):
             raise AdapterError(f"MLE prepared private asset drift: {task_id}")
+        updated[task_id] = fingerprint
+    if updated != cache:
+        _store_asset_cache(cache_path, updated)
     return expected
 
 
