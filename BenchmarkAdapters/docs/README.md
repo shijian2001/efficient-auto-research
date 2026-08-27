@@ -52,6 +52,10 @@ upstream identity, baseline promotion procedure, and formal comparison rules are
 documented in
 `BenchmarkAdapters/docs/OPTIMIZER_DESIGN_SEVEN_AGENT_ADAPTER.md`.
 
+Per-cell adapter documentation — how each Agent is wired into each benchmark,
+one file per Agent x Benchmark cell — is in `BenchmarkAdapters/docs/adapters/`
+(index: `docs/adapters/README.md`).
+
 The important boundary is benchmark-specific:
 
 - `BenchmarkAdapters/MLEBenchLite/adapter.py` builds MLE-Bench Lite workspaces

@@ -27,6 +27,9 @@ re-export。
   `max_steps=1` 的 non-formal smoke 兼容层。
   详见 `BenchmarkAdapters/docs/FML_SEVEN_AGENT_ADAPTER.md`。
 
+每格 Adapter 的具体做法（每个 Agent x Benchmark 一篇）见
+`BenchmarkAdapters/docs/adapters/`，索引在 `docs/adapters/README.md`。
+
 ## 七 Agent
 
 | Agent | MLE 原生路径 | Terminal AO 原生路径 | Optimizer Design 小 Adapter |
