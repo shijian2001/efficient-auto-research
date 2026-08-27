@@ -50,12 +50,13 @@ THIN_CLASSIFICATIONS = {
 # this table, so re-pinning a tree without updating the entry blocks that cell.
 # Prior upstream tips, for provenance:
 #   arbor         65ffcc8fdf23a64a781940e6a3cfb6369d6d887e
+#   ai-scientist  770039abc8f1319f436542b16f630d70d117d322 (before the ARG BASE_IMAGE pin)
 #   ai-scientist  db8cce71cf9668a4946d1eace72290d9e3376164
 #   ml-master-2   36a52bc6c42a6b9fd710a41c52f3c3bb948b9ac9
 # Identities and what each local commit contains: docs/ON_DISK_AGENT_VERSIONS.md
 UPSTREAM_REVISIONS = {
     "arbor": "92c6fd5c22c8a291796d39730605ac0eb8ba07c5",
-    "ai-scientist": "770039abc8f1319f436542b16f630d70d117d322",
+    "ai-scientist": "61522b79c09748749a80b1c0d7214d8b67751ecb",
     "ml-master-2": "07a80dac7f9edad18f2d97bcbffc0585e06d5b46",
 }
 

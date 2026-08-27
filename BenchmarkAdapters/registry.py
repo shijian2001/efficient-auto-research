@@ -140,6 +140,27 @@ AGENTS = {
 }
 
 
+# Runtime container images an Agent needs but upstream never published.
+#
+# AiScientist executes the code its Agent writes inside a Docker container, so a
+# usable image is part of its runtime, not an optional extra. Upstream ships the
+# code (MIT) but points `mle-default` at `hub.byted.org/your-team/aisci-mle`, an
+# internal registry with a placeholder team name, and its Dockerfile's base image
+# lived there too. Nothing pullable exists outside that network, so the cell died
+# in preflight with "Runtime image ... is missing locally and this run would
+# pull it".
+#
+# The image is therefore built locally from upstream's own docker/ assets via
+# `bash docker/build_mle_image.sh` (see docs/adapters/mle-bench-lite.ai-scientist.md).
+# `pull_policy=never` keeps a formal run from silently reaching the network: if
+# the image is absent the cell fails loudly instead of pulling something
+# unrecorded. Scorecards must note that this cell's runtime was built here rather
+# than pulled from a published upstream release.
+AGENT_RUNTIME_IMAGES = {
+    "ai-scientist": ("aisci-mle:test", "never"),
+}
+
+
 TERMINAL_AO_UNSUPPORTED_REASONS = {
     "mlevolve": (
         "MLEvolve's search engine decides candidate success by whether a node produced "

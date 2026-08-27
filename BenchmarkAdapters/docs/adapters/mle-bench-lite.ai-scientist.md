@@ -63,6 +63,46 @@ bwrap `--die-with-parent --new-session --unshare-all`。挂载：
 `HOME`、`TMPDIR`、`XDG_CACHE_HOME`、`XDG_CONFIG_HOME` 全部指到 `output_dir` 下的
 子目录，`PYTHONPATH` 指向 `install_path/src`。网络同样只通 relay Unix socket。
 
+## 运行镜像：上游没发布，本地构建
+
+AiScientist 把 Agent 写的代码放进 Docker 容器执行（`src/aisci_runtime_docker/`），
+所以可用镜像是它运行时的一部分，不是可选项。
+
+上游开源了代码（MIT，163 个 Python 文件），但**没有发布可用镜像**：
+
+- `config/image_profiles.yaml` 的 `mle-default` 指向
+  `hub.byted.org/your-team/aisci-mle:latest` —— 内网 registry，`your-team`
+  还是个占位符，本机连 DNS 都解析不了。
+- `docker/mle-agent.Dockerfile` 的 `FROM` 也在同一内网。
+- 它自带的 `docker/build_mle_image.sh` 本来是为此准备的：脚本会传
+  `--build-arg BASE_IMAGE`，默认值就是公网的 `ubuntu:24.04`。但 Dockerfile
+  **没有声明这个 ARG**，参数因此失效，构建仍然去拉内网镜像。
+
+这不是版本旧，是上游发布时把外部可用的那一环漏掉了。表现为该格在 preflight
+阶段就死：
+
+```
+Runtime image hub.byted.org/your-team/aisci-mle:latest is missing locally
+and this run would pull it
+```
+
+处理方式是补上上游漏掉的那一行（本地 pin，不回上游），然后用**它自己的**
+构建脚本产出镜像：
+
+```bash
+cd baselines/AiScientist && bash docker/build_mle_image.sh   # -> aisci-mle:test
+```
+
+镜像身份记在 `registry.AGENT_RUNTIME_IMAGES`，由 `campaign.py` 传进
+`MleLiteRequest.runtime_image`。此前只有 `adapter_smoke.py` 会设这个字段，
+正式路径无法覆盖那个不可达的默认值。
+
+`pull_policy=never` 是有意的：正式 run 不允许静默联网拉镜像，镜像不在就直接
+失败，而不是拉进来一个没记录的东西。
+
+> **成绩单必须注明**：这一格的运行环境是本机按上游 docker/ 资产构建的，
+> 不是上游发布的镜像——因为上游没有发布版可对照。
+
 ## 产物：wrapper 定位
 
 这一格的 `submission.csv` 不在固定路径上——AiScientist 把结果写进

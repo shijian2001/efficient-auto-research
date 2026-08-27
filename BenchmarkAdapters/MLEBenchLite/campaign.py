@@ -20,7 +20,7 @@ from ..formal_contract import (
 from ..gpu_locks import gpu_allocation
 from ..protocol import BenchmarkMode, FormalProtocol, canonical_json, sha256_file
 from ..records import BenchmarkRunResult, RunManifest, RunStatus
-from ..registry import AGENTS, ROOT
+from ..registry import AGENT_RUNTIME_IMAGES, AGENTS, ROOT
 from ..task_specs import task_spec_digest
 from ..thin_registry import require_clean_upstream_source
 from .adapter import MleLiteAdapter, MleLiteRequest
@@ -324,6 +324,11 @@ def run_campaign_cell(
         request_timeout_seconds=model_config.request_timeout_seconds,
         retry_policy=dict(model_config.retry_policy),
         agent_variant=agent_variant,
+        # Agents that run their work inside a container need one named here:
+        # the campaign, not just adapter_smoke, has to be able to say which
+        # image a formal cell may use. See registry.AGENT_RUNTIME_IMAGES.
+        runtime_image=AGENT_RUNTIME_IMAGES.get(cell.agent, (None, None))[0],
+        image_pull_policy=AGENT_RUNTIME_IMAGES.get(cell.agent, (None, None))[1],
     )
     started = time.monotonic()
     manifest = build_manifest(

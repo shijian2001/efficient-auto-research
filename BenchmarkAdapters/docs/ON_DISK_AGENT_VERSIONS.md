@@ -79,3 +79,11 @@ AO protocol schema 2 需要 40 位 `benchmark_source_commit`。本机
 
 这是间接推定，不是从本地 git 直接读出的。若日后拿到直接记录与此不符，
 应重新生成 protocol 并作废受影响的成绩。
+
+## AiScientist 重新 pin（2026-08-27）
+
+`770039a` → `61522b7`：给 `docker/mle-agent.Dockerfile` 补上
+`ARG BASE_IMAGE`。上游的 `build_mle_image.sh` 一直在传这个 build-arg（默认公网
+`ubuntu:24.04`），但 Dockerfile 没声明，参数失效，构建只能拉内网基础镜像。
+补这一行之后可以用上游自己的脚本构建出 MLE 运行镜像。`UPSTREAM_REVISIONS`
+已同步更新。补丁只在本机 pin，未回上游。

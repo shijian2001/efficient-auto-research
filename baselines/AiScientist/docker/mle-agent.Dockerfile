@@ -1,4 +1,9 @@
-FROM hub.byted.org/ubuntu:24.04
+# build_mle_image.sh already passes --build-arg BASE_IMAGE (defaulting to the
+# public ubuntu:24.04), but this Dockerfile never declared the ARG, so the
+# flag was inert and every build still reached for the internal registry.
+# Declaring it makes the script's existing default work outside that network.
+ARG BASE_IMAGE=ubuntu:24.04
+FROM ${BASE_IMAGE}
 
 ENV DEBIAN_FRONTEND=noninteractive
 
