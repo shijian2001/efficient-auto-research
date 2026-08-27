@@ -806,7 +806,13 @@ def _workspace_command(
         executable = _required_executable("claude")
         native_argv = (
             "--print",
-            "--bare",
+            # Without a streamed transcript this cell records a score and nothing
+            # else: --print --bare emits only the closing sentence, so the run log
+            # came to 1.9 KB against Codex's 166 KB on the same task and no
+            # attempt, command or error could be reconstructed afterwards.
+            "--output-format",
+            "stream-json",
+            "--verbose",
             "--no-session-persistence",
             "--model",
             request.model,

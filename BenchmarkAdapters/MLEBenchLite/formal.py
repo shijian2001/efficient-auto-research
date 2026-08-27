@@ -14,6 +14,7 @@ from ..records import BenchmarkRunResult, RunManifest, RunStatus
 from .adapter import MleLiteAdapter, MleLiteRequest
 from .grading import OfficialGrade, grade_submission
 from .membership import require_lite_task
+from ..TerminalAO.supervisor import summarize_token_log
 
 
 @dataclass(frozen=True)
@@ -21,6 +22,36 @@ class FormalMleOutcome:
     artifact: PublishedArtifact
     grade: OfficialGrade
     result: BenchmarkRunResult
+
+
+def collect_token_usage(output_dir: Path) -> dict[str, int | None]:
+    """Roll the relay's per-call telemetry into this cell's result record.
+
+    Without this the campaign scores a cell but records `tokens: {}`, so
+    cost-per-point -- the headline efficiency comparison across the seven Agents
+    -- cannot be computed even though every number already sits on disk.
+
+    Two adapter paths write the log in different places: the workspace and native
+    host launchers get one `token_usage.jsonl` from the per-run relay, while the
+    docker launcher writes a `relay-telemetry/<agent>_<task>_gpu<n>.jsonl` per
+    container. Sum whatever is there so all seven Agents report on one basis.
+    """
+    output_dir = output_dir.resolve()
+    logs = [output_dir / "token_usage.jsonl"]
+    logs.extend(sorted((output_dir / "relay-telemetry").glob("*.jsonl")))
+    present = [path for path in logs if path.is_file()]
+    if not present:
+        return {}
+    combined: dict[str, int | None] = {}
+    for path in present:
+        for name, value in summarize_token_log(path).items():
+            if value is None:
+                # One unknown makes the whole total unknown: silently treating it
+                # as zero would understate cost rather than admit it is missing.
+                combined[name] = None
+            elif combined.get(name, 0) is not None:
+                combined[name] = int(combined.get(name, 0) or 0) + int(value)
+    return combined
 
 
 def run_formal_mle(
@@ -66,6 +97,7 @@ def run_formal_mle(
         artifact_path=str(artifact.path),
         artifact_sha256=artifact.sha256,
         wall_clock_seconds=time.monotonic() - started,
+        tokens=collect_token_usage(request.output_dir),
     )
     result.write(run_dir / "result.json")
     return FormalMleOutcome(artifact, grade, result)
