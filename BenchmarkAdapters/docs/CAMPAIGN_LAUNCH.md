@@ -25,11 +25,24 @@ env UPSTREAM_BASE_URL="$OPENAI_BASE_URL" \
     LLM_FORCE_PARAMETERS_JSON='{"temperature":1.0,"reasoning_effort":"high"}' \
     LLM_UPSTREAM_TIMEOUT=600 \
     LLM_MAX_RETRIES=20 \
+    LLM_PROXY_API_KEY="$OPENAI_API_KEY" \
     LLM_TOKEN_LOG_PATH=/path/to/host_relay_tokens.jsonl \
     LLM_PROXY_AGENT_NAME=host-relay \
     ./BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters.LLMRelay.server \
     --port 6200 --host 127.0.0.1
 ```
+
+`LLM_PROXY_API_KEY` 是**入站**凭据，必须设成 per-run relay 会发过来的那把 key。
+per-run relay 取 `UPSTREAM_API_KEY` 或 `OPENAI_API_KEY` 作为 Authorization 发给
+6200；而 host relay 默认只认字面量 `"proxy"`（`server.py:97`）。两边不一致时
+每格会在 1 秒内失败：
+
+```
+[proxy] ERROR upstream 4xx passthrough: upstream 401: {"error": {"message": "invalid relay credential"}}
+result.json: status=failed  failure_reason=RuntimeError: relay upstream readiness returned 401
+```
+
+这一条和上面的 6200 没起是**两个独立的坑**，会依次踩到。
 
 `LLM_FORCE_MODEL` 与 `LLM_FORCE_PARAMETERS_JSON` 必须与 model-track 一致，
 否则成绩单记的模型身份和实际调用不符。relay 会把任何 model 名改写成
@@ -39,7 +52,8 @@ env UPSTREAM_BASE_URL="$OPENAI_BASE_URL" \
 
 ```bash
 curl -s http://127.0.0.1:6200/v1/chat/completions \
-  -H 'Content-Type: application/json' -H 'Authorization: Bearer proxy' \
+  -H 'Content-Type: application/json' \
+  -H "Authorization: Bearer $OPENAI_API_KEY" \
   -d '{"model":"anything","messages":[{"role":"user","content":"Reply with exactly: RELAY_OK"}]}'
 ```
 
