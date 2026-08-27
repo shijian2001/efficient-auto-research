@@ -14,10 +14,18 @@ can currently produce formal scores. Current checkout status:
   from this host's `mle-bench-data/` prepared trees.
 - Terminal AO protocol is schema 2 as of 2026-08-27: `benchmark_source_commit`
   `2fd12b88aafdd04a52c298e3940bcb189f9766d6`, `inner_model`
-  `configured-by-model-track`, digest
-  `17ab0e360eeac0453d53b4fa0ac60574581b700f26976a97c8de6f85ee433662`.
+  `configured-by-model-track`, `seeds = (0,)`, digest
+  `0c4444b0f19d3e145d7049c85b627a876ce4a546b0534afdded1cc1ab263031e`.
   `require_formal_contract()` passes. How that commit was established (indirect
   evidence, not a local git read): `ON_DISK_AGENT_VERSIONS.md`.
+- This campaign reports **N=1** on both benchmarks. `repetition_summary` then
+  emits `reporting_label: single_run` with `mean` only: standard deviation,
+  standard error and the 95% CI are all `null`. Scorecards therefore rank by a
+  single observation per cell and cannot separate a real gap from run-to-run
+  noise; do not describe an N=1 ordering as a significant difference.
+  Frozen protocols: `configs/mle-protocol.n1-12h.json` (22 tasks, seed 0,
+  12h wall clock) and `terminal-bench-2/ao_protocol/protocol.json`
+  (36/53 split, seed 0, 48h outer).
 - Shared model-track for this host: `configs/model-track.gpt-5.6-terra-host-relay.json`
   (gpt-5.6-terra, temperature 1.0, reasoning_effort high, relay
   `http://127.0.0.1:6200/v1`) — the track for the upcoming campaign. The earlier

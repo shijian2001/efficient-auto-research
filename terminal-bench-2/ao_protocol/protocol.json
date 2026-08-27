@@ -21,14 +21,12 @@
   "harbor_version": "0.20.0",
   "inner_model": "configured-by-model-track",
   "outer_wall_clock_seconds": 172800,
-  "protocol_digest": "17ab0e360eeac0453d53b4fa0ac60574581b700f26976a97c8de6f85ee433662",
+  "protocol_digest": "0c4444b0f19d3e145d7049c85b627a876ce4a546b0534afdded1cc1ab263031e",
   "protocol_id": "terminal-bench-ao-reconstruction-v1",
   "retry_policy": "infrastructure-only-once",
   "schema_version": 2,
   "seeds": [
-    0,
-    1,
-    2
+    0
   ],
   "split_digest": "1a37db2d4a244cc8be356e3134620b2d0f396e8fdd9f6223ca84a12a3a6b54e4",
   "split_path": "repo:terminal-bench-2/ao_protocol/split.json"

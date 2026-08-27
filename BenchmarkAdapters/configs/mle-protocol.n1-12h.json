@@ -1,0 +1,50 @@
+{
+  "aggregation_policy": "22-task rates per outer run; single_run for N=1 or Avg@3 for N=3",
+  "artifact_policy": "one explicit final submission.csv selected before host-owned grading",
+  "asset_digests": {
+    "data_manifest": "6b9bcf44f6f28c965d3da3eb76cfaf24ebb61c384ace4cd82a4a354ffc1db04a",
+    "grader_worker": "3835aa28d9016019b60f20219e943f136c748884d0907da2380eb6f477b2ae2f",
+    "mlebench_lock": "faf4424bd6e8bd253c70b0fc861c830caff7359054a97b54bfdea681e7ed7e3d",
+    "official_low_split": "55574dcb4ae7006c22cc621124fa5b2e6d506ab060b88f6cb176a3bd965e6779",
+    "task_spec": "2792c2280d603178072eb96e17f1a144d4654b7ac08f63fe9bf06714453c7780"
+  },
+  "failure_policy": "missing, invalid, timed-out, and failed tasks remain in the denominator as zero",
+  "formal": true,
+  "hardware_policy": "one declared GPU and fixed wall-clock budget per task",
+  "mode": "mle",
+  "model": "configured-by-model-track",
+  "protocol_digest": "a728947c6e791603acfe53a1124817b97334b86fac8670b0591cf9da70a29aca",
+  "protocol_id": "mle-bench-lite-official-22-v1",
+  "reasoning_effort": "configured-by-model-track",
+  "retry_policy": "no task retry; infrastructure retry keeps the same run identity",
+  "schema_version": 2,
+  "seeds": [
+    0
+  ],
+  "task_ids": [
+    "aerial-cactus-identification",
+    "aptos2019-blindness-detection",
+    "denoising-dirty-documents",
+    "detecting-insults-in-social-commentary",
+    "dog-breed-identification",
+    "dogs-vs-cats-redux-kernels-edition",
+    "histopathologic-cancer-detection",
+    "jigsaw-toxic-comment-classification-challenge",
+    "leaf-classification",
+    "mlsp-2013-birds",
+    "new-york-city-taxi-fare-prediction",
+    "nomad2018-predict-transparent-conductors",
+    "plant-pathology-2020-fgvc7",
+    "random-acts-of-pizza",
+    "ranzcr-clip-catheter-line-classification",
+    "siim-isic-melanoma-classification",
+    "spooky-author-identification",
+    "tabular-playground-series-dec-2021",
+    "tabular-playground-series-may-2022",
+    "text-normalization-challenge-english-language",
+    "text-normalization-challenge-russian-language",
+    "the-icml-2013-whale-challenge-right-whale-redux"
+  ],
+  "temperature": null,
+  "wall_clock_seconds": 43200
+}
