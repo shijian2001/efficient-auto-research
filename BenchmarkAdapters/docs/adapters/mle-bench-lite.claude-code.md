@@ -19,7 +19,7 @@ workspace 内容见 [mle-bench-lite.codex.md](mle-bench-lite.codex.md#workspace-
 ### CLI 调用
 
 ```
-claude --print --bare --no-session-persistence
+claude --print
        --model <model>
        --permission-mode bypassPermissions
        --max-turns <max_turns>
@@ -28,18 +28,21 @@ claude --print --bare --no-session-persistence
 
 `instruction` 与 Codex 逐字节相同（`task_specs/mle-bench-lite.md`）。
 
+不传 `--bare`、不传 `--no-session-persistence`、也不强加 `--output-format`。
+Claude Code 按自己的方式把 session 写到 `$HOME/.claude`；这一格把 HOME 绑到
+真实目录，transcript 会留下来，和其他 Agent 自己写日志、格子再收集的做法一致。
+
 各 flag 的用意：
 
 | flag | 为什么 |
 |---|---|
 | `--print` | 非交互，一次性输出 |
-| `--bare` | 去掉终端装饰，日志可解析 |
-| `--no-session-persistence` | 不写 session 文件，格与格之间不串 |
 | `--permission-mode bypassPermissions` | 沙箱已经限制了能力边界，再弹权限确认会卡死非交互进程 |
-| `--max-turns` | **这一格特有的预算参数**，`MleLiteRequest.max_turns` 默认 8 |
+| `--max-turns` | **这一格特有的预算参数**。`MleLiteRequest` 默认 8；正式 campaign 传 1000，让 wall clock（12h）成为实际上限 |
 
 `--max-turns` 是 Codex 那一格没有的。两家的预算口径因此不完全对称：
 Claude Code 受 turn 数和 wall clock 双重约束，Codex 只受 wall clock 约束。
+正式 campaign 把 turn 上限放到 1000，12h 预算内几乎碰不到这个墙。
 **跨格比较 token / 步数时要记得这一点。**
 
 ### 沙箱

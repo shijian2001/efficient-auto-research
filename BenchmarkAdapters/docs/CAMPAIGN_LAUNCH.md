@@ -125,7 +125,7 @@ temperature 与 reasoning effort 仍然强制覆盖成 track 里的值。
 | Codex | `codex` | `codex` |
 | Claude Code | `claude-code` | `claude-code` |
 | ML-Master 2.0 | `ml-master-2@07a80dac7f9edad18f2d97bcbffc0585e06d5b46` | 不参与 |
-| AiScientist | `ai-scientist@770039abc8f1319f436542b16f630d70d117d322` | `ai-scientist-terminal-variant` |
+| AiScientist | `ai-scientist@aae385b12b0d1e5ad928c6f988a769cfb173b3e7` | `ai-scientist-terminal-variant` |
 
 带 `@` 的那三家用的是**本机 pin**，不是上游 tip。写错会被
 `require_clean_upstream_source` 拒（报错会给出正确哈希）。来源见

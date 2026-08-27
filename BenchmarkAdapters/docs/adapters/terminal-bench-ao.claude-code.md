@@ -27,13 +27,15 @@ claude --print --no-session-persistence
 | flag | MLE 格 | AO 格 |
 |---|---|---|
 | `--print` | ✓ | ✓ |
-| `--bare` | ✓ | ✗ |
-| `--no-session-persistence` | ✓ | ✓ |
+| `--bare` | ✗ | ✗ |
+| `--no-session-persistence` | ✗ | ✓ |
 | `--permission-mode bypassPermissions` | ✓ | ✓ |
-| `--max-turns` | ✓（默认 8） | **✗** |
+| `--max-turns` | ✓（campaign 传 1000） | **✗** |
 
 AO 这一格**不传** `--max-turns`，预算纯由 wall clock 控制 ——
 这样和 Codex 对称。MLE 那一格传了，所以那边两家不对称。
+AO 仍传 `--no-session-persistence`；MLE 那一格刻意不传，好留下 Claude
+自己的 session 记录。
 
 ### instruction
 

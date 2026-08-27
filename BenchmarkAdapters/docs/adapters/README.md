@@ -42,8 +42,10 @@ fail-closed 存根。
 ## 共同约束
 
 - **模型统一**：所有格经 host-owned LLM relay（`http://127.0.0.1:6200/v1`），
-  由 `configs/model-track.*.json` 定义 model id / 参数 / 超时 / 重试。
-  Agent 拿到的是 relay 端点，不是真 key。
+  正式 campaign 用 `configs/model-track.gpt-5.6-terra-host-relay.json`
+  （`gpt-5.6-terra`，temperature 1.0，reasoning_effort high，不设 max tokens）。
+  Agent 拿到的是 relay 端点，不是真 key。relay 默认按客户端协议原样透传；
+  跨协议改写只在 `LLM_FORCE_CROSS_PROTOCOL` 打开时发生。
 - **来源钉死**：正式格要求 `install_path` 的 nested git 干净，HEAD 那 40 位写进
   manifest。身份见 `../ON_DISK_AGENT_VERSIONS.md`。
 - **产物判定**：MLE 认 Agent 自己声明的最终 `submission.csv`（非空、与

@@ -125,3 +125,15 @@ cd baselines/AiScientist && bash docker/build_mle_image.sh   # -> aisci-mle:test
 `native-mle` 走 `MleLiteAdapter.run` 的 `RelayProcess` + Unix socket
 （与 workspace 两家相同，与 native-docker 三家不同）。
 `OPENAI_API_KEY=proxy`，真实上游由 relay 持有。
+
+## 本地补丁（MLE 相关）
+
+`baselines/AiScientist` HEAD 是 `aae385b`，不是文档里曾经写的 `770039a`：
+
+- `61522b7`：Dockerfile 声明 `ARG BASE_IMAGE`，让上游自己的
+  `build_mle_image.sh` 在公网能构建。环境适配。
+- `aae385b`：MLE 域尊重 `AISCI_LLM_PROFILE_FILE`，否则 `--llm-profile-file`
+  被静默忽略、格子起不来。环境适配。
+- `770039a` 的 `TerminalTaskSubagent` 只给 AO 用，MLE 路径不走它。
+- `config/llm_profiles.yaml` 多了一个 `gpt-5.5` 段；正式 campaign 用生成的
+  `ai-scientist-llm-profile.yaml`（gpt-5.6-terra），不靠这份仓库内 profile。

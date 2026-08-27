@@ -65,3 +65,25 @@ recovery 和外部官方评分链路保留不动。
 ## Relay
 
 `native-docker`，relay 在 host 由 `run_in_docker.sh` 起。
+
+## 本地补丁里会影响搜索的部分
+
+`Arbor-longrun-patched` 相对上游不只是环境适配。读这一格分数时必须写明：
+
+- `src/plugins/mle_kaggle.yaml`：`mle_bench_lite.executor_timeout` 从 4h 改成
+  2h（`time_budget` 仍是 24h）。12h campaign 下，4h 超时连续三次会把整格预算
+  吃光、零提交；减半是为了还能再试。这改变了单次 executor 能跑多久，是行为
+  变化，不是纯 bugfix。对 Arbor **不利**（单次训练更短），但避免整格交白卷。
+- `src/core/agent.py`：扩了 premature-stop nudge（第一轮纯文本也 nudge；
+  `will <动词>` 也算未完成），long-run 树还开了 `continue_until_budget`——
+  没到预算就纯文本结束会被要求继续。这是搜索时长/坚持程度的变化，对 Arbor
+  **可能有利**。
+- `src/coordinator/orchestrator.py`：eval_contract 覆盖 tree meta，并把
+  `test_semantics=artifact_verification_only` 写进 prompt（「artifact
+  integrity only; official/test grading remains external」）。这是防作弊/
+  防拿 test 当反馈，不是加强搜索。
+- `src/mle/state_store.py`：只存 candidate 与 receipt 的绑定，**不排序、
+  不改选优**。
+
+成绩单必须写 `arbor-benchmark-patched`，并记下 executor_timeout=2h 和
+continue-until-budget。

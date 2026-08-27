@@ -66,6 +66,17 @@ ML-Master 2.0 通过复制 `submission_<uid>.csv` 晋升最优解，最终落在
 
 `native-mle`，`MleLiteAdapter.run` 起 `RelayProcess` + Unix socket。
 
+## 本地补丁
+
+`baselines/EvoMaster` HEAD `07a80da`，相对上游只有：
+
+- `evomaster/utils/llm.py`：把 `reasoning_effort` 从 config 传到请求里
+  （campaign 统一 high，不是给 ML-Master 单独加探索）。
+- `playground/ml_master_2/core/utils/watch_dog.py`：超时从写死 86400s 改成读
+  `ML_MASTER_RUN_TIMEOUT_SECONDS`，默认仍 86400。adapter 目前**不设**这个
+  环境变量，所以默认行为与上游相同；12h protocol 是否注入它，跑前要再确认。
+- `uv.lock` 是新增锁文件（+3438），不是改已有 pin。
+
 ## 与 AO 那一格的关系
 
 这一格是**完全原生可用**的。ML-Master 2.0 被排除在 Terminal AO 之外，

@@ -15,14 +15,20 @@
 
 ```
 codex exec --ephemeral --skip-git-repo-check
-           --sandbox workspace-write
+           --dangerously-bypass-approvals-and-sandbox
            --model <model>
            -c model_provider="benchmark_relay"
+           -c model_providers.benchmark_relay.name="Benchmark relay"
            -c model_providers.benchmark_relay.base_url="<relay>"
            -c model_providers.benchmark_relay.wire_api="responses"
            -c model_providers.benchmark_relay.requires_openai_auth=true
            <instruction>
 ```
+
+`--dangerously-bypass-approvals-and-sandbox` 的理由与 MLE 那一格相同：
+正式 AO 会再套一层 host Bubblewrap jail，jail 里没有 bwrap，Codex 自己的
+sandbox 起不来。外层 jail 仍然只给 candidate、locked runtime、dev socket
+和 relay socket。
 
 `cwd` = candidate 目录，`timeout_seconds` = supervisor 传入的剩余预算。
 

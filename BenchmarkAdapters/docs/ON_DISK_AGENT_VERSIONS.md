@@ -24,7 +24,7 @@ RUC-NLPIR / AweAI-Team / InternScience / sjtu-sai-agents）。EAR 内层 `origin
 | Codex | `baselines/Codex`（无内层 `.git`，跟外层走） | 外层 `f9f4ba674b034c54937d7325cb649b1d05ff501d` | 外层 `full4090` | 跟外层 | 原版 ID |
 | Claude Code | `baselines/ClaudeCode`（无内层 `.git`，跟外层走） | 外层 `f9f4ba674b034c54937d7325cb649b1d05ff501d` | 外层 `full4090` | 跟外层 | 原版 ID |
 | ML-Master 2.0 | `baselines/EvoMaster` | `07a80dac7f9edad18f2d97bcbffc0585e06d5b46` | `main` | **干净** | 原版 ID（AO 不进表） |
-| AiScientist | `baselines/AiScientist` | `770039abc8f1319f436542b16f630d70d117d322` | `main` | **干净** | AO 必须 `ai-scientist-terminal-variant` |
+| AiScientist | `baselines/AiScientist` | `aae385b12b0d1e5ad928c6f988a769cfb173b3e7` | `main` | **干净** | AO 必须 `ai-scientist-terminal-variant` |
 
 Codex / Claude Code 没有独立 nested git。`git -C baselines/Codex rev-parse HEAD`
 会走到外层仓库，不要把它当成 Codex 上游 commit。Claude Code 树内 changelog 顶是
@@ -48,7 +48,9 @@ Codex / Claude Code 没有独立 nested git。`git -C baselines/Codex rev-parse 
 
 ### AiScientist
 
-本地 commit `770039a` 含 `TerminalTaskSubagent`（AO 的 `ai-scientist-terminal-variant`）。工作区干净。
+本地 HEAD `aae385b`：`770039a` 的 `TerminalTaskSubagent`（AO 的
+`ai-scientist-terminal-variant`），加上 Dockerfile `ARG BASE_IMAGE` 和
+MLE 域尊重 `AISCI_LLM_PROFILE_FILE`。工作区干净。
 
 ### MLEvolve / ML-Master 2.0
 

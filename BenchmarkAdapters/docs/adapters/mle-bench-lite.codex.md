@@ -34,9 +34,10 @@ workspace 已存在时默认拒绝，`--force` 才 `rmtree` 重建。
 
 ```
 codex exec --ephemeral --skip-git-repo-check
-           --sandbox workspace-write
+           --dangerously-bypass-approvals-and-sandbox
            --model <model>
            -c model_provider="benchmark_relay"
+           -c model_providers.benchmark_relay.name="Benchmark relay"
            -c model_providers.benchmark_relay.base_url="http://127.0.0.1:6200/v1"
            -c model_providers.benchmark_relay.wire_api="responses"
            -c model_providers.benchmark_relay.requires_openai_auth=true
@@ -47,8 +48,15 @@ codex exec --ephemeral --skip-git-repo-check
 那一格**逐字节相同**。`--ephemeral` + `--skip-git-repo-check` 避免它把 workspace
 当成 git 仓库或写持久 session。
 
+`--dangerously-bypass-approvals-and-sandbox` 不是放开沙箱。这一格已经跑在
+host 的 Bubblewrap jail 里，jail 内没有 bwrap，Codex 自己再起一层 sandbox
+会全部失败（"bubblewrap is unavailable"）。这个 flag 是 Codex 文档里给
+「外部已经沙箱化」的用法；外层 jail 仍然只给 workspace、public task 目录和
+relay socket。
+
 `wire_api="responses"` 是 Codex 特有的：它走 Responses API，不是 chat completions。
-relay 端要能应答这个 wire 格式。
+relay 默认按客户端协议原样透传（chat 走 chat，responses 走 responses）；
+只有显式打开 `LLM_FORCE_CROSS_PROTOCOL` 才会跨协议改写。
 
 ### 沙箱（`_workspace_sandbox_argv`）
 

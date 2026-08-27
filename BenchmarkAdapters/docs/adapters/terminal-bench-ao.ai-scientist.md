@@ -28,8 +28,11 @@ if request.agent == "ai-scientist" and variant is None:
 自己的 subagent 框架（`SubagentConfig` / `SubagentStatus` / `ShellInterface`），
 不是 adapter 另写的循环。搜索、工具调用、何时停都由这个 subagent 决定。
 
-对应的本地 pin 是 `baselines/AiScientist` 的 `770039a`，见
-`../ON_DISK_AGENT_VERSIONS.md`。
+对应的本地 pin 现在是 `baselines/AiScientist` 的 `aae385b`
+（`770039a` TerminalTaskSubagent + `61522b7` Dockerfile ARG +
+`aae385b` MLE 域读 `AISCI_LLM_PROFILE_FILE`），见
+`../ON_DISK_AGENT_VERSIONS.md`。`thin_registry.UPSTREAM_REVISIONS["ai-scientist"]`
+必须与此一致。
 
 ## 做法
 

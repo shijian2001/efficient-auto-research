@@ -75,3 +75,27 @@ relay 由 `run_in_docker.sh` 在 host 侧起（`_host_relay_environment`
   `EAR_CLI_MODE` 分支决定。
 - `EAR_CLI_MODE` 另有 `g3_legacy_knowledge` / `g3_legacy_mle_knowledge` 两档
   cold-start 变体，**本次 campaign 不用**（用了对无知识库的对照不公平）。
+
+## 内部校验 vs 官方 grader
+
+EAR 自己的 submission validator（`agent/engine/search.py`）把 sample header
+从第二列起全部当成「必须非空的预测列」。像
+`detecting-insults-in-social-commentary` 这种 sample 是
+`Insult,Date,Comment`、只有 `Insult` 是预测、`Date` 本来就有空值的题，
+validator 会把每一步都记成
+`SubmissionContentError: empty value in prediction column 'Date'`，
+`best_metric` 一直是 null。
+
+结束时如果没有通过内部校验的 `best_submission.csv`，它仍会把 workspace
+里最后一次写出的 `submission.csv` 拷到声明产物上。官方 grader 只看 `Insult`
+列，所以会出现「内部报告全失败、官方分数却是金牌」的情况。这是 EAR 内部
+记账过严，不是 harness 塞了别人的文件。读这一格的内部 report 时不要把
+`best_metric: null` 当成没交卷。
+
+## Token 记账
+
+`result.json` 的 `tokens` 来自 `collect_token_usage(request.output_dir)`，
+会读 `agent-output/token_usage.jsonl` 和
+`agent-output/relay-telemetry/*.jsonl`。`090ba13`（2026-08-27 17:32）才加上
+这条路径。更早的格子（例如 14:49 的 insults 那次）`tokens: {}` 是当时代码
+还没写，不是 telemetry 丢了；jsonl 还在，可以事后重算。
