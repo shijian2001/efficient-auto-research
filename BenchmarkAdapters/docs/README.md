@@ -71,6 +71,10 @@ Per-cell adapter documentation — how each Agent is wired into each benchmark,
 one file per Agent x Benchmark cell — is in `BenchmarkAdapters/docs/adapters/`
 (index: `docs/adapters/README.md`).
 
+How to actually launch this campaign — the host relay on port 6200 that must be
+started first, the frozen protocol/model-track paths, the per-cell
+`--agent-variant` values, and known traps — is `CAMPAIGN_LAUNCH.md`.
+
 The important boundary is benchmark-specific:
 
 - `BenchmarkAdapters/MLEBenchLite/adapter.py` builds MLE-Bench Lite workspaces
