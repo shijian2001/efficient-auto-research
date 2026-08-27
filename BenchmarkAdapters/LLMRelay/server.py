@@ -117,8 +117,16 @@ _CONTROL_PARAMETERS = {
 # Only protocol fields supplied by a client are preserved. Every other
 # top-level request field is a model-generation/control parameter and must be
 # supplied by the frozen model track, not by one particular Agent.
+# Fields forwarded upstream as the client sent them. The output-token limit is
+# included deliberately: the campaign never injects one (the model track carries
+# no max_tokens), but an Agent that sets its own budget must keep it rather than
+# have it silently stripped. Everything outside this set is dropped and reported
+# through _request_telemetry so the frozen track stays the only source of
+# sampling parameters.
 _PROTOCOL_FIELDS = {
-    "/chat/completions": frozenset({"messages", "tools", "tool_choice"}),
+    "/chat/completions": frozenset(
+        {"messages", "tools", "tool_choice", "max_tokens", "max_completion_tokens"}
+    ),
     "/responses": frozenset(
         {
             "input",
@@ -128,6 +136,7 @@ _PROTOCOL_FIELDS = {
             "previous_response_id",
             "conversation",
             "include",
+            "max_output_tokens",
         }
     ),
 }

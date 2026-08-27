@@ -26,6 +26,7 @@ env UPSTREAM_BASE_URL="$OPENAI_BASE_URL" \
     LLM_UPSTREAM_TIMEOUT=600 \
     LLM_MAX_RETRIES=20 \
     LLM_PROXY_API_KEY="$OPENAI_API_KEY" \
+    LLM_UPSTREAM_API=responses \
     LLM_TOKEN_LOG_PATH=/path/to/host_relay_tokens.jsonl \
     LLM_PROXY_AGENT_NAME=host-relay \
     ./BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters.LLMRelay.server \
@@ -61,6 +62,25 @@ curl -s http://127.0.0.1:6200/v1/chat/completions \
 ```
 
 返回里 `model` 应为 `gpt-5.6-terra`。
+
+### 为什么必须 `LLM_UPSTREAM_API=responses`
+
+默认 `chat` 会把 Responses 请求降级成 chat completions，而 **Codex 的工具声明
+在这一步会被整个丢掉**。Codex 不用标准的 `tools` 字段，它把工具放在 input 数组里
+一个 `{"type":"additional_tools", ...}` 条目中；转换器只认 `body["tools"]`，
+那个条目既不是 role message 又没有 content，于是被跳过。
+
+结果是模型收到「有任务、但没有任何工具」，Codex 正常启动、正常烧 token，然后回
+
+    I'm unable to access the filesystem in this session
+
+**不报错、不超时，看起来像模型能力不行。** 这是最贵的一种失败：一格烧满预算却交白卷。
+
+`responses` 直连把请求原样透传给上游，工具声明完整保留。model track 的重写不受影响：
+temperature 与 reasoning effort 仍然强制覆盖成 track 里的值。
+
+`max_tokens` / `max_output_tokens` 是例外：campaign **不注入**（model track 里没有这一项），
+但 Agent 自己设的会原样保留——那是 Agent 自己的预算，不是我们该替它决定的采样参数。
 
 ## 1. 冻结的协议与 model-track
 

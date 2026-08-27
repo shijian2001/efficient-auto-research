@@ -77,8 +77,12 @@ def test_relay_strips_all_client_generation_parameters(monkeypatch, tmp_path: Pa
     assert rewritten["model"] == "gpt-5.5"
     assert rewritten["reasoning_effort"] == "high"
     assert rewritten["temperature"] == 1.0
-    assert "max_tokens" not in rewritten
-    assert "max_tokens" in relay._request_telemetry()
+    # The output-token limit is the Agent's own budget, not a sampling knob the
+    # track owns: the campaign never injects one, and an Agent that sets its own
+    # keeps it. Everything else below is still stripped so the frozen model track
+    # remains the only source of generation parameters.
+    assert rewritten["max_tokens"] == 1
+    assert "max_tokens" not in relay._request_telemetry()
     assert rewritten["tools"] == [_tool()]
     assert rewritten["tool_choice"] == "auto"
     for name in (
