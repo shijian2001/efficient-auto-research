@@ -171,5 +171,16 @@ AO 一次独占 8 卡（`dev_concurrency=8`），所以 5 家只能串行：
   `mlebench prepare`（不加 `--skip-verification`），或显式的
   `mle-freeze-assets`。
 
+- **用满时间不再等于零分（MLE-011 已修）。** 协议里的 `wall_clock_seconds`
+  （正式 MLE 12h、AO 48h）是每格给 Agent 的解题时间。原先唯一的强制手段是
+  `预算+120s` 时 SIGKILL 整个进程树，那一刀连我们自己的 wrapper 一起砍，
+  于是 Agent 早已写好的 `submission.csv` 来不及被拷进成绩目录。ML-Master 因此
+  把一个官方 grader 打 0.91987、够金牌的结果记成了 `timed_out / score: null`。
+
+  现在 native wrapper 自己在预算点停 Agent（先 SIGTERM，20s 不退再 SIGKILL），
+  剩下的窗口用来发布产物；外层硬 kill 退化成保底。**Agent 的解题时间没有变**，
+  变的只是"超时"的含义：从"你做的全作废"变成"时间到，交已经做出来的"。
+  子进程真失败仍然照常报错，不会被当成功发布。
+
 - **N=1 没有误差棒。** `repetition_summary` 只给 `mean`，
   standard_deviation / standard_error / ci95 全为 `null`。排名不得表述为显著差异。

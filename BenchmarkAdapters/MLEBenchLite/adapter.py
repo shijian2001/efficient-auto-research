@@ -929,6 +929,12 @@ def _ai_scientist_command(request: MleLiteRequest) -> CommandSpec:
              str(ROOT / "BenchmarkAdapters/.venv/bin/python"),
             str(Path(__file__).with_name("native_wrappers.py")),
             "ai-scientist",
+            # Stop the Agent at its own budget and keep the rest of the outer
+            # window to publish what it produced. Without this the outer kill at
+            # budget+120s destroys the wrapper before it copies the artifact, so
+            # an Agent that used its full time is scored as a zero.
+            "--budget-seconds",
+            str(request.timeout_seconds),
             "--output-dir",
             str(request.output_dir.resolve()),
             "--",
@@ -1047,6 +1053,12 @@ def _ml_master_command(request: MleLiteRequest) -> CommandSpec:
              str(ROOT / "BenchmarkAdapters/.venv/bin/python"),
             str(Path(__file__).with_name("native_wrappers.py")),
             "ml-master-2",
+            # Stop the Agent at its own budget and keep the rest of the outer
+            # window to publish what it produced. Without this the outer kill at
+            # budget+120s destroys the wrapper before it copies the artifact, so
+            # an Agent that used its full time is scored as a zero.
+            "--budget-seconds",
+            str(request.timeout_seconds),
             "--output-dir",
             str(request.output_dir.resolve()),
             "--workspace-dir",
