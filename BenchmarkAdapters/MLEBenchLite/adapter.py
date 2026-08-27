@@ -699,6 +699,16 @@ def _docker_command(request: MleLiteRequest) -> CommandSpec:
                 )
             ),
             "BENCHMARK_TASK_SPEC_SHA256": task_spec_digest("mle-bench-lite"),
+            # run_in_docker.sh otherwise falls back to its own ubuntu:20.04
+            # default, which ships no git -- Arbor then dies initialising its
+            # workspace with "No such file or directory: 'git'". The image an
+            # Agent needs is part of its runtime, so it comes from the registry
+            # rather than from whoever happens to launch the cell.
+            **(
+                {"CONTAINER_IMAGE": request.runtime_image}
+                if request.runtime_image
+                else {}
+            ),
             "ARBOR_OUTPUT_DIR": str(request.output_dir.resolve()),
             "MLE_RUN_ROOT": str(request.output_dir.resolve()),
             "MLE_BENCH_DATA_ROOT": str(request.data_root.resolve()),

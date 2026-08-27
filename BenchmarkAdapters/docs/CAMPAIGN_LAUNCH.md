@@ -205,5 +205,15 @@ AO 一次独占 8 卡（`dev_concurrency=8`），所以 5 家只能串行：
   变的只是"超时"的含义：从"你做的全作废"变成"时间到，交已经做出来的"。
   子进程真失败仍然照常报错，不会被当成功发布。
 
+- **有的 Agent 需要指定运行镜像，正式入口现在会自己带上。**
+  镜像登记在 `registry.AGENT_RUNTIME_IMAGES`：AiScientist 用本地构建的
+  `aisci-mle:test`，Arbor 用 `alexgshaw/fix-git:20251031`（它启动时先初始化 git
+  工作区，而 `run_in_docker.sh` 的默认镜像 `ubuntu:20.04` 里没有 git，
+  会立刻报 `No such file or directory: 'git'`）。
+
+  2026-08-23 那次 12h Arbor 长跑是走老脚本、由 `campaign.env` 显式传镜像才成功的；
+  `mle-cell` 这条正式路径此前不传，于是同一个 Agent 在正式入口上跑不起来。
+  两条路径的镜像来源现在统一到 registry。
+
 - **N=1 没有误差棒。** `repetition_summary` 只给 `mean`，
   standard_deviation / standard_error / ci95 全为 `null`。排名不得表述为显著差异。

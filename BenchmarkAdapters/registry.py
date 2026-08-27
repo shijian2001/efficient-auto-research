@@ -158,6 +158,12 @@ AGENTS = {
 # than pulled from a published upstream release.
 AGENT_RUNTIME_IMAGES = {
     "ai-scientist": ("aisci-mle:test", "never"),
+    # Arbor initialises a git workspace before it does anything else, so the
+    # container needs git. run_in_docker.sh defaults to ubuntu:20.04, which has
+    # none, and the cell fails instantly. The 2026-08-23 12h campaign passed this
+    # image explicitly through campaign.env; naming it here means the formal
+    # mle-cell entry point gets it too instead of silently taking the default.
+    "arbor": ("alexgshaw/fix-git:20251031", "never"),
 }
 
 
