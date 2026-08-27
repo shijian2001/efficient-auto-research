@@ -959,6 +959,14 @@ def _ai_scientist_command(request: MleLiteRequest) -> CommandSpec:
             "DOCKER_HOST": "unix:///run/docker.sock",
         }
     )
+    if request.official_llm_profile is None:
+        # `--llm-profile-file` only sets AISCI_LLM_PROFILE_FILE inside the CLI
+        # process (aisci_app/cli.py:79). The MLE workflow runs its phases in
+        # subprocesses, which re-resolve the registry from that variable and
+        # otherwise fall back to the repo-root default -- where our generated
+        # profile does not exist, so every phase dies with
+        # "Unknown LLM profile: benchmark-model". Export it for the whole tree.
+        environment["AISCI_LLM_PROFILE_FILE"] = str(profile_path)
     argv = (
         (str(_required_executable("bwrap")), "<sandbox-options>", *wrapper_argv)
         if request.dry_run
