@@ -115,6 +115,15 @@ def redact_sensitive_payload(payload: object, environment: Mapping[str, str]) ->
     return payload
 
 
+def _write_command_log(log_path: Path, output: str) -> None:
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        with log_path.open("x", encoding="utf-8") as handle:
+            handle.write(output)
+    except FileExistsError as exc:
+        raise AdapterError(f"refusing to overwrite command log: {log_path}") from exc
+
+
 def run_command(command: CommandSpec, *, log_path: Path | None = None) -> CommandResult:
     try:
         completed = subprocess.run(
@@ -125,15 +134,21 @@ def run_command(command: CommandSpec, *, log_path: Path | None = None) -> Comman
         )
         output = redact_process_output(completed.stdout or "", command.merged_env())
         if log_path is not None:
-            log_path.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                with log_path.open("x", encoding="utf-8") as handle:
-                    handle.write(output)
-            except FileExistsError as exc:
-                raise AdapterError(f"refusing to overwrite command log: {log_path}") from exc
+            _write_command_log(log_path, output)
     except FileNotFoundError as exc:
         raise AdapterError(f"command executable not found: {command.argv[0]}") from exc
     except subprocess.TimeoutExpired as exc:
+        # A timed-out cell is exactly the one whose trajectory we most need to
+        # explain, so the output produced before the deadline is persisted
+        # rather than discarded with the exception.  subprocess hands this
+        # partial stream back as bytes even under text=True.
+        if log_path is not None:
+            partial = exc.stdout or b""
+            if isinstance(partial, bytes):
+                partial = partial.decode("utf-8", "replace")
+            _write_command_log(
+                log_path, redact_process_output(partial, command.merged_env())
+            )
         raise AdapterError(f"{command.label or 'adapter command'} timed out") from exc
     except OSError as exc:
         raise AdapterError(f"could not run {command.label or 'adapter command'}: {exc}") from exc

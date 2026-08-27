@@ -134,3 +134,44 @@ G5 closeout 完成：
 
 结论：G5 的代码级实验底座已经完成，但还不能声明 G5 性能提升。下一条有效性能结论必须来自
 完整、独立、可追溯的 G5 正式运行。
+
+## 9. 12h 正式 campaign 前的 per-cell 证据审计（2026-08-27）
+
+在 7 agent × 6 task × 12h 正式 campaign 启动前，对当天已完成的六个真实 cell
+（codex / claude-code / ai-scientist / ear / mlevolve / arbor，覆盖全部四条 adapter 路径）
+做了一次「事后能否重建 agent 轨迹」的证据审计。
+
+### 已修复
+
+`BenchmarkAdapters/process.py` 的 `run_command` 在 `subprocess.TimeoutExpired`
+分支上直接丢弃了 `exc.stdout`，超时 cell 因此完全没有 `agent.log`。
+证据：`/tmp/mlm_campaign_v4/ml-master-2/seed-0/detecting-insults-in-social-commentary/`
+（`status: "timed_out"`）目录下没有 `agent.log`，只有 `result.json` 和 `manifest.json`。
+12h 预算下超时是最可能的结束方式，这正是最需要轨迹的一类 cell。
+现在超时路径会把 deadline 之前的 partial stdout 经同样的 `redact_process_output`
+写入 `agent.log`；正常路径行为不变。
+
+### 未修复但已记录的缺口（按危害排序）
+
+1. `result.json` 的 `tokens` / `cost` 恒为 `{}`，尽管 per-call telemetry
+   （`token_usage.jsonl` / `relay-telemetry/*.jsonl`）齐全且可求和。
+   `campaign.py` 的 aggregate 因此把每个 cell 的 usage 记为 `None`。
+2. claude-code 的 `agent.log` 只有 1885 B 且不含任何轨迹：`_workspace_command`
+   用 `--print --bare` 而没有 `--output-format=stream-json --verbose`，
+   而同路径的 codex 产出 165 888 B 的完整 exec trace。
+3. EAR 的 `report.json` 记录 6 步全部失败、`best_metric: null`、
+   "Ensemble skipped: only 0 scored submissions"，最终却提交了 0.91662 的
+   submission.csv，日志无法说明该文件由哪一步产生。
+4. MLEvolve 的节点代码只存在于 `MLEvolve.verbose.log` 文本中，
+   workspace 未落盘任何 node 代码文件。
+
+### 体积与泄漏
+
+- 无 API key 泄漏：环境中的 `OPENAI_API_KEY` / `ANTHROPIC_AUTH_TOKEN` /
+  `CUSTOM_API_KEY` 在六个 cell 中均无命中；`auth.json` 只含占位串 `"proxy"`。
+  `redact_process_output` 对 env 派生 secret 和 `Authorization:` 行均生效。
+- 无 private label 泄漏：未发现 private/test 标签或 answers 文件路径。
+- 体积主项不是日志而是 `agent-output/cache/huggingface`：EAR 单 cell 419 MB
+  （`BAAI/bge-base-en-v1.5` 权重 438 MB），42 cell 外推约 17 GB，
+  而 `/` 仅剩 103 GB。日志本身 12h 外推最大约 121 MB
+  （codex `state_5.sqlite-wal`），可接受。
