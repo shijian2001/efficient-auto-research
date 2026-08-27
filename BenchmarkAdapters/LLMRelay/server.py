@@ -95,6 +95,13 @@ if MAX_UPSTREAM_CALLS is not None and MAX_UPSTREAM_CALLS < 1:
     raise RuntimeError("LLM_MAX_UPSTREAM_CALLS must be positive")
 AGENT_NAME = os.environ.get("LLM_PROXY_AGENT_NAME", "unknown")
 INBOUND_API_KEY = os.environ.get("LLM_PROXY_API_KEY", "proxy")
+# Escape hatch, off by default: force every client onto the single upstream
+# protocol named by LLM_UPSTREAM_API, translating whatever does not match. That
+# is what the relay always used to do, and it is why tools went missing. Keep it
+# only for an upstream that genuinely serves one endpoint.
+_FORCE_CROSS_PROTOCOL = os.environ.get(
+    "LLM_FORCE_CROSS_PROTOCOL", ""
+).strip().lower() in {"1", "true", "yes"}
 _configured_upstream_api = os.environ.get("LLM_UPSTREAM_API", "").strip().lower()
 UPSTREAM_API = _configured_upstream_api or (
     "responses"
@@ -904,7 +911,19 @@ def _chat_response_to_messages(data: dict) -> dict:
 
 
 def _post_canonical_chat(body: dict, call_type: str) -> tuple[dict, float, int]:
-    if UPSTREAM_API == "responses":
+    """Forward a chat-shaped request to the upstream chat endpoint.
+
+    Cross-protocol rewriting used to be decided by a single global switch, which
+    could only ever be right for half the fleet: translating an Agent's native
+    wire format loses whatever the target format cannot express. Codex declares
+    its tools in a `additional_tools` input item that has no chat equivalent, so
+    downgrading its /responses call dropped every tool and it reported having no
+    shell; converting MLEvolve's chat calls the other way made its first real
+    request hang for ten minutes. Each Agent now reaches upstream on the protocol
+    it actually speaks. Only `_rewrite_body` still intervenes, and only to pin the
+    frozen model track.
+    """
+    if UPSTREAM_API == "responses" and _FORCE_CROSS_PROTOCOL:
         data, duration, retries = _post_upstream(
             "/responses",
             _rewrite_body(_chat_request_to_responses(body), "/responses"),
@@ -1285,7 +1304,9 @@ class ProxyHandler(BaseHTTPRequestHandler):
         client_wants_stream = bool(body.pop("stream", False))
         body.pop("stream_options", None)
         model = FORCE_MODEL or body.get("model", "")
-        if UPSTREAM_API == "responses":
+        # Native by default: a /responses client reaches the /responses endpoint,
+        # so tool declarations the chat schema cannot carry survive untouched.
+        if UPSTREAM_API == "responses" or not _FORCE_CROSS_PROTOCOL:
             data, duration, retries = _post_upstream(
                 "/responses",
                 _rewrite_body(body, "/responses"),

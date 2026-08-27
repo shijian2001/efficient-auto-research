@@ -26,7 +26,6 @@ env UPSTREAM_BASE_URL="$OPENAI_BASE_URL" \
     LLM_UPSTREAM_TIMEOUT=600 \
     LLM_MAX_RETRIES=20 \
     LLM_PROXY_API_KEY="$OPENAI_API_KEY" \
-    LLM_UPSTREAM_API=responses \
     LLM_TOKEN_LOG_PATH=/path/to/host_relay_tokens.jsonl \
     LLM_PROXY_AGENT_NAME=host-relay \
     ./BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters.LLMRelay.server \
@@ -63,7 +62,31 @@ curl -s http://127.0.0.1:6200/v1/chat/completions \
 
 返回里 `model` 应为 `gpt-5.6-terra`。
 
-### 为什么必须 `LLM_UPSTREAM_API=responses`
+### 协议按客户端原样透传，不做跨协议改写
+
+relay 的入口本来就同时接 `/chat/completions`、`/responses`、`/messages`。
+现在出口也按同一条协议转发：**Agent 用什么协议发，就用什么协议到上游**。
+
+原先出口由一个全局开关（`LLM_UPSTREAM_API`）决定，一份配置管所有 Agent，
+所以怎么设都只能对一半：
+
+| 开关 | 后果 |
+|---|---|
+| `chat` | Codex 的 `/responses` 被降级；它的工具声明放在 `additional_tools`
+  条目里，chat 没有对应结构 → 工具全丢，Agent 报「没有 shell」，烧满 token 交白卷 |
+| `responses` | MLEvolve 的 chat 请求被转成 responses → 第一次真实调用挂十分钟，
+  跑满 1210s 只调用模型 1 次，最后 fusion 找不到 submission |
+
+跨协议改写本身就是有损的：目标格式表达不了的东西会被丢掉。改成原样透传后，
+两家都不需要任何 per-Agent 配置，model track 里也不再需要 `api_mode`。
+
+口径统一不受影响——`_rewrite_body` 仍在两条路径上分别强制 model、
+temperature=1.0、reasoning_effort=high，并且都不注入 max tokens（Agent 自带的保留）。
+
+需要强制单协议时（上游只有一个端点），设 `LLM_FORCE_CROSS_PROTOCOL=1`
+配合 `LLM_UPSTREAM_API`，恢复旧的改写行为。默认关闭。
+
+### 历史备注：曾经的 `LLM_UPSTREAM_API=responses`
 
 默认 `chat` 会把 Responses 请求降级成 chat completions，而 **Codex 的工具声明
 在这一步会被整个丢掉**。Codex 不用标准的 `tools` 字段，它把工具放在 input 数组里
