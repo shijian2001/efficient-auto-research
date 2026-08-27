@@ -14,9 +14,12 @@ can currently produce formal scores. Current checkout status:
   from this host's `mle-bench-data/` prepared trees.
 - Terminal AO protocol is still schema 1 until a 40-char
   `benchmark_source_commit` is supplied to `terminal-ao-protocol`.
-- Shared model-track for this host: `configs/model-track.gpt-5.5-host-relay.json`
-  (gpt-5.5, temperature 1.0, reasoning_effort high, relay
-  `http://127.0.0.1:6200/v1`). The placeholder file remains a template only.
+- Shared model-track for this host: `configs/model-track.gpt-5.6-terra-host-relay.json`
+  (gpt-5.6-terra, temperature 1.0, reasoning_effort high, relay
+  `http://127.0.0.1:6200/v1`) — the track for the upcoming campaign. The earlier
+  `model-track.gpt-5.5-host-relay.json` is kept unchanged so already-recorded
+  gpt-5.5 runs stay reproducible; do not mix the two in one comparison. The
+  placeholder file remains a template only.
 - `BenchmarkAdapters/.venv` includes PyYAML.
 - Nested Agent checkouts are still dirty; formal preflight will refuse those
   cells until each `install_path` is a clean pinned commit. Do not reset

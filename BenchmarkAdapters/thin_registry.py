@@ -43,10 +43,20 @@ THIN_CLASSIFICATIONS = {
     },
 }
 
+# The reviewed source identity for each Agent that carries an original-ID thin
+# adapter. These are the 2026-08-27 on-disk pins for this campaign: the local
+# commits that froze the patches already in use, not the upstream tips they sit
+# on. ``require_clean_upstream_source`` compares an install_path HEAD against
+# this table, so re-pinning a tree without updating the entry blocks that cell.
+# Prior upstream tips, for provenance:
+#   arbor         65ffcc8fdf23a64a781940e6a3cfb6369d6d887e
+#   ai-scientist  db8cce71cf9668a4946d1eace72290d9e3376164
+#   ml-master-2   36a52bc6c42a6b9fd710a41c52f3c3bb948b9ac9
+# Identities and what each local commit contains: docs/ON_DISK_AGENT_VERSIONS.md
 UPSTREAM_REVISIONS = {
-    "arbor": "65ffcc8fdf23a64a781940e6a3cfb6369d6d887e",
-    "ai-scientist": "db8cce71cf9668a4946d1eace72290d9e3376164",
-    "ml-master-2": "36a52bc6c42a6b9fd710a41c52f3c3bb948b9ac9",
+    "arbor": "92c6fd5c22c8a291796d39730605ac0eb8ba07c5",
+    "ai-scientist": "770039abc8f1319f436542b16f630d70d117d322",
+    "ml-master-2": "07a80dac7f9edad18f2d97bcbffc0585e06d5b46",
 }
 
 

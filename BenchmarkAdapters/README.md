@@ -107,16 +107,16 @@ BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters mle-cell \
   --protocol /runs/mle/protocol.json --agent codex \
   --competition-id spooky-author-identification --seed 0 \
   --data-root /data/mle-bench --campaign-dir /runs/mle \
-  --model-config BenchmarkAdapters/configs/model-track.gpt-5.5-host-relay.json \
+  --model-config BenchmarkAdapters/configs/model-track.gpt-5.6-terra-host-relay.json \
   --agent-variant pinned-codex
 
 # 运行一个 Terminal AO seed；正式 timeout 固定为 172800 秒
-# 本机 model-track：BenchmarkAdapters/configs/model-track.gpt-5.5-host-relay.json
+# 本机 model-track：BenchmarkAdapters/configs/model-track.gpt-5.6-terra-host-relay.json
 BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters terminal-ao \
   --agent ear --protocol terminal-bench-2/ao_protocol/protocol.json \
   --output-dir /runs/ao/ear/run-0 --seed 0 --gpu-id 0 --gpu-id 1 \
   --gpu-id 2 --gpu-id 3 --gpu-id 4 --gpu-id 5 --gpu-id 6 --gpu-id 7 \
-  --model-config BenchmarkAdapters/configs/model-track.gpt-5.5-host-relay.json \
+  --model-config BenchmarkAdapters/configs/model-track.gpt-5.6-terra-host-relay.json \
   --agent-variant g3@7cd9ed5c1db0ff5250faad373e5d5a67209e604c
 
 # 分别聚合
