@@ -35,6 +35,17 @@ def main() -> int:
     shutil.copytree(args.public_dir, public_destination)
     payload["competition_id"] = args.competition_id
     payload["data_root"] = str(args.staged_data_root.resolve())
+    # Upstream resolves every agent-local relative asset (the prompts/*.txt
+    # files each agent declares) by taking the config's own directory and
+    # rewriting "configs" -> "playground".  The generated per-run config lives
+    # in the run directory instead of configs/ml_master_2, so that rewrite
+    # produces a path under the run dir and every agent dies with
+    # "Prompt file not found".  evolution.base_config_dir is the upstream
+    # escape hatch for exactly this case: a config outside configs/<agent>
+    # that must still resolve its assets against the original agent directory.
+    payload.setdefault("evolution", {})["base_config_dir"] = str(
+        (Path(__file__).resolve().parents[2] / "baselines/EvoMaster/configs/ml_master_2")
+    )
     # The upstream template hard-codes a single example competition and its
     # metric direction.  ML-Master compares candidate solutions with this flag,
     # so leaving the template default keeps the worst solution on the seven
