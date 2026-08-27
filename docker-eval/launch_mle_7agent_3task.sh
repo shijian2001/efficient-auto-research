@@ -1,13 +1,11 @@
 #!/usr/bin/env bash
-# 7 Agent x 6 题 MLE-Bench Lite campaign，共 14 轮。
+# 7 Agent x 3 题 MLE-Bench Lite (Low) campaign，共 7 轮、21 格。
 #
 # 一轮 = 一个 Agent 跑 3 题（3 张卡并行）。轮与轮之间串行，任何时刻最多
 # 3 格在跑，所以对 host relay 的并发压力恒定为 3 路。
 #
-#   轮 1-7 : 7 个 Agent 依次跑「前 3 题」
-#   轮 8-14: 7 个 Agent 依次跑「后 3 题」
-#
-# 题目分组沿用 2026-08-23 那次 12h campaign 的 group1/group2，便于和历史结果对照。
+# 题目是原 6 题研究子集里落在官方 Lite Low split 的那 3 道
+# （spooky / jigsaw / mlsp）。另外 3 道在 Medium，mle-cell 会拒。
 #
 # 每轮开跑前等到有 3 张 GPU 连续空闲 GPU_STABILITY_SECONDS 秒。空闲判定同时看
 # 显存和「有没有 compute app 占着」，并用 GPU UUID 关联，不假设 nvidia-smi 的
@@ -17,7 +15,7 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT"
 
-CAMPAIGN_ID=${CAMPAIGN_ID:-$(date +%Y%m%d_%H%M%S)_mle_7agent_6task}
+CAMPAIGN_ID=${CAMPAIGN_ID:-$(date +%Y%m%d_%H%M%S)_mle_7agent_3task}
 CAMPAIGN_DIR=${CAMPAIGN_DIR:-$ROOT/experiment-campaigns/$CAMPAIGN_ID}
 PROTOCOL=${PROTOCOL:-$ROOT/BenchmarkAdapters/configs/mle-protocol.n1-12h.json}
 MODEL_CONFIG=${MODEL_CONFIG:-$ROOT/BenchmarkAdapters/configs/model-track.gpt-5.6-terra-host-relay.json}
@@ -54,15 +52,10 @@ declare -a AGENTS=(
 # Arbor 的 MLE 格只能经 patched variant 进入；原版 ID 会被直接拒绝。
 declare -A VARIANT_OVERRIDE=( ["arbor"]="arbor-benchmark-patched" )
 
-declare -a GROUP1=(
+declare -a TASKS=(
   "spooky-author-identification"
-  "tweet-sentiment-extraction"
-  "learning-agency-lab-automated-essay-scoring-2"
-)
-declare -a GROUP2=(
   "jigsaw-toxic-comment-classification-challenge"
   "mlsp-2013-birds"
-  "chaii-hindi-and-tamil-question-answering"
 )
 
 log() { printf '[%s] %s\n' "$(date -Is)" "$*" | tee -a "$CAMPAIGN_DIR/orchestration.log"; }
@@ -186,7 +179,7 @@ run_round() {
 
 main() {
   mkdir -p "$CAMPAIGN_DIR"
-  TOTAL_ROUNDS=$(( ${#AGENTS[@]} * 2 ))
+  TOTAL_ROUNDS=${#AGENTS[@]}
 
   # 先做硬前提检查，别等跑到第 8 轮才发现 relay 没起。
   [ -f "$PROTOCOL" ] || { echo "缺少协议: $PROTOCOL" >&2; exit 2; }
@@ -210,12 +203,7 @@ main() {
   for agent in "${AGENTS[@]}"; do
     round=$((round + 1))
     variant=${VARIANT_OVERRIDE[$agent]:-$(resolve_variant "$agent")}
-    run_round "$round" "$agent" "$variant" "${GROUP1[@]}"
-  done
-  for agent in "${AGENTS[@]}"; do
-    round=$((round + 1))
-    variant=${VARIANT_OVERRIDE[$agent]:-$(resolve_variant "$agent")}
-    run_round "$round" "$agent" "$variant" "${GROUP2[@]}"
+    run_round "$round" "$agent" "$variant" "${TASKS[@]}"
   done
 
   log "全部 $TOTAL_ROUNDS 轮结束。结果在 $CAMPAIGN_DIR"
