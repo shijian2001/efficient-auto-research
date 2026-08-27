@@ -300,6 +300,7 @@ run_round() {
 
 main() {
   mkdir -p "$CAMPAIGN_DIR"
+  printf '%s\n' "$$" > "$CAMPAIGN_DIR/controller.pid"
   TOTAL_ROUNDS=${#AGENTS[@]}
   emit_event campaign_started status=starting total_rounds="$TOTAL_ROUNDS" tasks="${TASKS[*]}"
 
