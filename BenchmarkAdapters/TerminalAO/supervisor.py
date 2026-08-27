@@ -602,6 +602,9 @@ def run_terminal_ao(
             artifact_path=None,
             artifact_sha256=None,
             wall_clock_seconds=time.monotonic() - started,
+            # Same reasoning as the inner failure branch: whatever the outer loop
+            # burned before dying is recorded, not silently dropped.
+            tokens=summarize_token_log(output_dir / "launcher/token_usage.jsonl"),
             failure_reason=f"{type(exc).__name__}: {exc}",
         )
         result.write(result_path)

@@ -484,3 +484,40 @@ def test_ml_master_config_generation_requires_an_explicit_metric_direction(
     )
     assert completed.returncode != 0
     assert "--is-lower-better" in completed.stderr
+
+def test_every_result_path_records_token_usage() -> None:
+    """No path that writes a result may leave token usage empty.
+
+    Cost-per-point is only meaningful if every cell reports what it spent, and
+    the cells that spend most are exactly the ones that end abnormally: a
+    search-shaped Agent fills its whole wall-clock budget and is then killed, so
+    it exits through the failure branch rather than the success one. When that
+    branch omitted `tokens`, the priciest cells were recorded as free and the
+    efficiency comparison inverted. This pins every writer, so a new exit path
+    cannot quietly reintroduce the gap.
+    """
+    import ast
+
+    for module, expected in (
+        ("BenchmarkAdapters/MLEBenchLite/formal.py", 1),
+        ("BenchmarkAdapters/MLEBenchLite/campaign.py", 1),
+        ("BenchmarkAdapters/TerminalAO/supervisor.py", 3),
+    ):
+        source = (ROOT / module).read_text(encoding="utf-8")
+        tree = ast.parse(source)
+        constructed = [
+            node
+            for node in ast.walk(tree)
+            if isinstance(node, ast.Call)
+            and getattr(node.func, "id", None) == "BenchmarkRunResult"
+        ]
+        assert len(constructed) == expected, (
+            f"{module} builds {len(constructed)} results, expected {expected}; "
+            "a new one must also pass tokens="
+        )
+        for call in constructed:
+            names = {kw.arg for kw in call.keywords}
+            assert "tokens" in names, (
+                f"{module}:{call.lineno} builds a BenchmarkRunResult without "
+                "tokens=; a cell that ends here would report zero cost"
+            )

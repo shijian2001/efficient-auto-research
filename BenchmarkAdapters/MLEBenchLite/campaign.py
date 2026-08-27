@@ -26,7 +26,7 @@ from ..task_specs import task_spec_digest
 from ..thin_registry import require_clean_upstream_source
 from .adapter import MleLiteAdapter, MleLiteRequest
 from .aggregate import aggregate_seeds, calculate_seed_metrics
-from .formal import FormalMleOutcome, run_formal_mle
+from .formal import FormalMleOutcome, collect_token_usage, run_formal_mle
 from .grading import GRADER_WORKER, metric_is_lower_better
 from .membership import (
     data_manifest_digest,
@@ -398,6 +398,12 @@ def run_campaign_cell(
             artifact_path=str(artifact_path) if artifact_sha256 is not None else None,
             artifact_sha256=artifact_sha256,
             wall_clock_seconds=time.monotonic() - started,
+            # A cell that ran out of its wall-clock budget is usually the one that
+            # spent the most: search-shaped Agents fill the whole 12h. Leaving
+            # tokens empty here would report the priciest cells as free and invert
+            # cost-per-point. The per-call telemetry is already on disk, so read it
+            # on this path too.
+            tokens=collect_token_usage(request.output_dir),
             failure_reason=failure_text,
         )
         result.write(cell.run_dir / "result.json")
