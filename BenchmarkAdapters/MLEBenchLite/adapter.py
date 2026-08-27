@@ -769,8 +769,15 @@ def _workspace_command(
             "exec",
             "--ephemeral",
             "--skip-git-repo-check",
-            "--sandbox",
-            "workspace-write",
+            # The cell already runs inside the host's Bubblewrap jail, and bwrap
+            # is not reachable from within it, so Codex's own sandbox cannot
+            # start: every command and file write fails with "bubblewrap is
+            # unavailable" and the Agent exits without a submission. This flag is
+            # documented for exactly this case -- "environments that are
+            # externally sandboxed" -- and does not widen what the cell can
+            # reach: the outer jail still confines it to the workspace, the
+            # public task directory and the relay socket.
+            "--dangerously-bypass-approvals-and-sandbox",
             "--model",
             request.model,
             "-c",

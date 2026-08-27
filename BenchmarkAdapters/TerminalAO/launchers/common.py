@@ -76,8 +76,12 @@ def _codex(request: NativeAOLaunchRequest) -> CommandSpec:
             "exec",
             "--ephemeral",
             "--skip-git-repo-check",
-            "--sandbox",
-            "workspace-write",
+            # Formal AO wraps this command in the host's Bubblewrap jail, where
+            # bwrap itself is not reachable, so Codex's own sandbox cannot start
+            # and every command fails before execution. Documented flag for
+            # externally sandboxed environments; the outer jail still limits the
+            # candidate, its runtime, the dev socket and the relay socket.
+            "--dangerously-bypass-approvals-and-sandbox",
             "--model",
             request.model,
             "-c",
