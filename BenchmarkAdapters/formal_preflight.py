@@ -47,6 +47,75 @@ def git_identity(path: Path) -> tuple[str | None, bool | None]:
     return commit.stdout.strip(), bool(dirty.stdout.strip())
 
 
+def probe_host_relay(model_config: ModelTrackConfig) -> str:
+    """Prove the host-owned relay is actually answering before a cell launches.
+
+    Two failures were silent until the first real run, and neither is visible to
+    a static check:
+
+    * Nothing is listening on the model track's ``relay_base_url``. The per-run
+      relay is only a Unix-socket forwarder whose upstream is that port, so the
+      agent retries ``[Errno 111] Connection refused`` until the whole wall-clock
+      budget is gone.
+    * Something is listening but rejects the credential the per-run relay sends.
+      The per-run relay authenticates to this port with the resolved upstream
+      key (``UPSTREAM_API_KEY``/``OPENAI_API_KEY``), so the host relay must be
+      started with ``LLM_PROXY_API_KEY`` set to that same value; otherwise every
+      cell dies within a second on ``401 invalid relay credential``.
+
+    Both are configuration mistakes on the host, not properties of the frozen
+    protocol, so they belong in preflight rather than in a run's failure log.
+    """
+    import urllib.error
+    import urllib.request
+
+    base_url = model_config.relay_base_url.rstrip("/")
+    payload = json.dumps(
+        {
+            "model": model_config.outer_model_id,
+            "messages": [{"role": "user", "content": "preflight"}],
+            "max_tokens": 1,
+        }
+    ).encode()
+    # Probe with exactly the credential the per-run relay will present, so a pass
+    # here really means the campaign can authenticate. "Bearer proxy" is only used
+    # on the per-run relay's own loopback socket, never against this port.
+    from .LLMRelay.client import resolve_upstream_api_key
+
+    request = urllib.request.Request(
+        f"{base_url}/chat/completions",
+        data=payload,
+        headers={
+            "Authorization": f"Bearer {resolve_upstream_api_key()}",
+            "Content-Type": "application/json",
+        },
+    )
+    try:
+        with urllib.request.urlopen(request, timeout=120) as response:
+            body = json.loads(response.read().decode("utf-8"))
+    except urllib.error.HTTPError as exc:
+        detail = exc.read().decode("utf-8", "replace")[:200]
+        if exc.code in {401, 403}:
+            raise AdapterError(
+                f"host relay at {base_url} rejected the credential the per-run relay sends "
+                f"(HTTP {exc.code}); start it with LLM_PROXY_API_KEY set to the same "
+                f"UPSTREAM_API_KEY/OPENAI_API_KEY value: {detail}"
+            ) from exc
+        raise AdapterError(f"host relay at {base_url} returned HTTP {exc.code}: {detail}") from exc
+    except OSError as exc:
+        raise AdapterError(
+            f"no host relay is answering at {base_url} ({exc}); start "
+            "BenchmarkAdapters.LLMRelay.server on that port before the campaign"
+        ) from exc
+    served = str(body.get("model", ""))
+    if served != model_config.outer_model_id:
+        raise AdapterError(
+            f"host relay serves model {served!r} but the model track declares "
+            f"{model_config.outer_model_id!r}; LLM_FORCE_MODEL must match the track"
+        )
+    return f"{base_url} serving {served}"
+
+
 def _check(name: str, callback) -> PreflightCheck:
     try:
         detail = callback()
@@ -313,6 +382,12 @@ def collect_formal_preflight(
         _check("baseline_status", baseline),
         _check("baseline_digest_verified", baseline_digest),
         _check("launcher_config_complete", launcher),
+        _check(
+            "host_relay_reachable",
+            lambda: "skipped-non-formal"
+            if not formal
+            else probe_host_relay(model_state()),
+        ),
         _check("hardware_profile_valid", hardware),
         _check("task_spec_digest_verified", task_spec),
         _check(

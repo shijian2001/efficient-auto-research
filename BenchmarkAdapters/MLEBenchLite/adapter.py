@@ -415,6 +415,22 @@ def _workspace_sandbox_argv(
         auth_path.write_text('{"OPENAI_API_KEY":"proxy"}\n', encoding="utf-8")
         auth_path.chmod(0o600)
     sandbox_executable = f"/agent-bin/{executable.name}"
+    # Some CLIs resolve companion executables as siblings of argv[0]: Codex needs
+    # codex-code-mode-host next to the binary, and without it the agent starts,
+    # silently loses its shell tool, and returns "no executable tool has been
+    # exposed to me" instead of a submission. Bind the whole shipping directory
+    # when the resolved target really is that CLI's own bin dir. Claude Code
+    # instead resolves to a version-named file inside a shared versions/
+    # directory; binding that parent would expose every installed version and
+    # would not even land on /agent-bin/claude, so that case keeps the single
+    # file bind.
+    resolved_executable = executable.resolve()
+    executable_dir = resolved_executable.parent
+    bind_executable_dir = resolved_executable.name == executable.name and any(
+        sibling.name != executable.name and sibling.name.startswith(executable.name + "-")
+        for sibling in executable_dir.iterdir()
+        if sibling.is_file()
+    )
     argv = [
         str(benchmark_venv / "bin/python"),
         str(sandbox_runner),
@@ -483,8 +499,8 @@ def _workspace_sandbox_argv(
         str(workspace.public_dir),
         "/workspace/input",
         "--ro-bind",
-        str(executable),
-        sandbox_executable,
+        str(executable_dir if bind_executable_dir else executable),
+        "/agent-bin" if bind_executable_dir else sandbox_executable,
         "--ro-bind",
         str(relay_forwarder),
         "/agent-bin/relay_forwarder.py",

@@ -9,7 +9,8 @@ from pathlib import Path
 
 import pytest
 
-from BenchmarkAdapters.contracts import CommandSpec
+from BenchmarkAdapters.contracts import AdapterError, CommandSpec
+from BenchmarkAdapters.formal_contract import ModelTrackConfig
 from BenchmarkAdapters.registry import AGENTS, ROOT
 from BenchmarkAdapters.thin_registry import terminal_ao_agents
 from BenchmarkAdapters.TerminalAO.baseline import BaselineManifest, tree_digest
@@ -29,8 +30,27 @@ from BenchmarkAdapters.TerminalAO.supervisor import run_terminal_ao, summarize_t
 ASSET_DIR = ROOT / "terminal-bench-2/ao_protocol"
 
 
+MODEL_TRACK_PATH = ROOT / "BenchmarkAdapters/configs/model-track.gpt-5.6-terra-host-relay.json"
+
+# Every AO cell now runs through an explicit variant id; "default" is refused by
+# agent_variant_explicit, and the three patched trees must name their local pin.
+AO_VARIANTS = {
+    "ear": "ear",
+    "codex": "codex",
+    "claude-code": "claude-code",
+    "arbor": "arbor@92c6fd5c22c8a291796d39730605ac0eb8ba07c5",
+    "ai-scientist": "ai-scientist-terminal-variant",
+}
+
+
 def _protocol() -> TerminalAOProtocol:
     return TerminalAOProtocol.load(ASSET_DIR / "protocol.json")
+
+
+def _model_config() -> ModelTrackConfig:
+    return ModelTrackConfig.load(
+        MODEL_TRACK_PATH, formal=True, require_terminal_inner=True
+    )
 
 
 def _fake_evaluation(
@@ -40,8 +60,10 @@ def _fake_evaluation(
     harness_dir: Path,
     evaluation_dir: Path,
     environment=None,
+    model_config=None,
+    gpu_ids: tuple[str, ...] = (),
 ) -> EvaluationRecord:
-    del environment
+    del environment, model_config, gpu_ids
     split = FrozenSplit.load(protocol.split_path)
     task_ids = split.dev if split_name == "dev" else split.test
     marker = "synthetic-improvement" in (harness_dir / "terminus_2.py").read_text(
@@ -83,6 +105,7 @@ def test_dev_socket_exposes_only_structured_dev_feedback(tmp_path: Path, monkeyp
         candidate_dir=candidate,
         output_dir=tmp_path / "evaluations",
         socket_path=tmp_path / "broker.sock",
+        model_config=_model_config(),
     )
     with broker:
         payload = request_evaluation(str(broker.socket_path), broker.token)
@@ -111,6 +134,7 @@ def test_every_ao_launcher_dispatches_to_a_distinct_native_loop(
         model_parameters={},
         request_timeout_seconds=60,
         retry_policy={},
+        agent_variant=AO_VARIANTS[agent],
     )
     command = build_native_ao_command(request)
     text = " ".join(command.argv)
@@ -119,9 +143,14 @@ def test_every_ao_launcher_dispatches_to_a_distinct_native_loop(
         "arbor": "Arbor native coordinator Terminal AO loop",
         "codex": "Codex native Terminal AO loop",
         "claude-code": "Claude Code native Terminal AO loop",
-        "ai-scientist": "AiScientist native subagent Terminal AO loop",
+        # AiScientist has no original AO entrypoint; the registered variant is
+        # the only way in, so the command reports the variant label.
+        "ai-scientist": "AiScientist TerminalTaskSubagent variant",
     }[agent]
-    assert "dev.sock" in text
+    # Arbor reaches the DEV capability through its plugin evaluator contract, so
+    # the socket path lives in the generated config rather than the argv.
+    if agent != "arbor":
+        assert "dev.sock" in text
     assert "held-out-53" not in text
     assert "split.json" not in text
     if agent in {"ear", "ai-scientist"}:
@@ -142,7 +171,7 @@ def test_ear_is_bound_to_clean_g3_worktree() -> None:
         capture_output=True,
         text=True,
         check=True,
-    ).stdout.strip() == "7cd9ed5c1db0ff5250faad373e5d5a67209e604c"
+    ).stdout.strip() == "169947e667d0f555c1ca680cf24166fbe78e20be"
 
 
 def test_supervisor_scores_agent_declared_harness_then_consumes_one_sealed_test(
@@ -179,9 +208,11 @@ def test_supervisor_scores_agent_declared_harness_then_consumes_one_sealed_test(
         protocol=protocol,
         output_dir=output,
         seed=0,
-        model="gpt-5.5",
+        model=_model_config().outer_model_id,
         timeout_seconds=172800,
         formal=False,
+        model_config=_model_config(),
+        agent_variant=AO_VARIANTS["codex"],
     )
     selection = json.loads((output / "selection.json").read_text())
     assert selection["dev_evaluations"] == 2
@@ -225,9 +256,11 @@ def test_supervisor_timeout_closes_search_and_scores_declared_harness(
         protocol=protocol,
         output_dir=output,
         seed=0,
-        model="gpt-5.5",
+        model=_model_config().outer_model_id,
         timeout_seconds=172800,
         formal=False,
+        model_config=_model_config(),
+        agent_variant=AO_VARIANTS["codex"],
     )
     selection = json.loads((output / "selection.json").read_text())
     assert selection["launcher_timed_out"] is True
@@ -262,9 +295,11 @@ def test_supervisor_exit_124_closes_search_and_records_timeout(
         protocol=protocol,
         output_dir=output,
         seed=0,
-        model="gpt-5.5",
+        model=_model_config().outer_model_id,
         timeout_seconds=172800,
         formal=False,
+        model_config=_model_config(),
+        agent_variant=AO_VARIANTS["codex"],
     )
     selection = json.loads((output / "selection.json").read_text())
     assert selection["launcher_return_code"] == 124
@@ -319,44 +354,52 @@ def test_formal_launcher_sandbox_hides_protocol_and_test_assets(tmp_path: Path) 
     assert str(ROOT / "mle-bench-data") not in mount_arguments
 
 
-def test_terminal_ao_aggregate_reports_avg_at_three_and_failure_zero(tmp_path: Path) -> None:
+def test_terminal_ao_aggregate_refuses_results_without_bound_formal_evidence(
+    tmp_path: Path,
+) -> None:
+    """A bare result.json is not enough to enter the AO scorecard.
+
+    The aggregate is fail-closed: each outer run must present a result whose
+    identity matches the protocol *and* an immutable manifest the result is
+    hash-bound to (plus the hardware attestation). A result file alone -- which
+    is all a partially-written or hand-edited run leaves behind -- must stop the
+    aggregate rather than be scored, so a run that never really completed cannot
+    silently become a number on the card.
+
+    This also no longer asserts Avg@3: the campaign is frozen at N=1
+    (``protocol.seeds == (0,)``), so there is no three-seed mean to report.
+    """
     protocol = _protocol()
-    for seed, passed in ((0, 10), (1, 20)):
-        run_dir = tmp_path / "codex" / f"seed-{seed}"
-        run_dir.mkdir(parents=True)
-        (run_dir / "result.json").write_text(
-            json.dumps(
-                {
-                    "protocol_digest": protocol.digest,
-                    "mode": "terminal-ao",
-                    "agent": "codex",
-                    "seed": seed,
-                    "status": "completed",
-                    "score_valid": True,
-                    "score": passed / 53,
-                    "metrics": {
-                        "passed": passed,
-                        "failed": 53 - passed,
-                        "errors": 0,
-                        "missing_rewards": 0,
-                    },
-                    "tokens": {"input": 100},
-                    "cost": {"usd": 1.0},
-                    "wall_clock_seconds": 10,
-                }
-            )
+    run_dir = tmp_path / "codex" / f"seed-{protocol.seeds[0]}"
+    run_dir.mkdir(parents=True)
+    (run_dir / "result.json").write_text(
+        json.dumps(
+            {
+                "protocol_digest": protocol.digest,
+                "mode": "terminal-ao",
+                "agent": "codex",
+                "seed": protocol.seeds[0],
+                "status": "completed",
+                "score_valid": True,
+                "score": 10 / 53,
+                "metrics": {
+                    "passed": 10,
+                    "failed": 43,
+                    "errors": 0,
+                    "missing_rewards": 0,
+                },
+                "tokens": {"input": 100},
+                "cost": {"usd": 1.0},
+                "wall_clock_seconds": 10,
+            }
         )
-    aggregate = aggregate_terminal_ao(
-        protocol=protocol,
-        campaign_dir=tmp_path,
-        agent="codex",
     )
-    assert aggregate["tasks_per_seed"] == 53
-    assert aggregate["num_seeds"] == 3
-    assert aggregate["invalid_or_missing_seeds"] == 1
-    assert aggregate["seed_metrics"][2]["pass_rate"] == 0.0
-    assert aggregate["metrics"]["held_out_53_pass_rate"]["mean"] == pytest.approx(30 / 159)
-    assert aggregate["direct_89_scores_included"] is False
+    with pytest.raises(AdapterError):
+        aggregate_terminal_ao(
+            protocol=protocol,
+            campaign_dir=tmp_path,
+            agent="codex",
+        )
 
 
 def test_relay_token_log_is_summed_without_inventing_cost(tmp_path: Path) -> None:
