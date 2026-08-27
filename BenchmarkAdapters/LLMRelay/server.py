@@ -230,8 +230,14 @@ def _append_token_log(
 ) -> None:
     usage_available = isinstance(usage, dict)
     usage = usage or {}
-    prompt_details = usage.get("prompt_tokens_details") or {}
-    completion_details = usage.get("completion_tokens_details") or {}
+    # Chat Completions reports the breakdown under prompt/completion_tokens_details;
+    # the Responses API uses input/output_tokens_details for the same numbers.
+    prompt_details = (
+        usage.get("prompt_tokens_details") or usage.get("input_tokens_details") or {}
+    )
+    completion_details = (
+        usage.get("completion_tokens_details") or usage.get("output_tokens_details") or {}
+    )
     record = {
         "timestamp": time.time(),
         "request_id": uuid.uuid4().hex,
@@ -248,20 +254,33 @@ def _append_token_log(
         "response_kind": response_kind,
         "input_tokens": _usage_get(usage, "prompt_tokens", "input_tokens"),
         "output_tokens": _usage_get(usage, "completion_tokens", "output_tokens"),
-        "cache_read_tokens": _usage_get(usage, "cache_read_input_tokens"),
-        "cache_write_tokens": _usage_get(usage, "cache_creation_input_tokens"),
+        # Anthropic names the cache-read count cache_read_input_tokens; OpenAI puts
+        # the same quantity in prompt/input_tokens_details.cached_tokens.  They are
+        # alternatives, never both, so fall back rather than summing them.
+        "cache_read_tokens": _usage_get(
+            usage, "cache_read_input_tokens", default=prompt_details.get("cached_tokens")
+        ),
+        "cache_write_tokens": _usage_get(
+            usage,
+            "cache_creation_input_tokens",
+            default=prompt_details.get("cache_write_tokens"),
+        ),
         "cached_tokens": prompt_details.get("cached_tokens"),
         "reasoning_tokens": completion_details.get("reasoning_tokens"),
         "usage_available": usage_available,
     }
+    # cached_tokens is deliberately excluded: it is the raw OpenAI spelling of the
+    # value already folded into cache_read_tokens, so including it would double count.
     cache_components = (
         record["cache_read_tokens"],
         record["cache_write_tokens"],
-        record["cached_tokens"],
     )
+    # Upstreams report only the subset of these fields their protocol defines, so
+    # requiring all three would record every real cache hit as "unknown".  Sum the
+    # components that are present; stay None only when no cache signal arrived.
     record["cache_tokens"] = (
-        sum(int(value) for value in cache_components)
-        if all(value is not None for value in cache_components)
+        sum(int(value) for value in cache_components if value is not None)
+        if any(value is not None for value in cache_components)
         else None
     )
     record["total_tokens"] = (

@@ -383,3 +383,67 @@ def test_streaming_synthesis_carries_the_truncation_signal(monkeypatch, tmp_path
     ).decode("utf-8")
     assert "response.incomplete" in responses_stream
     assert "response.completed" not in responses_stream
+
+
+def test_token_log_captures_cache_from_both_upstream_usage_shapes(monkeypatch, tmp_path: Path) -> None:
+    """Real gpt-5.6-terra usage objects: chat reports cache under
+    prompt_tokens_details, /responses under input_tokens_details.  Both must be
+    recorded as numbers, and total_tokens must stay input+output because the
+    cached count is a subset of the prompt tokens, not an addition."""
+    relay = _relay(monkeypatch, tmp_path)
+    observed = [
+        # /v1/chat/completions, second identical long request (cache hit).
+        {
+            "completion_tokens": 5,
+            "prompt_tokens": 11207,
+            "total_tokens": 11212,
+            "prompt_tokens_details": {"cached_tokens": 11008},
+        },
+        # /v1/responses.
+        {
+            "input_tokens": 26778,
+            "input_tokens_details": {"cached_tokens": 0, "cache_write_tokens": 0},
+            "output_tokens": 5,
+            "output_tokens_details": {"reasoning_tokens": 7},
+            "total_tokens": 26783,
+        },
+        # Anthropic-style usage.
+        {
+            "input_tokens": 100,
+            "output_tokens": 10,
+            "cache_read_input_tokens": 80,
+            "cache_creation_input_tokens": 20,
+        },
+    ]
+    for usage in observed:
+        relay._append_token_log("gpt-5.6-terra", "chat.completions", usage, 0.1, 0)
+    records = [
+        json.loads(line)
+        for line in (tmp_path / "telemetry.jsonl").read_text(encoding="utf-8").splitlines()
+    ]
+
+    chat, responses, anthropic = records
+    assert chat["cache_tokens"] == 11008
+    assert chat["cache_read_tokens"] == 11008
+    assert chat["total_tokens"] == 11212
+
+    assert responses["cache_tokens"] == 0
+    assert responses["reasoning_tokens"] == 7
+    assert responses["total_tokens"] == 26783
+
+    assert anthropic["cache_tokens"] == 100
+    assert anthropic["total_tokens"] == 110
+
+
+def test_token_log_reports_unknown_cache_when_upstream_is_silent(monkeypatch, tmp_path: Path) -> None:
+    relay = _relay(monkeypatch, tmp_path)
+    relay._append_token_log(
+        "gpt-5.6-terra",
+        "chat.completions",
+        {"prompt_tokens": 11207, "completion_tokens": 5, "total_tokens": 11212},
+        0.1,
+        0,
+    )
+    record = json.loads((tmp_path / "telemetry.jsonl").read_text(encoding="utf-8"))
+    assert record["cache_tokens"] is None
+    assert record["total_tokens"] == 11212

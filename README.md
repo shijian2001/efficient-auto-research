@@ -56,6 +56,18 @@ relay 上游 (gpt-5.5)
 价值：换模型只改环境变量；token 记账覆盖各 Agent 的调用；代理重试在全部实验中兜住上游抖动
 （合计 60+ 次重试，零 agent 层失败）。详见 [docker-eval/README.md](docker-eval/README.md)。
 
+**cache token 记账（2026-08-27 修复）**：上游 `gpt-5.6-terra` 两个端点报的 usage 形状不同——
+`/v1/chat/completions` 把命中数放在 `usage.prompt_tokens_details.cached_tokens`（实测长 prompt
+重复请求：`prompt_tokens=11207`，其中 `cached_tokens=11008`），`/v1/responses` 则放在
+`usage.input_tokens_details.{cached_tokens,cache_write_tokens}`、reasoning 放在
+`output_tokens_details.reasoning_tokens`。原 `_append_token_log` 只读 `prompt_tokens_details` /
+`completion_tokens_details`，且要求 Anthropic 与 OpenAI 三个字段**同时**非空才算 `cache_tokens`，
+结果所有真实命中都被写成 `cache_tokens=None`（387 条 host 日志里 111 条有 `cached_tokens`、
+0 条有 `cache_tokens`），并让 `summarize_token_log` 把整段 cache 汇总降级为 None。现改为按端点
+回退取值、只要有任一 cache 信号就求和；上游完全不报时仍为 None（保持「未知」而非伪造 0）。
+`total_tokens = input + output` 保持不变且**正确**：OpenAI 约定里 `cached_tokens` 是
+`prompt_tokens` 的子集而非增量（实测 11207+5=11212=上游 `total_tokens`），加上去会重复计数。
+
 ### 历史三 Agent 的代码状态
 
 | Agent | 分支 / 位置 | 说明 |
