@@ -21,8 +21,8 @@ RUC-NLPIR / AweAI-Team / InternScience / sjtu-sai-agents）。EAR 内层 `origin
 | MLEvolve | `baselines/MLEvolve` | `ed595138c62a3785532bfb11cbd14b14e51a701f` | `main` | **干净** | 原版 ID |
 | Arbor（registry / AO 默认路径） | `baselines/Arbor` | `92c6fd5c22c8a291796d39730605ac0eb8ba07c5` | `feat/mle-bench-adapter-hardening` | **干净** | MLE 必须 `arbor-benchmark-patched` |
 | Arbor（MLE docker 实际执行） | `baselines/Arbor-longrun-patched` | `a51a1fe4b48e07259a22a02d4969abc04494f77e` | `feat/mle-bench-adapter-hardening` | **干净** | 同上；12h 长跑用这棵树 |
-| Codex | `baselines/Codex`（无内层 `.git`，跟外层走） | 外层 `full4090` 本次推送后的 HEAD | 外层 `full4090` | 跟外层 | 原版 ID |
-| Claude Code | `baselines/ClaudeCode`（无内层 `.git`，跟外层走） | 外层 `full4090` 本次推送后的 HEAD | 外层 `full4090` | 跟外层 | 原版 ID |
+| Codex | `baselines/Codex`（无内层 `.git`，跟外层走） | 外层 `f9f4ba674b034c54937d7325cb649b1d05ff501d` | 外层 `full4090` | 跟外层 | 原版 ID |
+| Claude Code | `baselines/ClaudeCode`（无内层 `.git`，跟外层走） | 外层 `f9f4ba674b034c54937d7325cb649b1d05ff501d` | 外层 `full4090` | 跟外层 | 原版 ID |
 | ML-Master 2.0 | `baselines/EvoMaster` | `07a80dac7f9edad18f2d97bcbffc0585e06d5b46` | `main` | **干净** | 原版 ID（AO 不进表） |
 | AiScientist | `baselines/AiScientist` | `770039abc8f1319f436542b16f630d70d117d322` | `main` | **干净** | AO 必须 `ai-scientist-terminal-variant` |
 
@@ -57,7 +57,7 @@ Codex / Claude Code 没有独立 nested git。`git -C baselines/Codex rev-parse 
 
 ### Codex / Claude Code
 
-无 nested `.git`，身份跟外层 `full4090` HEAD。
+无 nested `.git`，身份跟外层 `full4090` @ `f9f4ba674b034c54937d7325cb649b1d05ff501d`。
 
 ## 比较集合（不变）
 
