@@ -1017,6 +1017,26 @@ def _ml_master_command(request: MleLiteRequest) -> CommandSpec:
             "HOME": str(request.output_dir.resolve() / "home"),
             "OPENAI_API_KEY": "proxy",
             "ANTHROPIC_API_KEY": "proxy",
+            # ML-Master's local session runs the agent's generated code through
+            # `subprocess.run(..., shell=True, env=os.environ.copy())`
+            # (evomaster/env/local.py:490-515).  With inherit_env=False and no
+            # PATH here the shell falls back to the default system PATH, and
+            # this host ships no /usr/bin/python, so every training script the
+            # agent writes dies with "/bin/sh: 1: python: not found" (exit 127)
+            # and the run cannot produce a submission.  Put the agent's own
+            # locked venv first so `python` is the interpreter that actually
+            # holds its pinned torch/pandas/sklearn.
+            "PATH": os.pathsep.join(
+                (
+                    str(AGENTS[request.agent].execution_path / ".venv" / "bin"),
+                    "/usr/local/sbin",
+                    "/usr/local/bin",
+                    "/usr/sbin",
+                    "/usr/bin",
+                    "/sbin",
+                    "/bin",
+                )
+            ),
             "TMPDIR": str(request.output_dir.resolve() / "tmp"),
             "XDG_CACHE_HOME": str(request.output_dir.resolve() / "cache"),
             "XDG_CONFIG_HOME": str(request.output_dir.resolve() / "config"),
