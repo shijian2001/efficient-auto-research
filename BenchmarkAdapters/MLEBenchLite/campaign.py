@@ -149,7 +149,9 @@ def generate_ml_master_config(request: MleLiteRequest) -> MleLiteRequest:
             "--competition-id",
             request.competition_id,
             "--public-dir",
-            str(request.data_root / request.competition_id / "prepared/public"),
+            # The worker runs with cwd=source_root (the ML-Master install dir),
+            # so a relative --data-root would resolve against the wrong tree.
+            str((request.data_root / request.competition_id / "prepared/public").resolve()),
             "--staged-data-root",
             str(request.output_dir / "public-data"),
             "--workspace-dir",
