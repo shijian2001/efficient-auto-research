@@ -13,7 +13,7 @@ import zipfile
 import hashlib
 import tempfile
 import stat
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, DecimalException, InvalidOperation
 from dataclasses import dataclass, field
 from dataclasses import replace
 from pathlib import Path
@@ -93,8 +93,14 @@ def _payload_signatures(data: bytes) -> set[str]:
                         raise InvalidOperation
                     if number == 0:
                         number = Decimal(0)
+                    # normalize() can raise Overflow, not just InvalidOperation:
+                    # jigsaw's ids look like "0061e98945132728", which Decimal reads
+                    # as 61e98945132728 -- finite, but with an exponent no expansion
+                    # can hold. Catching the whole DecimalException family keeps an
+                    # id that merely resembles a number from aborting the run; such a
+                    # cell is simply treated as the text it actually is.
                     normalized.append(["number", str(number.normalize())])
-                except (InvalidOperation, ValueError):
+                except (DecimalException, ValueError):
                     normalized.append(["text", value])
             rows.append(normalized)
     except (UnicodeDecodeError, csv.Error):

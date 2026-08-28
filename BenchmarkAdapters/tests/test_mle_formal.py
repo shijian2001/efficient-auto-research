@@ -521,3 +521,24 @@ def test_every_result_path_records_token_usage() -> None:
                 f"{module}:{call.lineno} builds a BenchmarkRunResult without "
                 "tokens=; a cell that ends here would report zero cost"
             )
+
+
+def test_signature_survives_ids_that_look_like_exponents():
+    """An id column is not a number just because Decimal will parse it.
+
+    jigsaw ids look like "0061e98945132728". Decimal reads that as a finite
+    number with an exponent no expansion can hold, so normalize() raises
+    Overflow -- a DecimalException, but not InvalidOperation. Catching only the
+    latter aborted every jigsaw cell in under two seconds, before the agent
+    started, for all seven agents alike.
+    """
+    from BenchmarkAdapters.MLEBenchLite.adapter import _payload_signatures
+
+    payload = b"id,toxic\n0061e98945132728,0.5\n00001cee341fdb12,0.5\n"
+    signatures = _payload_signatures(payload)
+    assert len(signatures) == 2, "expected both the raw and the canonical-csv digest"
+
+    # The overflowing id must be preserved as text, so two files that differ
+    # only in that column still hash differently.
+    other = payload.replace(b"0061e98945132728", b"0061e98945132729")
+    assert _payload_signatures(other).isdisjoint(signatures)
