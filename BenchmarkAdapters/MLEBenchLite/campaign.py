@@ -411,6 +411,50 @@ def run_campaign_cell(
         return result
 
 
+def _reconcile_adapter_commits(
+    adapter_commits: set[str], campaign_dir: Path, agent: str
+) -> str:
+    """One adapter commit per agent, unless a waiver on disk says why not.
+
+    Cells built by different adapter revisions are normally incomparable, and
+    that is worth refusing: a changed metric or a changed prompt would silently
+    split one row of the scorecard across two harnesses. But a fix that only
+    stops the harness from crashing changes no cell that already ran, and
+    re-running a 12-hour cell to relabel it buys nothing.
+
+    So the exception has to be written down rather than assumed. A waiver file
+    names every commit it covers and states the reason; anyone reading the
+    scorecard can find it, and a commit that is not named still fails the gate.
+    """
+    if len(adapter_commits) == 1:
+        return next(iter(adapter_commits))
+    waiver_path = campaign_dir / "adapter-commit-waiver.json"
+    if not waiver_path.is_file() or waiver_path.is_symlink():
+        raise AdapterError(
+            f"MLE formal task cells mix adapter commits for {agent}: "
+            f"{sorted(adapter_commits)}; write {waiver_path.name} to declare why "
+            "they are comparable, or re-run the cells on one commit"
+        )
+    try:
+        waiver = json.loads(waiver_path.read_text(encoding="utf-8"))
+    except ValueError as exc:
+        raise AdapterError(f"MLE adapter-commit waiver is not readable: {exc}") from exc
+    covered = {str(entry) for entry in waiver.get("adapter_commits", [])}
+    reason = str(waiver.get("reason", "")).strip()
+    canonical = str(waiver.get("canonical_adapter_commit", "")).strip()
+    if not adapter_commits <= covered:
+        raise AdapterError(
+            f"MLE adapter-commit waiver does not cover {sorted(adapter_commits - covered)}"
+        )
+    if not reason:
+        raise AdapterError("MLE adapter-commit waiver states no reason")
+    if canonical not in adapter_commits:
+        raise AdapterError(
+            "MLE adapter-commit waiver names a canonical commit that no cell used"
+        )
+    return canonical
+
+
 def aggregate_campaign(protocol: FormalProtocol, campaign_dir: Path, agent: str) -> dict[str, Any]:
     if agent not in AGENTS:
         raise AdapterError(f"unknown baseline agent: {agent}")
@@ -608,11 +652,14 @@ def aggregate_campaign(protocol: FormalProtocol, campaign_dir: Path, agent: str)
         model_config_digests,
         model_track_ids,
         hardware_fingerprints,
-        adapter_commits,
         agent_commits,
     )):
         raise AdapterError("MLE formal task cells mix model, hardware, or adapter tracks")
+    adapter_commit = _reconcile_adapter_commits(adapter_commits, campaign_dir, agent)
     return {
+        # A waived run reports every commit it drew from, so a reader never has
+        # to trust that the single canonical value tells the whole story.
+        "adapter_commits_observed": sorted(adapter_commits),
         "protocol_id": protocol.protocol_id,
         "protocol_digest": protocol.digest,
         "mode": BenchmarkMode.MLE.value,
@@ -621,7 +668,7 @@ def aggregate_campaign(protocol: FormalProtocol, campaign_dir: Path, agent: str)
         "model_config_digest": next(iter(model_config_digests)),
         "model_track_id": next(iter(model_track_ids)),
         "hardware_fingerprint": next(iter(hardware_fingerprints)),
-        "adapter_commit": next(iter(adapter_commits)),
+        "adapter_commit": adapter_commit,
         "agent_commit": next(iter(agent_commits)),
         **aggregate_seeds(seed_metrics, outer_repetitions=len(protocol.seeds)),
     }

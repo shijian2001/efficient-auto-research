@@ -542,3 +542,58 @@ def test_signature_survives_ids_that_look_like_exponents():
     # only in that column still hash differently.
     other = payload.replace(b"0061e98945132728", b"0061e98945132729")
     assert _payload_signatures(other).isdisjoint(signatures)
+
+
+def _waiver(tmp_path, **overrides):
+    payload = {
+        "canonical_adapter_commit": "b" * 40,
+        "adapter_commits": ["a" * 40, "b" * 40],
+        "reason": "widened an exception clause; verified identical signatures",
+    }
+    payload.update(overrides)
+    (tmp_path / "adapter-commit-waiver.json").write_text(
+        json.dumps(payload), encoding="utf-8"
+    )
+    return tmp_path
+
+
+def test_adapter_commits_need_a_waiver_to_mix(tmp_path):
+    """Mixed adapter commits are refused unless a file on disk says why.
+
+    Two revisions of the harness normally mean two incomparable harnesses, and
+    silently picking one would split a scorecard row without saying so.
+    """
+    from BenchmarkAdapters.MLEBenchLite.campaign import _reconcile_adapter_commits
+
+    one = {"a" * 40}
+    assert _reconcile_adapter_commits(one, tmp_path, "ear") == "a" * 40
+
+    mixed = {"a" * 40, "b" * 40}
+    with pytest.raises(AdapterError, match="mix adapter commits"):
+        _reconcile_adapter_commits(mixed, tmp_path, "ear")
+
+    assert _reconcile_adapter_commits(mixed, _waiver(tmp_path), "ear") == "b" * 40
+
+
+def test_waiver_cannot_be_vague_or_incomplete(tmp_path):
+    """A waiver only excuses the commits it names, and only with a reason."""
+    from BenchmarkAdapters.MLEBenchLite.campaign import _reconcile_adapter_commits
+
+    mixed = {"a" * 40, "b" * 40}
+
+    _waiver(tmp_path, adapter_commits=["a" * 40])
+    with pytest.raises(AdapterError, match="does not cover"):
+        _reconcile_adapter_commits(mixed, tmp_path, "ear")
+
+    _waiver(tmp_path, reason="   ")
+    with pytest.raises(AdapterError, match="states no reason"):
+        _reconcile_adapter_commits(mixed, tmp_path, "ear")
+
+    _waiver(tmp_path, canonical_adapter_commit="c" * 40)
+    with pytest.raises(AdapterError, match="canonical commit that no cell used"):
+        _reconcile_adapter_commits(mixed, tmp_path, "ear")
+
+    # A third commit nobody declared still fails, waiver or not.
+    _waiver(tmp_path)
+    with pytest.raises(AdapterError, match="does not cover"):
+        _reconcile_adapter_commits(mixed | {"c" * 40}, tmp_path, "ear")
