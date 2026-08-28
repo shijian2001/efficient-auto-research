@@ -673,7 +673,10 @@ def _docker_command(request: MleLiteRequest) -> CommandSpec:
     if not request.model:
         raise AdapterError("MLE launcher requires an explicit model")
     agent_name = NATIVE_DOCKER_NAMES[request.agent]
-    run_tag = request.run_tag or f"adapter_{request.agent}_{request.competition_id}"
+    run_tag = request.run_tag or (
+        f"adapter_{request.agent}_{request.competition_id}_"
+        f"{hashlib.sha256(str(request.output_dir.resolve()).encode()).hexdigest()[:12]}"
+    )
     return CommandSpec(
         argv=(
             "bash",

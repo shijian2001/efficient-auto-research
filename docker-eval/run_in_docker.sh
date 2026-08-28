@@ -35,6 +35,48 @@ BENCHMARK_MOUNTS=()
 HOST_FORMAT_SERVER_PID=""
 HOST_RELAY_PID=""
 HOST_DOWNLOAD_PROXY_PID=""
+declare -a PORT_LOCK_FDS=()
+ALLOCATED_PORT=""
+
+# Reserve host-side service ports for this launcher lifetime.  Fixed
+# GPU-index-derived ports collide with orphaned relay/format processes from an
+# interrupted run, so choose a free port under a per-port flock instead.
+PORT_LOCK_ROOT=${PORT_LOCK_ROOT:-/tmp/mle-bench-port-locks}
+mkdir -p "$PORT_LOCK_ROOT"
+
+allocate_port() {
+  local family=$1 range_start=$2 range_size=$3
+  local digest offset step candidate fd lock_path
+  digest=$(printf '%s' "$RUN_TAG|$COMP|$GPU_ID|$family" | sha256sum | cut -c1-8)
+  offset=$(( $(printf '%d' "0x$digest") % range_size ))
+  for ((step=0; step<range_size; step++)); do
+    candidate=$((range_start + (offset + step) % range_size))
+    lock_path="$PORT_LOCK_ROOT/port-${candidate}.lock"
+    eval "exec {fd}>\"$lock_path\""
+    if ! flock -n "$fd"; then
+      eval "exec ${fd}>&-"
+      continue
+    fi
+    if ss -H -ltn 2>/dev/null | awk -v port=":$candidate" '$4 ~ port"$" { found=1 } END { exit !found }'; then
+      flock -u "$fd"
+      eval "exec ${fd}>&-"
+      continue
+    fi
+    PORT_LOCK_FDS+=("$fd")
+    ALLOCATED_PORT=$candidate
+    return 0
+  done
+  echo "没有可用的 $family 端口 (range=${range_start}-$((range_start + range_size - 1)))" >&2
+  return 1
+}
+
+cleanup_port_locks() {
+  local fd
+  for fd in "${PORT_LOCK_FDS[@]}"; do
+    flock -u "$fd" 2>/dev/null || true
+    eval "exec ${fd}>&-" 2>/dev/null || true
+  done
+}
 
 cleanup_host_services() {
   if [ -n "$HOST_FORMAT_SERVER_PID" ]; then
@@ -46,6 +88,7 @@ cleanup_host_services() {
   if [ -n "$HOST_DOWNLOAD_PROXY_PID" ]; then
     kill "$HOST_DOWNLOAD_PROXY_PID" 2>/dev/null || true
   fi
+  cleanup_port_locks
 }
 trap cleanup_host_services EXIT INT TERM
 
@@ -144,7 +187,8 @@ LLM_MAX_UPSTREAM_CALLS=${LLM_MAX_UPSTREAM_CALLS:-}
 LLM_SKIP_UPSTREAM_READY=${LLM_SKIP_UPSTREAM_READY:-0}
 
 # --- 本地转发代理 ---
-PROXY_PORT=$((6200 + GPU_ID))
+allocate_port llm-relay 6200 800
+PROXY_PORT=$ALLOCATED_PORT
 DOCKER_BRIDGE_IP=${DOCKER_BRIDGE_IP:-$(docker network inspect bridge -f '{{(index .IPAM.Config 0).Gateway}}')}
 RELAY_BIND_HOST=${RELAY_BIND_HOST:-$DOCKER_BRIDGE_IP}
 RELAY_CONTAINER_HOST=${RELAY_CONTAINER_HOST:-host.docker.internal}
@@ -172,8 +216,10 @@ mkdir -p "$HF_CACHE_HOST" "$MLE_CACHE_HOST"
 # repository or MLE-Bench data root wholesale into an Agent container.
 BENCHMARK_MOUNTS=()
 
-# grading server 端口按 GPU_ID 错开（host 网络下三容器共享网络栈，不能撞）
-GRADING_PORT=$((5200 + GPU_ID))
+# The format server also needs an isolated host port; old servers can survive a
+# failed container, so do not assume the GPU-index port is available.
+allocate_port format-server 5200 800
+GRADING_PORT=$ALLOCATED_PORT
 
 # CPU 配额：与 MLEvolve 官方 run_single_task.sh 的 CPUS_PER_TASK=21 对齐。
 # 每容器独占 21 核、按 GPU_ID 错开区间（8 卡 × 21 = 168 ≤ 256），杜绝互踩；
@@ -182,7 +228,8 @@ CPUS_PER_TASK=${CPUS_PER_TASK:-21}
 CPU_START=$((GPU_ID * CPUS_PER_TASK))
 CPUSET="${CPU_START}-$((CPU_START + CPUS_PER_TASK - 1))"
 
-CONTAINER_NAME=${CONTAINER_NAME:-"mle-${AGENT}-${COMP}-gpu${GPU_ID}"}
+RUN_INSTANCE_SUFFIX=$(printf '%s' "$RUN_TAG|$COMP|$GPU_ID" | sha256sum | cut -c1-10)
+CONTAINER_NAME=${CONTAINER_NAME:-"mle-${AGENT}-${COMP}-gpu${GPU_ID}-r${RUN_INSTANCE_SUFFIX}"}
 docker rm -f "$CONTAINER_NAME" 2>/dev/null || true
 
 # The real upstream credential remains in this host-owned relay process. Agent
@@ -213,7 +260,8 @@ case "$CLASH_PROXY" in
     case "$CLASH_PROXY_PORT" in
       ''|*[!0-9]*) echo "Unsupported local HTTP proxy URL: $CLASH_PROXY" >&2; exit 2 ;;
     esac
-    DOWNLOAD_PROXY_PORT=$((17892 + GPU_ID))
+    allocate_port download-proxy 17892 800
+    DOWNLOAD_PROXY_PORT=$ALLOCATED_PORT
     "$RELAY_PYTHON" -u "$EAR/BenchmarkAdapters/tcp_forwarder.py" \
       --listen-host "$DOCKER_BRIDGE_IP" --listen-port "$DOWNLOAD_PROXY_PORT" \
       --target-host 127.0.0.1 --target-port "$CLASH_PROXY_PORT" \
