@@ -725,7 +725,7 @@ def _docker_command(request: MleLiteRequest) -> CommandSpec:
             "MLE_AGENT_DIR": str(AGENTS["mlevolve"].install_path),
             "SEED": str(request.seed),
         },
-        timeout_seconds=request.timeout_seconds + 120,
+        timeout_seconds=request.timeout_seconds + 1800,
         label=f"{request.agent} MLE-Bench Lite launcher",
         inherit_env=False,
         artifact_path=request.output_dir.resolve() / "submission.csv",
@@ -957,7 +957,7 @@ def _ai_scientist_command(request: MleLiteRequest) -> CommandSpec:
             "ai-scientist",
             # Stop the Agent at its own budget and keep the rest of the outer
             # window to publish what it produced. Without this the outer kill at
-            # budget+120s destroys the wrapper before it copies the artifact, so
+            # budget+1800s destroys the wrapper before it copies the artifact, so
             # an Agent that used its full time is scored as a zero.
             "--budget-seconds",
             str(request.timeout_seconds),
@@ -1008,7 +1008,7 @@ def _ai_scientist_command(request: MleLiteRequest) -> CommandSpec:
         argv=argv,
         cwd=AGENTS[request.agent].install_path,
         env=environment,
-        timeout_seconds=request.timeout_seconds + 120,
+        timeout_seconds=request.timeout_seconds + 1800,
         label="AiScientist MLE-Bench Lite adapter",
         inherit_env=False,
         artifact_path=request.output_dir.resolve() / "submission.csv",
@@ -1089,7 +1089,7 @@ def _ml_master_command(request: MleLiteRequest) -> CommandSpec:
             "ml-master-2",
             # Stop the Agent at its own budget and keep the rest of the outer
             # window to publish what it produced. Without this the outer kill at
-            # budget+120s destroys the wrapper before it copies the artifact, so
+            # budget+1800s destroys the wrapper before it copies the artifact, so
             # an Agent that used its full time is scored as a zero.
             "--budget-seconds",
             str(request.timeout_seconds),
@@ -1114,7 +1114,7 @@ def _ml_master_command(request: MleLiteRequest) -> CommandSpec:
         argv=argv,
         cwd=AGENTS[request.agent].install_path,
         env=environment,
-        timeout_seconds=request.timeout_seconds + 120,
+        timeout_seconds=request.timeout_seconds + 1800,
         label="ML-Master 2 MLE-Bench Lite adapter",
         inherit_env=False,
         artifact_path=request.output_dir.resolve() / "submission.csv",

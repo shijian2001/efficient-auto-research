@@ -30,6 +30,7 @@ GPU_UTIL_LIMIT_PERCENT=${GPU_UTIL_LIMIT_PERCENT:-5}
 GPUS_PER_ROUND=${GPUS_PER_ROUND:-3}
 POLL_SECONDS=${POLL_SECONDS:-30}
 EXCLUDE_GPU_IDS=${EXCLUDE_GPU_IDS:-}
+START_ROUND=${START_ROUND:-1}
 
 RELAY_BASE_URL=${RELAY_BASE_URL:-http://127.0.0.1:6200/v1}
 
@@ -302,7 +303,11 @@ main() {
   mkdir -p "$CAMPAIGN_DIR"
   printf '%s\n' "$$" > "$CAMPAIGN_DIR/controller.pid"
   TOTAL_ROUNDS=${#AGENTS[@]}
-  emit_event campaign_started status=starting total_rounds="$TOTAL_ROUNDS" tasks="${TASKS[*]}"
+  if ! [[ "$START_ROUND" =~ ^[1-9][0-9]*$ ]] || (( START_ROUND > TOTAL_ROUNDS )); then
+    die 2 "START_ROUND 必须在 1..$TOTAL_ROUNDS 范围内，当前=$START_ROUND"
+  fi
+  emit_event campaign_started status=starting total_rounds="$TOTAL_ROUNDS" \
+    start_round="$START_ROUND" tasks="${TASKS[*]}"
 
   # 先做硬前提检查，别等跑到第 8 轮才发现 relay 没起。
   [ -f "$PROTOCOL" ] || die 2 "缺少协议: $PROTOCOL"
@@ -323,6 +328,9 @@ main() {
   local round=0 agent variant failed_rounds=0
   for agent in "${AGENTS[@]}"; do
     round=$((round + 1))
+    if (( round < START_ROUND )); then
+      continue
+    fi
     variant=${VARIANT_OVERRIDE[$agent]:-$(resolve_variant "$agent")}
     if run_round "$round" "$agent" "$variant" "${TASKS[@]}"; then
       :
