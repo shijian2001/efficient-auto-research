@@ -175,3 +175,101 @@ G5 closeout 完成：
   （`BAAI/bge-base-en-v1.5` 权重 438 MB），42 cell 外推约 17 GB，
   而 `/` 仅剩 103 GB。日志本身 12h 外推最大约 121 MB
   （codex `state_5.sqlite-wal`），可接受。
+
+---
+
+## 08 · 单次调用型 CLI 的预算真空（2026-08-30）
+
+### 现象
+
+7-agent × 3-task campaign（`20260828_223600_..._r2_portsafe`，round 02–07）
+跑完后，用时分布是两极的，中间没有任何一个 agent：
+
+```
+mlevolve      12:00 12:00 12:00   跑满
+ml-master-2   12:00 12:00 12:00   跑满
+arbor         10:47 10:47 10:47   自己收尾（89.9%）
+─────────────────────────────────────────
+claude-code    0:29  0:21  0:31   约 4%
+codex          0:13  0:12  0:06   约 1~2%
+```
+
+codex 和 claude-code **不是崩溃**：日志末尾是正常收尾陈述，提交有效、
+分数正常（claude-code mlsp 0.90645 银牌，用时 21 分钟，比 arbor 跑
+10h47m 的 0.90201 还高）。它们是**主动早退**。
+
+### 根因
+
+不是 `--max-turns`。`campaign.py:322` 传的是 `max_turns=1000`，
+`adapter.py` 里的 `8` 只是 CLI 默认值，正式路径从不使用它。
+
+真正的原因是**任务指令里没有时间这回事**。冻结的
+`task_specs/mle-bench-lite.md` 全文只要求 "Produce exactly one
+`submission.csv`"，没有提预算、没有提迭代。codex 照做了，然后退出——
+它的行为完全正确。
+
+结构性差异在于预算的传递方式：
+
+| | 预算怎么到达 agent |
+|---|---|
+| arbor / ear / mlevolve / ml-master-2 / ai-scientist | `--budget-seconds`，自带搜索循环对着它迭代 |
+| codex / claude-code | **无通道**。单次 `subprocess` 调用，返回即结束，且看不到自己的启动时刻 |
+
+### 对照 Frontis-MA1 / NatureBench
+
+Frontis 的 `agent/claude.py`、`agent/codex.py`（NatureBench 公开实现）
+证实：**没有任何"跑满"的代码机制**——无 `--max-turns`、无
+`subprocess timeout=`、无外部重调循环，单次调用。填满预算全靠三样东西：
+
+1. prompt 明说 `"Use the full time budget: keep iterating... until
+   /time_remaining is close to zero"` / `"Do not exit early"`
+2. 一个可查询的时钟：`/time_remaining` 端点
+3. 可反复调用、取最大值的 `/evaluate` 服务，`"a worse later attempt will
+   NOT override an earlier higher score"`
+
+注：Frontis 的 MLE 专用 `claude.py/codex.py` 未公开，上述来自同一批人的
+NatureBench 实现，机制可借鉴但不能声称是同一份文件。
+
+第 3 条在 MLE-Bench 上**不能照搬**：私有标签必须对 agent 保密，开打分
+接口等于泄题。替代做法是把闭环的构建推给 agent 自己（切 CV、用竞赛
+自身指标做反馈），这正是 mlevolve/ml-master 内部本来就在做的事。
+
+### 改动（commit `e3e541f`）
+
+新增 `task_specs/mle-bench-lite.cli-harness-addendum.md`，**只追加到
+codex/claude-code 的 prompt，不进共享 spec**：
+
+- 声明单次调用语义：不会被重启，退出即结束，submission 可覆盖
+- 声明预算：`{budget}` / `{budget_seconds}` 由 cell 的
+  `timeout_seconds` 渲染，smoke run 不会谎称 12 小时
+- 要求先落 baseline 保底，再持续改进直到预算将尽
+- 要求自建验证闭环（切 CV、用竞赛指标判断），因为 grader 分数在退出前不可见
+- 早停的唯一合法条件：自评分数连续多次实质性尝试无改善
+
+配套 `workspace/DEADLINE.txt`：一个 unix 时间戳，`date +%s` 一比即得剩余
+秒数。prompt 可以写明时长，但只有磁盘上的数字能撑过 12 小时而不依赖估算。
+
+codex 额外加一句 session rule：`codex exec` 在无 tool call 的纯文本回复
+处结束会话——round-04 那句 "Created the required submission.csv" 正是
+这种结尾。claude-code 没有这条规则，因此不告诉它有。
+
+### 公平性
+
+共享 spec 保持逐字节不变，`task_spec` digest 仍是
+`2792c228...453c7780`，`protocol_digest` 不动，**已评分的格子provenance
+不受影响**。native agent 读的 `AGENT_TASK.md` 也未改动——它们已经通过
+`--budget-seconds` 拿到同一份预算，再塞一份散文副本等于给半边战场换了
+任务描述。
+
+测试（`test_mle_formal.py`，4 项）钉住：digest 不变、addendum 不泄露任何
+任务内容（competition 名、数据线索）、预算按真实 cell 渲染、native
+workspace 未受影响、session rule 只发给 codex。
+
+### 尚未解决
+
+- **重跑范围**：codex / claude-code 共 6 格需要在新 prompt 下重跑。
+  其余 5 个 agent 的格子不受影响（spec 未变）。
+- 这一改动**不改变**上一条记录里的 timeout 不评分缺陷：EAR 跑满 12h 后
+  被判 `timed_out` 直接抛错、不走评分路径，而它的
+  `agent-output/submission.csv` 经官方 grader 离线补评为
+  spooky 0.27628 铜牌 / mlsp 0.88328 铜牌。该路径仍待修。
