@@ -597,3 +597,108 @@ def test_waiver_cannot_be_vague_or_incomplete(tmp_path):
     _waiver(tmp_path)
     with pytest.raises(AdapterError, match="does not cover"):
         _reconcile_adapter_commits(mixed | {"c" * 40}, tmp_path, "ear")
+
+
+def test_cli_harness_addendum_leaves_the_frozen_spec_alone():
+    """The budget briefing is additive: the shared spec stays byte-identical.
+
+    Codex and Claude Code need to be told things the other Agents get
+    structurally, but the frozen task specification is what makes their cells
+    comparable to everyone else's. If closing that gap moved the spec digest,
+    every already-scored cell would silently belong to a different protocol.
+    """
+    from BenchmarkAdapters.MLEBenchLite.adapter import cli_harness_instruction
+    from BenchmarkAdapters.task_specs import task_spec_digest, task_spec_text
+
+    spec = task_spec_text("mle-bench-lite")
+    instruction = cli_harness_instruction(43200)
+
+    assert instruction.startswith(spec)
+    assert task_spec_digest("mle-bench-lite") == (
+        "2792c2280d603178072eb96e17f1a144d4654b7ac08f63fe9bf06714453c7780"
+    )
+
+    # The addendum states the working agreement and never leaks task content:
+    # no competition name, no hint about what the data looks like.
+    addendum = instruction[len(spec):]
+    assert "DEADLINE.txt" in addendum
+    assert "43200 seconds" in addendum
+    assert "12 hours" in addendum
+    for leak in ("spooky", "jigsaw", "mlsp", "author", "toxic"):
+        assert leak not in addendum.lower()
+
+
+def test_cli_harness_budget_is_rendered_from_the_real_cell_budget():
+    """The stated budget tracks the cell, so a smoke run cannot claim 12 hours."""
+    from BenchmarkAdapters.MLEBenchLite.adapter import cli_harness_instruction
+
+    assert "1 hour (3600 seconds)" in cli_harness_instruction(3600)
+    assert "2 hours (7200 seconds)" in cli_harness_instruction(7200)
+    assert "30 minutes (1800 seconds)" in cli_harness_instruction(1800)
+    with pytest.raises(AdapterError, match="positive budget"):
+        cli_harness_instruction(0)
+
+
+def test_only_the_cli_agents_are_briefed(tmp_path):
+    """Agents that run their own loop keep the untouched specification.
+
+    They already receive the budget through ``--budget-seconds`` and iterate
+    against it internally; handing them a second, prose copy of the same
+    contract would be a different task description for one half of the field.
+    """
+    from BenchmarkAdapters.MLEBenchLite.adapter import prepare_workspace
+    from BenchmarkAdapters.task_specs import task_spec_text
+
+    data_root = Path.home() / ".cache/mle-bench/data"
+    if not (data_root / "spooky-author-identification/prepared/public").is_dir():
+        pytest.skip("prepared MLE-Bench data is not available")
+
+    request = MleLiteRequest(
+        agent="codex",
+        competition_id="spooky-author-identification",
+        data_root=data_root,
+        output_dir=tmp_path / "out",
+        model="test-model",
+        timeout_seconds=43200,
+    )
+    workspace = prepare_workspace(request)
+
+    # AGENT_TASK.md is what the native Agents read, and it is the frozen text.
+    agent_task = (workspace.workspace_dir / "AGENT_TASK.md").read_text(encoding="utf-8")
+    assert agent_task.startswith(task_spec_text("mle-bench-lite"))
+    assert "single-invocation" not in agent_task
+
+    deadline_file = workspace.workspace_dir / "DEADLINE.txt"
+    deadline = int(deadline_file.read_text(encoding="utf-8").splitlines()[0])
+    assert 43100 < deadline - int(__import__("time").time()) <= 43200
+
+
+def test_codex_is_told_that_a_bare_reply_ends_its_run(tmp_path):
+    """Only Codex gets the session rule, because only Codex has that failure.
+
+    `codex exec` treats a reply with no tool call as the end of the session, so
+    a closing summary quits the run; Claude Code has no such rule and telling it
+    otherwise would be a false statement about its own harness.
+    """
+    data_root = Path.home() / ".cache/mle-bench/data"
+    if not (data_root / "spooky-author-identification/prepared/public").is_dir():
+        pytest.skip("prepared MLE-Bench data is not available")
+
+    prompts = {}
+    for agent in ("codex", "claude-code"):
+        request = MleLiteRequest(
+            agent=agent,
+            competition_id="spooky-author-identification",
+            data_root=data_root,
+            output_dir=tmp_path / agent,
+            model="test-model",
+            timeout_seconds=43200,
+            dry_run=True,
+        )
+        prompts[agent] = MleLiteAdapter(agent).build_command(request).argv[-1]
+
+    assert "How this session ends" in prompts["codex"]
+    assert "How this session ends" not in prompts["claude-code"]
+    # Both still carry the same budget agreement.
+    for prompt in prompts.values():
+        assert "12 hours (43200 seconds)" in prompt

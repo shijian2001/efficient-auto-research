@@ -12,6 +12,7 @@ import textwrap
 import zipfile
 import hashlib
 import tempfile
+import time
 import stat
 from decimal import Decimal, DecimalException, InvalidOperation
 from dataclasses import dataclass, field
@@ -660,6 +661,20 @@ def prepare_workspace(request: MleLiteRequest) -> MleLiteWorkspace:
         + f"\n\nCurrent competition: `{request.competition_id}`\n",
         encoding="utf-8",
     )
+    # A clock the Agent can actually read. The prompt can name a duration, but a
+    # CLI harness has no way to tell how much of it is left -- it cannot see its
+    # own launch time, and asking it to trust an elapsed-time estimate across a
+    # twelve-hour run invites it to stop early on a bad guess. `date +%s` against
+    # this number is a comparison it can make at any point with one shell call.
+    # Written a moment before launch, so it is a floor on the real deadline:
+    # sandbox setup is on the Agent's side of it, never the other way round.
+    deadline = int(time.time()) + int(request.timeout_seconds)
+    (workspace_dir / "DEADLINE.txt").write_text(
+        f"{deadline}\n"
+        f"# Unix seconds. The run stops at this time.\n"
+        f"# Remaining seconds: {deadline} - $(date +%s)\n",
+        encoding="utf-8",
+    )
     return MleLiteWorkspace(
         competition_id=request.competition_id,
         public_dir=public_dir,
@@ -735,6 +750,38 @@ def _docker_command(request: MleLiteRequest) -> CommandSpec:
     )
 
 
+def cli_harness_instruction(timeout_seconds: int) -> str:
+    """The frozen task spec plus what a one-shot CLI harness cannot infer.
+
+    Codex and Claude Code are launched once and never re-invoked, so their whole
+    run is one CLI process: when it returns, the cell is over. The Agents that
+    ship their own search loop are handed the same budget through
+    ``--budget-seconds`` and iterate against it on their own. A CLI harness has
+    no equivalent channel -- the frozen spec asks for one ``submission.csv`` and
+    says nothing about time, so producing that file reasonably reads as the
+    whole job, and both Agents returned in minutes out of a twelve-hour cell.
+
+    The addendum closes that gap without touching the shared specification. It
+    adds no task content and no hint about any competition; it states the
+    contract the other Agents get structurally -- how long the cell runs, that
+    nothing restarts the process, that the submission may be overwritten -- and
+    asks for the self-scored improvement loop those Agents already run
+    internally. The spec text itself stays byte-identical for every Agent, so
+    the protocol's frozen task_spec digest does not move.
+    """
+    if timeout_seconds < 1:
+        raise AdapterError("MLE CLI harness instruction requires a positive budget")
+    hours = timeout_seconds / 3600
+    budget = f"{hours:g} hour{'' if hours == 1 else 's'}" if hours >= 1 else (
+        f"{timeout_seconds // 60:g} minutes" if timeout_seconds >= 60 else f"{timeout_seconds} seconds"
+    )
+    addendum = task_spec_text("mle-bench-lite-cli-harness").format(
+        budget_seconds=timeout_seconds,
+        budget=budget,
+    )
+    return f"{task_spec_text('mle-bench-lite')}\n\n{addendum}"
+
+
 def _workspace_command(
     request: MleLiteRequest,
     workspace: MleLiteWorkspace,
@@ -743,7 +790,7 @@ def _workspace_command(
 ) -> CommandSpec:
     if not request.model:
         raise AdapterError("MLE launcher requires an explicit model")
-    instruction = request.instruction or task_spec_text("mle-bench-lite")
+    instruction = request.instruction or cli_harness_instruction(request.timeout_seconds)
     environment = relay_client_env(
         base_url="http://127.0.0.1:6200/v1",
         proxy="",
@@ -789,6 +836,20 @@ def _workspace_command(
         environment["CUDA_VISIBLE_DEVICES"] = gpu_uuid.stdout.strip()
     if request.agent == "codex":
         executable = _required_executable("codex")
+        # `codex exec` ends the session on any reply that finishes with prose and
+        # no tool call, so a closing summary is indistinguishable from quitting:
+        # the round-04 cells signed off with "Created the required
+        # submission.csv" and returned in minutes. Say so, since the Agent cannot
+        # observe it and would otherwise narrate its way out of its own budget.
+        codex_instruction = (
+            f"{instruction}\n\n"
+            "## How this session ends\n\n"
+            "A reply that ends in text with no tool call after it closes the "
+            "session and ends the run -- including a reply whose text says you "
+            "will continue. Keep every message you send anchored to a tool call "
+            "until you are genuinely finished, and write progress notes into a "
+            "file in your working directory rather than into a bare reply.\n"
+        )
         native_argv = (
             "exec",
             "--ephemeral",
@@ -814,7 +875,7 @@ def _workspace_command(
             'model_providers.benchmark_relay.wire_api="responses"',
             "-c",
             "model_providers.benchmark_relay.requires_openai_auth=true",
-            instruction,
+            codex_instruction,
         )
     elif request.agent == "claude-code":
         executable = _required_executable("claude")

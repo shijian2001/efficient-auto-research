@@ -15,6 +15,13 @@ TASK_SPEC_FILES = {
     "autoresearch-architecture": "autoresearch-architecture.md",
     "optimizer-design": "optimizer-design.md",
     "fml-bench": "fml-bench.md",
+    # Addendum, not a task specification: it carries no task content and only
+    # tells a single-invocation CLI harness what the frozen spec leaves to an
+    # Agent's own loop -- that nothing restarts it, and that the budget is a
+    # target rather than a ceiling. Agents that already run their own search
+    # loop do not read it, so the shared spec above stays byte-identical for
+    # every Agent and the protocol's task_spec digest does not move.
+    "mle-bench-lite-cli-harness": "mle-bench-lite.cli-harness-addendum.md",
 }
 
 
