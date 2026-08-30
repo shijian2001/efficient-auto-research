@@ -84,6 +84,7 @@ def _write_cell(
     campaign: Path,
     outer_run_index: int,
     task_id: str,
+    status: RunStatus = RunStatus.COMPLETED,
 ) -> Path:
     run_dir = campaign / "codex" / f"run-{outer_run_index}" / task_id
     cell = MleCampaignCell(
@@ -146,9 +147,15 @@ def _write_cell(
         agent="codex",
         task_id=task_id,
         seed=cell.seed,
-        status=RunStatus.COMPLETED,
+        status=status,
         score_valid=True,
         score=0.5,
+        failure_reason=(
+            None
+            if status is RunStatus.COMPLETED
+            else "AdapterError: launcher timed out; submission written before "
+            "the deadline was graded by the official grader"
+        ),
         metrics={
             "grader_report_digest": report_digest,
             "grader_report_file_sha256": sha256_file(report_path),
@@ -335,3 +342,79 @@ def test_mle_data_root_structure_and_archive_hashes_are_enforced(
     archive.write_bytes(b"same-size-tamper".ljust(archive.stat().st_size, b"x"))
     with pytest.raises(AdapterError, match="archive"):
         verify_task_archive(data_root, TASKS[0])
+
+
+def test_rescued_cells_reach_the_scorecard_like_any_other(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A cell scored after its deadline counts, and is verified the same way.
+
+    Recovering the submission in ``run_campaign_cell`` is only half the fix: the
+    aggregate reads statuses too, and a status it does not recognise as scored
+    files the grader report as ``None`` and drops the score again. So the medal
+    an Agent earned by using its whole budget would still vanish between the
+    cell and the scorecard.
+
+    Nothing is waved through to achieve that. The rescued cell carries a real
+    grader report and is put through the identical artifact-hash and
+    report-digest binding as a clean completion.
+    """
+    protocol = _protocol(1)
+    campaign = tmp_path / "campaign"
+    monkeypatch.setattr(
+        "BenchmarkAdapters.MLEBenchLite.campaign._git_identity",
+        lambda _path: ("a" * 40, False),
+    )
+    monkeypatch.setattr(
+        "BenchmarkAdapters.MLEBenchLite.membership.load_data_manifest",
+        lambda: _manifest_data(),
+    )
+    for index, task_id in enumerate(TASKS):
+        _write_cell(
+            protocol=protocol,
+            campaign=campaign,
+            outer_run_index=0,
+            task_id=task_id,
+            # One cell was stopped by the harness after it had already produced
+            # a graded submission; the rest finished on their own.
+            status=RunStatus.TIMED_OUT_SCORED if index == 0 else RunStatus.COMPLETED,
+        )
+
+    aggregate = aggregate_campaign(protocol, campaign, "codex")
+
+    assert aggregate["metrics"]["valid_rate"]["mean"] == 1.0
+    assert aggregate["metrics"]["any_medal_rate"]["mean"] == 1.0
+
+
+def test_a_rescued_cell_still_needs_real_grader_evidence(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The new status is not a way around the bindings every cell must satisfy."""
+    protocol = _protocol(1)
+    campaign = tmp_path / "campaign"
+    monkeypatch.setattr(
+        "BenchmarkAdapters.MLEBenchLite.campaign._git_identity",
+        lambda _path: ("a" * 40, False),
+    )
+    monkeypatch.setattr(
+        "BenchmarkAdapters.MLEBenchLite.membership.load_data_manifest",
+        lambda: _manifest_data(),
+    )
+    run_dirs = [
+        _write_cell(
+            protocol=protocol,
+            campaign=campaign,
+            outer_run_index=0,
+            task_id=task_id,
+            status=RunStatus.TIMED_OUT_SCORED if index == 0 else RunStatus.COMPLETED,
+        )
+        for index, task_id in enumerate(TASKS)
+    ]
+
+    # Tamper with the rescued cell's published artifact: its recorded hash no
+    # longer describes the file that was graded.
+    (run_dirs[0] / "artifacts/final/submission.csv").write_text(
+        "id,target\n1,0.9\n", encoding="utf-8"
+    )
+    with pytest.raises(AdapterError, match="artifact hash mismatch"):
+        aggregate_campaign(protocol, campaign, "codex")

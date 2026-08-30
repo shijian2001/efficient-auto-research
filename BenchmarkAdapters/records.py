@@ -18,8 +18,19 @@ class RunStatus(str, Enum):
     COMPLETED = "completed"
     FAILED = "failed"
     TIMED_OUT = "timed_out"
+    # An Agent that spent its whole budget and was stopped by the harness, but
+    # had already written a submission the official grader accepted. Spending
+    # the budget is what a search-shaped Agent is supposed to do, so the work
+    # counts; the status still says the Agent did not finish on its own, which
+    # "completed" would hide.
+    TIMED_OUT_SCORED = "timed_out_scored"
     INVALID_ARTIFACT = "invalid_artifact"
     INFRASTRUCTURE_ERROR = "infrastructure_error"
+
+    @property
+    def is_scored(self) -> bool:
+        """Whether this status carries an official score."""
+        return self in {RunStatus.COMPLETED, RunStatus.TIMED_OUT_SCORED}
 
 
 @dataclass(frozen=True)
@@ -179,9 +190,11 @@ class BenchmarkRunResult:
             raise AdapterError("a valid score requires a hashed final artifact")
         if self.artifact_sha256 is not None and len(self.artifact_sha256) != 64:
             raise AdapterError("invalid artifact SHA-256")
-        if self.status is RunStatus.COMPLETED and not self.score_valid:
-            raise AdapterError("completed result must contain a valid score")
+        if self.status.is_scored and not self.score_valid:
+            raise AdapterError(f"{self.status.value} result must contain a valid score")
         if self.status is not RunStatus.COMPLETED and not self.failure_reason:
+            # A rescued cell keeps its reason too: it says which deadline stopped
+            # the Agent, which is the whole difference from a clean completion.
             raise AdapterError("non-completed result requires a failure reason")
         if self.wall_clock_seconds < 0:
             raise AdapterError("result wall-clock cannot be negative")

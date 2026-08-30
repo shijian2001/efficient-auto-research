@@ -273,3 +273,104 @@ workspace 未受影响、session rule 只发给 codex。
   被判 `timed_out` 直接抛错、不走评分路径，而它的
   `agent-output/submission.csv` 经官方 grader 离线补评为
   spooky 0.27628 铜牌 / mlsp 0.88328 铜牌。该路径仍待修。
+
+---
+
+## 09 · 超时格子不评分：只惩罚勤奋 agent 的测量缺陷（2026-08-30）
+
+### 根因
+
+`formal.py:57` 的 `run_formal_mle` 是一条**无 try/except 的直线**：
+
+```
+① MleLiteAdapter.run()            跑 agent
+② publish_artifact()              拷到 artifacts/final/
+③ grade_submission()              官方评分
+④ BenchmarkRunResult(COMPLETED)   写结果
+```
+
+超时时 `run_command`（`process.py:150`）抛
+`AdapterError("... timed out")`，异常从第 ① 步冲出，**②③④ 全部跳过**。
+
+`campaign.py` 的兜底分支接住它，然后去
+`artifacts/final/submission.csv` 找提交——**那个位置正是被跳过的第 ②
+步负责填的**。必然为空，必然记 `score: null`。
+
+### 为什么这是系统性偏差
+
+哪种 agent 会超时？恰恰是把 12 小时用满的那种。提前收工的进程正常退出、
+四步走完、分数照拿：
+
+```
+codex        6 分钟退出   → 正常路径 → 0.33465 计入
+claude-code  31 分钟退出  → 正常路径 → 0.35189 计入
+ear          跑满 12h    → 抛异常   → null（尽管交了铜牌）
+```
+
+**越努力越吃亏。** 而 commit `e3e541f` 刚把 codex/claude-code 也改造成
+"跑满预算"型，不修的话下一轮重跑很可能 6 格全 null。
+
+### 证据（EAR round-01）
+
+```
+spooky:  submission 写于 14:02:24，deadline 15:29:42，早 1h27m
+         result.json 写于 15:31:43 记 timed_out/null
+         artifacts/final 0 文件，grading 0 文件
+mlsp:    submission 写于 14:15:10，早 1h14m，同样记 null
+```
+
+官方 grader 补评：spooky **0.27628 铜牌**、mlsp **0.88328 铜牌**，
+`valid_submission: True`，且都通过 `_sample_hashes` 反作弊比对。
+
+### 改动
+
+**新状态** `RunStatus.TIMED_OUT_SCORED`（`records.py`）：分数有效、计入
+牌位，但状态名保留"没在预算内自己收尾"这个事实，`completed` 会把它抹掉。
+配套 `is_scored` property，`validate()` 按它分支而非硬编码 COMPLETED。
+
+**救援逻辑** `campaign.py:_rescue_timed_out_submission`：超时且
+`artifacts/final/` 为空时，去 `submission_roots()` 找 agent 实际写的提交，
+补做被跳过的 ②③ 步。复用现有件，未新写任何校验。
+
+四条不放松的约束（全部实测验证）：
+
+| 场景 | 结果 |
+|---|---|
+| sample 原样交回 | 拒（反作弊 `_sample_hashes`） |
+| deadline 之后才落盘 | 拒，且不留下 artifacts |
+| 没交 / 空文件 | 拒 |
+| 垃圾内容 | 官方 grader 拒，记 `rescue declined: ...` |
+| deadline 前的合格提交 | 评分，`TIMED_OUT_SCORED` |
+
+**聚合放行**：`campaign.py` 的 `if status != COMPLETED` 分支会把新状态
+当失败、把 report 记成 `None`，分数仍进不了成绩单。改为
+`status not in {COMPLETED, TIMED_OUT_SCORED}`，让救援格子走**已评分**
+路径——artifact hash 绑定、grader report digest 绑定与正常完成完全相同。
+`aggregate.py` 无需改动（它按 `reports[task_id]` 计数）。
+
+### EAR 两格补评
+
+用修好后的同一段代码重跑 `publish_artifact` + `grade_submission`，产物与
+将来原生跑出来的同构：
+
+```
+spooky  timed_out_scored  0.27628  铜牌  sha256 6c32380b0a525833...
+mlsp    timed_out_scored  0.88328  铜牌  sha256 c0351e017a77fef3...
+```
+
+原 `result.json` 备份为 `result.timed-out-unscored.json.bak` 保留证据。
+两格 artifact hash 与 result 记录一致（已核对）。
+
+**EAR 因此从"0 格有效"变成"2 格铜牌"**，jigsaw 那格仍是真失败（OOM
+exit 137，`agent-output` 无提交）。
+
+### 测试
+
+`test_mle_formal.py` 5 项 + `test_mle_formal_evidence.py` 2 项：
+救援成功给分、反作弊不放松、deadline 后不采纳、什么都没交仍记 0、
+grader 说了算、救援格子进成绩单、**篡改救援格子的 artifact 仍报
+`artifact hash mismatch`**（新状态不是绕过绑定的后门）。
+
+MLE 套件 46 项全过。全量 `BenchmarkAdapters/tests/` 失败数 81 项，与改动
+前完全一致（均为 `test_optimizer_design.py` 等无关套件的预存失败），
+通过数 225 → 232。

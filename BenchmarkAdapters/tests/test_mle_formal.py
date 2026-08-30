@@ -8,6 +8,8 @@ import pytest
 
 from BenchmarkAdapters.contracts import AdapterError
 from BenchmarkAdapters.formal_contract import ModelTrackConfig
+from BenchmarkAdapters.protocol import sha256_file
+from BenchmarkAdapters.records import RunStatus
 from BenchmarkAdapters.MLEBenchLite.aggregate import aggregate_seeds, calculate_seed_metrics
 from BenchmarkAdapters.MLEBenchLite.adapter import MleLiteAdapter, MleLiteRequest
 from BenchmarkAdapters.MLEBenchLite.campaign import (
@@ -702,3 +704,148 @@ def test_codex_is_told_that_a_bare_reply_ends_its_run(tmp_path):
     # Both still carry the same budget agreement.
     for prompt in prompts.values():
         assert "12 hours (43200 seconds)" in prompt
+
+
+def _timeout_cell(tmp_path: Path, monkeypatch, *, write_submission, grade_report=None):
+    """Drive one cell whose Agent is stopped by the harness after producing work.
+
+    ``write_submission(output_dir)`` stands in for the Agent: whatever it leaves
+    behind is what the timeout path finds. The grader is stubbed so these tests
+    exercise the rescue decision itself rather than MLE-Bench's scoring.
+    """
+    protocol = build_mle_protocol()
+    task_id = protocol.task_ids[0]
+    cell = MleCampaignCell("codex", task_id, 0, tmp_path / "cell")
+    for name in ("validate_mle_protocol", "verify_task_archive"):
+        monkeypatch.setattr(
+            f"BenchmarkAdapters.MLEBenchLite.campaign.{name}",
+            lambda *_args, **_kwargs: None,
+        )
+    monkeypatch.setattr(
+        "BenchmarkAdapters.MLEBenchLite.campaign._sample_hashes",
+        lambda request: {"csv:" + "s" * 64},
+    )
+
+    def stub_grade(*, competition_id, submission, data_root, report_path):
+        report = dict(grade_report or {"valid_submission": True, "score": 0.42})
+        report_path.parent.mkdir(parents=True, exist_ok=True)
+        report_path.write_text(json.dumps(report), encoding="utf-8")
+        if not report.get("valid_submission"):
+            raise AdapterError("official MLE grader rejected submission")
+
+        class _Grade:
+            pass
+
+        grade = _Grade()
+        grade.report = report
+        grade.report_path = report_path
+        return grade
+
+    monkeypatch.setattr("BenchmarkAdapters.MLEBenchLite.campaign.grade_submission", stub_grade)
+
+    def time_out_after_working(*, request, run_dir: Path, manifest, **_kwargs):
+        manifest.write(run_dir / "manifest.json")
+        request.output_dir.mkdir(parents=True, exist_ok=True)
+        write_submission(request.output_dir)
+        raise AdapterError("codex MLE-Bench Lite workspace agent timed out")
+
+    monkeypatch.setattr(
+        "BenchmarkAdapters.MLEBenchLite.campaign.run_formal_mle", time_out_after_working
+    )
+    return run_campaign_cell(
+        cell=cell,
+        protocol=protocol,
+        data_root=tmp_path,
+        formal=False,
+        model_config=_model_config(),
+    )
+
+
+def test_budget_exhaustion_does_not_discard_a_finished_submission(tmp_path, monkeypatch):
+    """Spending the whole budget is the job, not a reason to score zero.
+
+    The normal path publishes and grades after the Agent returns, so a harness
+    kill used to skip both and file a medal-winning submission as a zero. That
+    penalised exactly the Agents that searched for their full twelve hours while
+    scoring the ones that quit in six minutes.
+    """
+    result = _timeout_cell(
+        tmp_path,
+        monkeypatch,
+        write_submission=lambda out: (out / "submission.csv").write_text(
+            "id,target\n1,0.5\n", encoding="utf-8"
+        ),
+    )
+
+    assert result.status is RunStatus.TIMED_OUT_SCORED
+    assert result.score == 0.42
+    assert result.score_valid is True
+    assert len(result.artifact_sha256 or "") == 64
+    # The published artifact is the graded one, bound by hash like any other.
+    assert Path(result.artifact_path).name == "submission.csv"
+    assert sha256_file(Path(result.artifact_path)) == result.artifact_sha256
+    # The status still records that the Agent did not stop on its own.
+    assert "timed out" in result.failure_reason
+
+
+def test_rescue_does_not_relax_the_anti_cheat_check(tmp_path, monkeypatch):
+    """A sample handed back verbatim stays worthless whenever it is found."""
+    monkeypatch.setattr(
+        "BenchmarkAdapters.MLEBenchLite.campaign._file_signatures",
+        lambda path: {"csv:" + "s" * 64},
+    )
+    result = _timeout_cell(
+        tmp_path,
+        monkeypatch,
+        write_submission=lambda out: (out / "submission.csv").write_text(
+            "id,target\n1,0\n", encoding="utf-8"
+        ),
+    )
+
+    assert result.status is RunStatus.TIMED_OUT
+    assert result.score is None and result.score_valid is False
+
+
+def test_rescue_refuses_work_written_after_the_deadline(tmp_path, monkeypatch):
+    """A file that appears while the process is being killed is not a result.
+
+    The budget is the whole claim being measured. Something written past it was
+    never a submission the Agent stood behind inside its own time.
+    """
+
+    def write_late(out: Path) -> None:
+        path = out / "submission.csv"
+        path.write_text("id,target\n1,0.5\n", encoding="utf-8")
+        stamp = __import__("time").time() + 86400
+        __import__("os").utime(path, (stamp, stamp))
+
+    result = _timeout_cell(tmp_path, monkeypatch, write_submission=write_late)
+
+    assert result.status is RunStatus.TIMED_OUT
+    assert result.score is None
+    assert result.artifact_path is None
+
+
+def test_timeout_with_nothing_to_show_is_still_a_zero(tmp_path, monkeypatch):
+    """The rescue only recovers work that exists; it never invents a score."""
+    result = _timeout_cell(tmp_path, monkeypatch, write_submission=lambda out: None)
+
+    assert result.status is RunStatus.TIMED_OUT
+    assert result.score is None and result.score_valid is False
+    assert result.artifact_path is None
+
+
+def test_rescue_defers_to_the_official_grader(tmp_path, monkeypatch):
+    """If the grader refuses the file, the cell keeps its zero and says why."""
+    result = _timeout_cell(
+        tmp_path,
+        monkeypatch,
+        write_submission=lambda out: (out / "submission.csv").write_text(
+            "wrong,columns\n1,2\n", encoding="utf-8"
+        ),
+        grade_report={"valid_submission": False, "score": None},
+    )
+
+    assert result.status is RunStatus.TIMED_OUT
+    assert result.score is None
+    assert "rescue declined" in result.failure_reason

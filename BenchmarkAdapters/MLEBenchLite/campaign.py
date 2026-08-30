@@ -11,6 +11,7 @@ from dataclasses import dataclass, replace
 from pathlib import Path
 from typing import Any, Iterable, Mapping
 
+from ..artifacts import publish_artifact
 from ..contracts import AdapterError, require_formal_output_path
 from ..formal_contract import (
     ModelTrackConfig,
@@ -24,10 +25,16 @@ from ..registry import AGENT_RUNTIME_IMAGES, AGENTS, ROOT
 from ..run_logs import index_run
 from ..task_specs import task_spec_digest
 from ..thin_registry import require_clean_upstream_source
-from .adapter import MleLiteAdapter, MleLiteRequest
+from .adapter import (
+    MleLiteAdapter,
+    MleLiteRequest,
+    _file_signatures,
+    _sample_hashes,
+    submission_roots,
+)
 from .aggregate import aggregate_seeds, calculate_seed_metrics
 from .formal import FormalMleOutcome, collect_token_usage, run_formal_mle
-from .grading import GRADER_WORKER, metric_is_lower_better
+from .grading import GRADER_WORKER, grade_submission, metric_is_lower_better
 from .membership import (
     data_manifest_digest,
     load_lite_task_ids,
@@ -274,6 +281,60 @@ def build_manifest(
     )
 
 
+def _rescue_timed_out_submission(
+    *,
+    request: MleLiteRequest,
+    run_dir: Path,
+    deadline: float,
+) -> tuple[Path, str, dict[str, Any]] | None:
+    """Grade what a timed-out Agent had already produced, or return None.
+
+    ``run_formal_mle`` is a straight line: run the Agent, publish its submission
+    to ``artifacts/final/``, grade it. A timeout raises out of the first step, so
+    the other two never run -- and the failure path then looks for the artifact
+    in the very directory the skipped publish step was supposed to fill. It is
+    always empty, so the cell is recorded as a zero.
+
+    That penalty lands on exactly the Agents that used their budget. One that
+    stops after six minutes exits cleanly and is scored; one that searches for
+    the full twelve hours is stopped by the harness and scored nothing, even
+    with a medal-winning submission already on disk. That is a measurement
+    artefact, not a result, and it inverts the comparison it feeds.
+
+    So finish the skipped steps here. Nothing is relaxed to do it: the
+    submission still has to survive the same anti-cheat signatures, still has to
+    be published under its hash, and the official grader still decides whether
+    it counts. It additionally has to predate the deadline -- a file written
+    while the process was being killed was never a result the Agent stood behind
+    within its budget.
+    """
+    forbidden = _sample_hashes(request)
+    for root in submission_roots(request):
+        candidate = (root / "submission.csv").resolve()
+        if not candidate.is_file() or candidate.is_symlink():
+            continue
+        if candidate.stat().st_size <= 0 or candidate.stat().st_mtime > deadline:
+            continue
+        if not forbidden.isdisjoint(_file_signatures(candidate)):
+            continue
+        artifact = publish_artifact(candidate, run_dir / "artifacts/final/submission.csv")
+        # grade_submission raises when the grader rejects the file; the caller
+        # keeps its original failure status in that case, exactly as it would
+        # for a submission the normal path had rejected.
+        grade = grade_submission(
+            competition_id=request.competition_id,
+            submission=artifact.path,
+            data_root=request.data_root,
+            report_path=run_dir / "grading/competition_report.json",
+        )
+        return (
+            artifact.path,
+            artifact.sha256,
+            {**grade.report, "grader_report_file_sha256": sha256_file(grade.report_path)},
+        )
+    return None
+
+
 def run_campaign_cell(
     *,
     cell: MleCampaignCell,
@@ -332,6 +393,9 @@ def run_campaign_cell(
         image_pull_policy=AGENT_RUNTIME_IMAGES.get(cell.agent, (None, None))[1],
     )
     started = time.monotonic()
+    # A wall-clock twin of `started`: file mtimes are wall-clock, so deciding
+    # whether a submission predates the deadline needs a comparable origin.
+    started_wall = time.time()
     manifest = build_manifest(
         cell=cell,
         protocol=protocol,
@@ -376,10 +440,38 @@ def run_campaign_cell(
         except json.JSONDecodeError:
             metrics = {}
         failure_text = f"{type(exc).__name__}: {exc}"
+        timed_out = (
+            isinstance(exc, subprocess.TimeoutExpired) or "timed out" in failure_text.lower()
+        )
+        score: float | None = None
+        score_valid = False
         if artifact_sha256 is not None and report_path.is_file():
             status = RunStatus.INVALID_ARTIFACT
-        elif isinstance(exc, subprocess.TimeoutExpired) or "timed out" in failure_text.lower():
+        elif timed_out:
             status = RunStatus.TIMED_OUT
+            if artifact_sha256 is None:
+                try:
+                    rescued = _rescue_timed_out_submission(
+                        request=request,
+                        run_dir=cell.run_dir,
+                        deadline=started_wall + protocol.wall_clock_seconds,
+                    )
+                except Exception as rescue_exc:  # noqa: BLE001
+                    # A rescue that fails leaves the cell exactly as it was: the
+                    # grader refusing the file, or anything else going wrong
+                    # here, is not evidence of a score. Record why it was
+                    # refused so the zero can be explained.
+                    rescued = None
+                    failure_text = f"{failure_text}; rescue declined: {rescue_exc}"
+                if rescued is not None:
+                    artifact_path, artifact_sha256, metrics = rescued
+                    score = float(metrics["score"])
+                    score_valid = True
+                    status = RunStatus.TIMED_OUT_SCORED
+                    failure_text = (
+                        f"{failure_text}; submission written before the deadline was "
+                        f"graded by the official grader"
+                    )
         else:
             status = RunStatus.FAILED
         result = BenchmarkRunResult(
@@ -392,8 +484,8 @@ def run_campaign_cell(
             task_id=cell.task_id,
             seed=cell.seed,
             status=status,
-            score_valid=False,
-            score=None,
+            score_valid=score_valid,
+            score=score,
             metrics=metrics,
             artifact_path=str(artifact_path) if artifact_sha256 is not None else None,
             artifact_sha256=artifact_sha256,
@@ -539,7 +631,12 @@ def aggregate_campaign(protocol: FormalProtocol, campaign_dir: Path, agent: str)
             agent_commits.add(str(manifest.get("agent_commit", "")))
             hardware_fingerprints.add(hardware_comparison_fingerprint(hardware))
             status = str(result.get("status", ""))
-            if status != RunStatus.COMPLETED.value:
+            # A cell rescued after its deadline carries a real grader report and
+            # is verified exactly like a clean completion below -- same artifact
+            # hash binding, same report digest binding. It is scored, so it
+            # cannot take the failed-evidence branch, which would file its report
+            # as None and drop the score from the scorecard.
+            if status not in {RunStatus.COMPLETED.value, RunStatus.TIMED_OUT_SCORED.value}:
                 if not (
                     status
                     in {
