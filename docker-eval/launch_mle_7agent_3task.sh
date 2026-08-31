@@ -31,6 +31,7 @@ GPUS_PER_ROUND=${GPUS_PER_ROUND:-3}
 POLL_SECONDS=${POLL_SECONDS:-30}
 EXCLUDE_GPU_IDS=${EXCLUDE_GPU_IDS:-}
 START_ROUND=${START_ROUND:-1}
+AGENT_LIST=${AGENT_LIST:-"ear mlevolve arbor codex claude-code ml-master-2 ai-scientist"}
 
 RELAY_BASE_URL=${RELAY_BASE_URL:-http://127.0.0.1:6200/v1}
 
@@ -60,9 +61,7 @@ print(a + '@' + UPSTREAM_REVISIONS[a] if a in UPSTREAM_REVISIONS else a)
 "
 }
 
-declare -a AGENTS=(
-  "ear" "mlevolve" "arbor" "codex" "claude-code" "ml-master-2" "ai-scientist"
-)
+read -r -a AGENTS <<<"$AGENT_LIST"
 
 # Arbor 的 MLE 格只能经 patched variant 进入；原版 ID 会被直接拒绝。
 declare -A VARIANT_OVERRIDE=( ["arbor"]="arbor-benchmark-patched" )
@@ -303,6 +302,10 @@ main() {
   mkdir -p "$CAMPAIGN_DIR"
   printf '%s\n' "$$" > "$CAMPAIGN_DIR/controller.pid"
   TOTAL_ROUNDS=${#AGENTS[@]}
+  TOTAL_TASKS=$(( TOTAL_ROUNDS * ${#TASKS[@]} ))
+  if (( TOTAL_ROUNDS == 0 )); then
+    die 2 "AGENT_LIST 不能为空"
+  fi
   if ! [[ "$START_ROUND" =~ ^[1-9][0-9]*$ ]] || (( START_ROUND > TOTAL_ROUNDS )); then
     die 2 "START_ROUND 必须在 1..$TOTAL_ROUNDS 范围内，当前=$START_ROUND"
   fi
@@ -341,7 +344,7 @@ main() {
 
   if (( failed_rounds == 0 )); then
     emit_event campaign_finished status=completed total_rounds="$TOTAL_ROUNDS" failed_rounds=0
-    notify_group "[Arbor监控] campaign=$CAMPAIGN_ID 全部 $TOTAL_ROUNDS 轮完成，21 个任务格已结束；结果目录=$CAMPAIGN_DIR。"
+    notify_group "[Arbor监控] campaign=$CAMPAIGN_ID 全部 $TOTAL_ROUNDS 轮完成，$TOTAL_TASKS 个任务格已结束；结果目录=$CAMPAIGN_DIR。"
     FINAL_EVENT_SENT=1
     log "全部 $TOTAL_ROUNDS 轮结束。结果在 $CAMPAIGN_DIR"
   else
