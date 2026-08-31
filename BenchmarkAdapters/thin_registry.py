@@ -92,6 +92,25 @@ AGENT_VARIANTS = {
         benchmarks=("autoresearch-architecture", "optimizer-design"),
         implementation="ArchitectureDesignSubagent with benchmark candidate tools",
     ),
+    # Codex and Claude Code return as soon as they consider the task done, so a
+    # twelve-hour cell bought about half an hour of work. These variants keep the
+    # CLI itself untouched and drive it in a resume loop until the budget is
+    # spent. The distinction from an Agent that loops on its own is real, so it
+    # is carried in the variant key and therefore in every manifest.
+    "codex-budget-loop": AgentVariantSpec(
+        key="codex-budget-loop",
+        base_agent="codex",
+        display_name="Codex harness-driven budget loop",
+        benchmarks=("mle-bench-lite",),
+        implementation="harness-driven `codex exec resume` loop; the CLI is unmodified",
+    ),
+    "claude-code-budget-loop": AgentVariantSpec(
+        key="claude-code-budget-loop",
+        base_agent="claude-code",
+        display_name="Claude Code harness-driven budget loop",
+        benchmarks=("mle-bench-lite",),
+        implementation="harness-driven `claude --continue` loop; the CLI is unmodified",
+    ),
     "ml-master-autoresearch-variant": AgentVariantSpec(
         key="ml-master-autoresearch-variant",
         base_agent="ml-master-2",
@@ -139,6 +158,12 @@ VARIANT_BACKENDS = {
     "ai-scientist-architecture-variant": {
         "autoresearch-architecture": "native-ai-scientist-subagent",
         "optimizer-design": "optimizer-design-ai-scientist-subagent",
+    },
+    "codex-budget-loop": {
+        "mle-bench-lite": "generic-mle-workspace",
+    },
+    "claude-code-budget-loop": {
+        "mle-bench-lite": "generic-mle-workspace",
     },
     "ml-master-autoresearch-variant": {
         "autoresearch-architecture": "native-ml-master-2-workflow",

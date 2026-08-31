@@ -139,6 +139,10 @@ class ThinAdapterArchitectureTests(unittest.TestCase):
             "ai-scientist-terminal-variant",
             "ai-scientist-architecture-variant",
             "ml-master-autoresearch-variant",
+            # Same CLI, driven until its budget ends rather than once. The key is
+            # what carries that difference into every manifest.
+            "codex-budget-loop",
+            "claude-code-budget-loop",
         }
         self.assertEqual(set(self.thin.AGENT_VARIANTS), expected_variants)
         self.assertTrue(expected_variants.isdisjoint(self.registry.AGENTS))

@@ -385,6 +385,7 @@ def _workspace_sandbox_argv(
     *,
     relay_socket: Path,
     gpu_id: int | None = None,
+    budget_loop: tuple[str, ...] = (),
 ) -> tuple[str, ...]:
     bwrap = _required_executable("bwrap")
     benchmark_venv = require_directory(
@@ -519,6 +520,17 @@ def _workspace_sandbox_argv(
         str(relay_socket),
         "/relay/agent.sock",
     ]
+    if budget_loop:
+        argv.extend(
+            [
+                "--ro-bind",
+                str(require_file(
+                    ROOT / "BenchmarkAdapters/MLEBenchLite/cli_budget_loop.py",
+                    "sandbox CLI budget loop",
+                )),
+                "/relay/cli_budget_loop.py",
+            ]
+        )
     current = Path("/")
     for part in benchmark_python_home.parent.parts[1:]:
         current /= part
@@ -585,9 +597,13 @@ def _workspace_sandbox_argv(
             "--port",
             "6200",
             "--",
-            sandbox_executable,
         ]
     )
+    if budget_loop:
+        # The loop sits between the forwarder and the CLI: the relay is already
+        # up when the first pass starts and stays up across every later one.
+        argv.extend(["/benchmark-venv/bin/python", "/relay/cli_budget_loop.py", *budget_loop, "--"])
+    argv.append(sandbox_executable)
     argv.extend(command)
     return tuple(argv)
 
@@ -790,6 +806,12 @@ def _workspace_command(
 ) -> CommandSpec:
     if not request.model:
         raise AdapterError("MLE launcher requires an explicit model")
+    # A registered `*-budget-loop` variant is what turns a one-shot CLI into a
+    # cell that works for its whole budget. Selecting it here -- rather than from
+    # an environment flag -- is what puts the fact in the manifest, so a scored
+    # row always says whether its wall clock came from the Agent or from us.
+    variant = selected_variant(request.agent, "mle-bench-lite", request.agent_variant)
+    budget_loop = variant is not None and variant.key.endswith("-budget-loop")
     instruction = request.instruction or cli_harness_instruction(request.timeout_seconds)
     environment = relay_client_env(
         base_url="http://127.0.0.1:6200/v1",
@@ -850,9 +872,7 @@ def _workspace_command(
             "until you are genuinely finished, and write progress notes into a "
             "file in your working directory rather than into a bare reply.\n"
         )
-        native_argv = (
-            "exec",
-            "--ephemeral",
+        codex_flags = (
             "--skip-git-repo-check",
             # The cell already runs inside the host's Bubblewrap jail, and bwrap
             # is not reachable from within it, so Codex's own sandbox cannot
@@ -875,12 +895,20 @@ def _workspace_command(
             'model_providers.benchmark_relay.wire_api="responses"',
             "-c",
             "model_providers.benchmark_relay.requires_openai_auth=true",
+        )
+        # `--ephemeral` means "run without persisting session files to disk", so
+        # a resumed pass would find no session to resume. It stays on the
+        # single-shot path, which has no second pass to lose.
+        native_argv = (
+            "exec",
+            *(() if budget_loop else ("--ephemeral",)),
+            *codex_flags,
             codex_instruction,
         )
+        resume_argv = (str(executable), "exec", "resume", "--last", *codex_flags)
     elif request.agent == "claude-code":
         executable = _required_executable("claude")
-        native_argv = (
-            "--print",
+        claude_flags = (
             # No --no-session-persistence and no imposed --output-format: Claude
             # Code writes its own session transcript under $HOME/.claude, exactly
             # as it does outside this harness. Keeping that is strictly weaker
@@ -894,11 +922,29 @@ def _workspace_command(
             "bypassPermissions",
             "--max-turns",
             str(request.max_turns),
-            instruction,
         )
+        native_argv = ("--print", *claude_flags, instruction)
+        resume_argv = (str(executable), "--print", "--continue", *claude_flags)
     else:
         raise UnsupportedAdapterError(
             f"{request.agent} does not use the generic MLE workspace adapter"
+        )
+    loop_argv: tuple[str, ...] = ()
+    if budget_loop:
+        # Paths here are the sandbox's, not the host's: the loop resolves them
+        # from inside the jail where /workspace is the Agent's own directory.
+        loop_argv = (
+            "--budget-seconds",
+            str(request.timeout_seconds),
+            "--submission",
+            "/workspace/submission.csv",
+            "--journal",
+            "/workspace/budget-loop.jsonl",
+            "--resume-command",
+            json.dumps(
+                [f"/agent-bin/{executable.name}" if part == str(executable) else part
+                 for part in resume_argv]
+            ),
         )
     argv = (
         (str(_required_executable("bwrap")), "<sandbox-options>", str(executable), *native_argv)
@@ -909,6 +955,7 @@ def _workspace_command(
             native_argv,
             relay_socket=request.relay_socket,
             gpu_id=request.gpu_id,
+            budget_loop=loop_argv,
         )
     )
     return CommandSpec(
@@ -1203,11 +1250,16 @@ class MleLiteAdapter:
         )
         mode = AGENTS[self.agent].mle_mode
         if variant is not None:
-            if variant.key != "arbor-benchmark-patched":
+            if variant.key == "arbor-benchmark-patched":
+                mode = "native-docker"
+            elif variant.key.endswith("-budget-loop"):
+                # Same workspace adapter as the single-shot cell; the variant only
+                # decides whether the CLI is driven once or until its budget ends.
+                mode = "generic-mle-workspace"
+            else:
                 raise UnsupportedAdapterError(
                     f"{variant.key} has no MLE-Bench Lite implementation"
                 )
-            mode = "native-docker"
         if mode == "native-docker":
             if self.agent == "arbor" and selected_variant(
                 self.agent, "mle-bench-lite", request.agent_variant

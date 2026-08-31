@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import itertools
 import json
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -849,3 +851,159 @@ def test_rescue_defers_to_the_official_grader(tmp_path, monkeypatch):
     assert result.status is RunStatus.TIMED_OUT
     assert result.score is None
     assert "rescue declined" in result.failure_reason
+
+
+def _loop_module():
+    from BenchmarkAdapters.MLEBenchLite import cli_budget_loop
+
+    return cli_budget_loop
+
+
+def _fake_cli(tmp_path: Path, *, exit_code: int = 0, sleep_seconds: float = 0.05) -> list[str]:
+    """A stand-in CLI that records each call and returns, like the real ones do."""
+    script = tmp_path / "fake_cli.py"
+    script.write_text(
+        "import sys, time, pathlib\n"
+        f"counter = pathlib.Path({str(tmp_path / 'calls')!r})\n"
+        "counter.write_text(str(int(counter.read_text()) + 1) if counter.exists() else '1')\n"
+        f"pathlib.Path({str(tmp_path / 'submission.csv')!r}).write_text(counter.read_text())\n"
+        f"time.sleep({sleep_seconds})\n"
+        f"sys.exit({exit_code})\n",
+        encoding="utf-8",
+    )
+    return [sys.executable, str(script)]
+
+
+def _run_loop(tmp_path: Path, monkeypatch, *, budget: float, argv: list[str]):
+    module = _loop_module()
+    monkeypatch.setattr(module, "_PUBLISH_GRACE_SECONDS", 0.5)
+    monkeypatch.setattr(module, "_MINIMUM_PASS_SECONDS", 0.1)
+    return module.run_budget_loop(
+        first_argv=argv,
+        resume_argv=argv,
+        budget_seconds=budget,
+        submission_path=tmp_path / "submission.csv",
+        journal_path=tmp_path / "budget-loop.jsonl",
+    )
+
+
+def test_the_loop_keeps_working_while_budget_remains(tmp_path, monkeypatch):
+    """A CLI that returns early is resumed, not treated as finished.
+
+    Codex and Claude Code sign off once they consider the task done, which ended
+    twelve-hour cells in about half an hour. Telling them about the budget moved
+    that from 388s to 1905s but could not remove the "done" state their
+    architecture has, so the loop supplies the persistence instead.
+    """
+    argv = _fake_cli(tmp_path)
+    assert _run_loop(tmp_path, monkeypatch, budget=3.0, argv=argv) == 0
+
+    calls = int((tmp_path / "calls").read_text())
+    assert calls > 1
+
+    records = [
+        json.loads(line)
+        for line in (tmp_path / "budget-loop.jsonl").read_text().splitlines()
+        if line.strip()
+    ]
+    assert len(records) == calls
+    assert [record["pass"] for record in records] == list(range(1, calls + 1))
+    # Every pass is auditable: which submission it left behind, and why it ended.
+    assert all(len(record["submission_sha256"]) == 64 for record in records)
+
+
+def test_the_loop_stops_at_the_budget_and_not_after(tmp_path, monkeypatch):
+    """The budget is the whole claim, so the loop may not overrun it."""
+    argv = _fake_cli(tmp_path)
+    started = time.monotonic()
+    _run_loop(tmp_path, monkeypatch, budget=2.0, argv=argv)
+    assert time.monotonic() - started < 4.0
+
+
+def test_a_failing_cli_stops_the_loop_instead_of_spinning(tmp_path, monkeypatch):
+    """Repeated failures end the cell rather than burn the budget on restarts."""
+    argv = _fake_cli(tmp_path, exit_code=1)
+    _run_loop(tmp_path, monkeypatch, budget=30.0, argv=argv)
+
+    module = _loop_module()
+    assert int((tmp_path / "calls").read_text()) == module._MAX_CONSECUTIVE_FAILURES
+
+
+def test_the_continuation_prompt_suggests_no_technique():
+    """The loop supplies persistence, never ideas.
+
+    Naming an approach here -- ensembling, tuning, a bigger model -- would put
+    our judgement inside the Agent's score, which is exactly what this
+    comparison is trying to measure about the Agent itself.
+    """
+    prompt = _loop_module().continuation_prompt(30000).lower()
+
+    for technique in (
+        "ensemble",
+        "tune",
+        "tuning",
+        "hyperparameter",
+        "feature",
+        "model architecture",
+        "cross-validation",
+        "gradient",
+        "transformer",
+        "n-gram",
+    ):
+        assert technique not in prompt
+    assert "8.3 hours" in prompt
+
+
+def test_only_the_loop_variant_changes_how_the_cli_is_driven(tmp_path):
+    """The default cell stays exactly as it was; the variant is the whole switch.
+
+    A run recorded as `codex` and one recorded as `codex-budget-loop` differ in
+    where the wall clock came from, so that distinction has to live in the
+    manifest rather than in whoever remembers how a directory was launched.
+    """
+    import socket
+
+    data_root = Path.home() / ".cache/mle-bench/data"
+    if not (data_root / "spooky-author-identification/prepared/public").is_dir():
+        pytest.skip("prepared MLE-Bench data is not available")
+
+    relay_socket = tmp_path / "relay.sock"
+    listener = socket.socket(socket.AF_UNIX)
+    listener.bind(str(relay_socket))
+
+    counter = itertools.count()
+
+    def argv_for(agent: str, variant: str) -> list[str]:
+        request = MleLiteRequest(
+            agent=agent,
+            competition_id="spooky-author-identification",
+            data_root=data_root,
+            output_dir=tmp_path / f"{agent}-{variant}-{next(counter)}",
+            model="test-model",
+            timeout_seconds=43200,
+            agent_variant=variant,
+            max_turns=1000,
+            relay_socket=relay_socket,
+        )
+        return list(MleLiteAdapter(agent).build_command(request).argv)
+
+    for agent, variant in (("codex", "codex-budget-loop"), ("claude-code", "claude-code-budget-loop")):
+        default_argv = argv_for(agent, "default")
+        loop_argv = argv_for(agent, variant)
+
+        assert not any("cli_budget_loop" in part for part in default_argv)
+        assert any("cli_budget_loop" in part for part in loop_argv)
+
+        # The resume command must name the executable by its in-sandbox path, or
+        # every pass after the first would fail to start.
+        # The resume command must name the executable by the same in-sandbox path
+        # the first pass uses, or every later pass would fail to start.
+        resume = json.loads(loop_argv[loop_argv.index("--resume-command") + 1])
+        first_pass_executable = loop_argv[loop_argv.index("--", loop_argv.index("--resume-command")) + 1]
+        assert resume[0].startswith("/agent-bin/")
+        assert resume[0] == first_pass_executable
+
+    # `--ephemeral` discards the session the next pass needs to resume, so it is
+    # only ever set on the single-shot path.
+    assert "--ephemeral" in argv_for("codex", "default")
+    assert "--ephemeral" not in argv_for("codex", "codex-budget-loop")

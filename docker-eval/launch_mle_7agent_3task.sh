@@ -64,7 +64,13 @@ print(a + '@' + UPSTREAM_REVISIONS[a] if a in UPSTREAM_REVISIONS else a)
 read -r -a AGENTS <<<"$AGENT_LIST"
 
 # Arbor 的 MLE 格只能经 patched variant 进入；原版 ID 会被直接拒绝。
-declare -A VARIANT_OVERRIDE=( ["arbor"]="arbor-benchmark-patched" )
+# codex/claude-code return as soon as they consider the task done, so their
+# cells are driven by the harness loop variant to use the declared budget.
+declare -A VARIANT_OVERRIDE=(
+  ["arbor"]="arbor-benchmark-patched"
+  ["codex"]="codex-budget-loop"
+  ["claude-code"]="claude-code-budget-loop"
+)
 
 declare -a TASKS=(
   "spooky-author-identification"
