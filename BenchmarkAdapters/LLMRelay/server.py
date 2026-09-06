@@ -95,6 +95,9 @@ if MAX_UPSTREAM_CALLS is not None and MAX_UPSTREAM_CALLS < 1:
     raise RuntimeError("LLM_MAX_UPSTREAM_CALLS must be positive")
 AGENT_NAME = os.environ.get("LLM_PROXY_AGENT_NAME", "unknown")
 INBOUND_API_KEY = os.environ.get("LLM_PROXY_API_KEY", "proxy")
+# Existing campaign processes retain their client credential across rotations.
+_previous_inbound_key = os.environ.get("LLM_PROXY_PREVIOUS_API_KEY", "")
+INBOUND_API_KEYS = frozenset(key for key in (INBOUND_API_KEY, _previous_inbound_key) if key)
 # Escape hatch, off by default: force every client onto the single upstream
 # protocol named by LLM_UPSTREAM_API, translating whatever does not match. That
 # is what the relay always used to do, and it is why tools went missing. Keep it
@@ -1205,11 +1208,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def _authorized(self) -> bool:
-        expected = f"Bearer {INBOUND_API_KEY}"
-        if (
-            self.headers.get("Authorization") == expected
-            or self.headers.get("x-api-key") == INBOUND_API_KEY
-            or self.headers.get("api-key") == INBOUND_API_KEY
+        if any(
+            self.headers.get("Authorization") == f"Bearer {key}"
+            or self.headers.get("x-api-key") == key
+            or self.headers.get("api-key") == key
+            for key in INBOUND_API_KEYS
         ):
             return True
         self._send_json(401, {"error": {"message": "invalid relay credential"}})

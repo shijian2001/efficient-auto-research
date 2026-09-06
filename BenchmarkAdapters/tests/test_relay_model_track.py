@@ -51,6 +51,30 @@ def _handler(module):
     return handler, responses
 
 
+@pytest.mark.parametrize("header", ["Authorization", "x-api-key", "api-key"])
+def test_relay_key_rotation_accepts_existing_campaign_clients(monkeypatch, tmp_path, header):
+    monkeypatch.setenv("LLM_PROXY_API_KEY", "new-client-key")
+    monkeypatch.setenv("LLM_PROXY_PREVIOUS_API_KEY", "previous-client-key")
+    relay = _relay(monkeypatch, tmp_path)
+    for key in ("new-client-key", "previous-client-key"):
+        handler, responses = _handler(relay)
+        handler.headers = {header: f"Bearer {key}" if header == "Authorization" else key}
+        assert handler._authorized() is True
+        assert responses == []
+    assert relay.UPSTREAM_API_KEY == "test-key"
+
+
+def test_relay_rejects_previous_key_when_rotation_is_disabled(monkeypatch, tmp_path):
+    monkeypatch.setenv("LLM_PROXY_API_KEY", "new-client-key")
+    monkeypatch.delenv("LLM_PROXY_PREVIOUS_API_KEY", raising=False)
+    relay = _relay(monkeypatch, tmp_path)
+    for key in ("previous-client-key", "", "unknown"):
+        handler, responses = _handler(relay)
+        handler.headers = {"Authorization": f"Bearer {key}"}
+        assert handler._authorized() is False
+        assert responses[0][0] == 401
+
+
 def test_relay_strips_all_client_generation_parameters(monkeypatch, tmp_path: Path) -> None:
     relay = _relay(monkeypatch, tmp_path)
     rewritten = relay._rewrite_body(
