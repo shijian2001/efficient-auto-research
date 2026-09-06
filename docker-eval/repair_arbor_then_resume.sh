@@ -20,14 +20,7 @@ STATE_FILE="$CAMPAIGN_DIR/priority-arbor-repair.json"
 tr '\0' '\n' < "/proc/$CONTROLLER_PID/cmdline" | \
   rg -q -x -F "$ROOT/docker-eval/launch_mle_7agent_3task.sh"
 [[ "$(readlink "/proc/$CONTROLLER_PID/cwd")" == "$ROOT" ]]
-"$ADAPTER_PY" - "$CONTROLLER_PID" "$CAMPAIGN_DIR" <<'PY'
-from pathlib import Path
-import sys
-pid, expected = sys.argv[1:]
-entries = Path(f"/proc/{pid}/environ").read_bytes().split(b"\0")
-environment = dict(entry.decode().split("=", 1) for entry in entries if b"=" in entry)
-assert environment.get("CAMPAIGN_DIR") == expected, "controller belongs to a different campaign"
-PY
+[[ "$(tr -d '[:space:]' < "$CAMPAIGN_DIR/controller.pid")" == "$CONTROLLER_PID" ]]
 CONTROLLER_START=$(awk '{print $22}' "/proc/$CONTROLLER_PID/stat")
 [[ "$(awk '{print $3}' "/proc/$CONTROLLER_PID/stat")" != T ]]
 
