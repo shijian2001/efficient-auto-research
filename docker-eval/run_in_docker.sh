@@ -151,7 +151,7 @@ fi
 # 冒烟测试需要快速失败时可用 MLE_EXEC_TIMEOUT 覆盖 MLEvolve。
 MLE_EXEC_TIMEOUT=${MLE_EXEC_TIMEOUT:-}
 
-CLASH_PROXY=${CLASH_PROXY:-http://127.0.0.1:17892}
+CLASH_PROXY=http://127.0.0.1:17892
 LLM_UPSTREAM_PROXY=${LLM_UPSTREAM_PROXY-$CLASH_PROXY}
 EAR=${EAR_ROOT:-$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)}
 ROOT=${HOST_ROOT:-$(dirname "$EAR")}
@@ -823,7 +823,10 @@ fi
 #   OPENAI_BASE_URL / OPENAI_API_BASE → 本地代理 (openai sdk / litellm / aider 都认)
 #   NO_PROXY 含 127.0.0.1 → agent 到代理的流量不走 Clash；代理到 relay 直连 (trust_env=False)
 #   HTTP(S)_PROXY 保留 → HF 下模型仍走 Clash
+PYTHONPATH="$EAR${PYTHONPATH:+:$PYTHONPATH}" "$RELAY_PYTHON" -c \
+  'from BenchmarkAdapters.MLEBenchLite.network import main; main()' "$CONTAINER_IMAGE"
 docker run "${DOCKER_RUN_FLAGS[@]}" "${EXTRA_DOCKER_FLAGS[@]}" \
+  --pull=never \
   --add-host "$RELAY_CONTAINER_HOST:host-gateway" \
   --device "$GPU_DEVICE":/dev/nvidia0 \
   --device /dev/nvidiactl:/dev/nvidiactl \
@@ -845,6 +848,10 @@ docker run "${DOCKER_RUN_FLAGS[@]}" "${EXTRA_DOCKER_FLAGS[@]}" \
   -e CUDA_VISIBLE_DEVICES=0 \
   -e HTTP_PROXY=${CONTAINER_HTTP_PROXY} \
   -e HTTPS_PROXY=${CONTAINER_HTTP_PROXY} \
+  -e http_proxy=${CONTAINER_HTTP_PROXY} \
+  -e https_proxy=${CONTAINER_HTTP_PROXY} \
+  -e ALL_PROXY=${CONTAINER_HTTP_PROXY} \
+  -e all_proxy=${CONTAINER_HTTP_PROXY} \
   -e NO_PROXY="localhost,127.0.0.1,$RELAY_CONTAINER_HOST" \
   -e no_proxy="localhost,127.0.0.1,$RELAY_CONTAINER_HOST" \
   -e OPENAI_API_KEY="$RELAY_API_KEY" \

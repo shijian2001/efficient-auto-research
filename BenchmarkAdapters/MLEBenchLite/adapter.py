@@ -32,6 +32,13 @@ from ..LLMRelay import RelayProcess
 from ..registry import AGENTS, ROOT
 from ..task_specs import task_spec_digest, task_spec_text
 from ..thin_registry import require_clean_upstream_source, require_thin_support, selected_variant
+from .network import (
+    MLE_PROXY,
+    agent_download_proxy,
+    check_proxy,
+    proxy_environment,
+    upstream_proxy,
+)
 
 
 @dataclass(frozen=True)
@@ -61,6 +68,7 @@ class MleLiteRequest:
     runtime_image: str | None = None
     image_pull_policy: str | None = None
     official_llm_profile: str | None = None
+    download_proxy: str = MLE_PROXY
 
 
 @dataclass(frozen=True)
@@ -724,7 +732,8 @@ def _docker_command(request: MleLiteRequest) -> CommandSpec:
             "MODEL": request.model,
             "RUN_TAG": run_tag,
             "UPSTREAM_BASE_URL": request.upstream_base_url,
-            "LLM_UPSTREAM_PROXY": request.proxy,
+            "LLM_UPSTREAM_PROXY": upstream_proxy(request.upstream_base_url),
+            "CLASH_PROXY": MLE_PROXY,
             "LLM_FORCE_PARAMETERS_JSON": json.dumps(request.model_parameters, sort_keys=True),
             "LLM_UPSTREAM_TIMEOUT": (
                 ""
@@ -815,7 +824,7 @@ def _workspace_command(
     instruction = request.instruction or cli_harness_instruction(request.timeout_seconds)
     environment = relay_client_env(
         base_url="http://127.0.0.1:6200/v1",
-        proxy="",
+        proxy=request.download_proxy,
         model=request.model,
         include_credentials=False,
     )
@@ -839,6 +848,7 @@ def _workspace_command(
             "ANTHROPIC_API_KEY": "proxy",
         }
     )
+    environment.update(proxy_environment(request.download_proxy))
     if not preview:
         gpu_uuid = subprocess.run(
             [
@@ -1079,7 +1089,7 @@ def _ai_scientist_command(request: MleLiteRequest) -> CommandSpec:
     )
     environment = relay_client_env(
         base_url="http://127.0.0.1:6200/v1",
-        proxy="",
+        proxy=request.download_proxy,
         model=request.model,
         include_credentials=False,
     )
@@ -1096,6 +1106,7 @@ def _ai_scientist_command(request: MleLiteRequest) -> CommandSpec:
             "DOCKER_HOST": "unix:///run/docker.sock",
         }
     )
+    environment.update(proxy_environment(request.download_proxy))
     if request.official_llm_profile is None:
         # `--llm-profile-file` only sets AISCI_LLM_PROFILE_FILE inside the CLI
         # process (aisci_app/cli.py:79). The MLE workflow runs its phases in
@@ -1159,7 +1170,7 @@ def _ml_master_command(request: MleLiteRequest) -> CommandSpec:
     )
     environment = relay_client_env(
         base_url="http://127.0.0.1:6200/v1",
-        proxy="",
+        proxy=request.download_proxy,
         model=request.model,
         include_credentials=False,
     )
@@ -1194,6 +1205,7 @@ def _ml_master_command(request: MleLiteRequest) -> CommandSpec:
             "BENCHMARK_TASK_SPEC_SHA256": task_spec_digest("mle-bench-lite"),
         }
     )
+    environment.update(proxy_environment(request.download_proxy))
     wrapper_argv = (
              str(ROOT / "BenchmarkAdapters/.venv/bin/python"),
             str(Path(__file__).with_name("native_wrappers.py")),
@@ -1289,6 +1301,7 @@ class MleLiteAdapter:
         raise UnsupportedAdapterError(f"no MLE-Bench Lite adapter for {self.agent}")
 
     def run(self, request: MleLiteRequest, *, log_path: Path | None = None) -> Path:
+        check_proxy()
         roots = submission_roots(request)
         previous = _submission_snapshot(*roots)
         forbidden_hashes = _sample_hashes(request)
@@ -1300,7 +1313,10 @@ class MleLiteAdapter:
         )
         if not native_docker:
             output_dir = protect_generated_output(request.output_dir, ROOT)
-            with tempfile.TemporaryDirectory(prefix="mle-agent-relay-") as temporary:
+            with (
+                tempfile.TemporaryDirectory(prefix="mle-agent-relay-") as temporary,
+                agent_download_proxy() as download_proxy,
+            ):
                 socket_path = Path(temporary) / "relay.sock"
                 relay = RelayProcess(
                     agent=request.agent,
@@ -1308,14 +1324,16 @@ class MleLiteAdapter:
                     token_log_path=output_dir / "token_usage.jsonl",
                     unix_socket=socket_path,
                     upstream_base_url=request.upstream_base_url,
-                    upstream_proxy=request.proxy,
+                    upstream_proxy=upstream_proxy(request.upstream_base_url),
                     model=request.model,
                     model_parameters=request.model_parameters,
                     request_timeout_seconds=request.request_timeout_seconds,
                     retry_policy=request.retry_policy,
                 )
                 with relay:
-                    command = self.build_command(replace(request, relay_socket=socket_path))
+                    command = self.build_command(replace(
+                        request, relay_socket=socket_path, download_proxy=download_proxy,
+                    ))
                     result = run_command(command, log_path=log_path)
         else:
             command = self.build_command(request)

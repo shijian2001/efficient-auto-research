@@ -26,6 +26,32 @@ canonical adapter source.
 
 ## Quick Start
 
+The seven-Agent MLE campaign requires the host HTTP proxy at
+`http://127.0.0.1:17892`. All MLE launchers use it for external downloads;
+localhost LLM relay requests remain local. The four bwrap-based Agents receive
+a per-run Docker-bridge TCP forwarder to this proxy, which also works for
+AiScientist's nested containers. Public/private data mounts are unchanged.
+
+Start the dedicated proxied model relay before launching the campaign:
+
+```bash
+bash docker-eval/install_crane.sh
+bash docker-eval/start_mle_host_relay.sh
+```
+
+The relay reads credentials from `~/.mle_relay_env`, listens on `127.0.0.1:6201`,
+and sends upstream model requests through port 17892. The existing port-6200
+relay can continue serving older runs. The model-track JSON selects port 6201
+for newly launched cells, including cells in an already-running campaign.
+
+Missing Docker images are downloaded through 17892 using pinned `crane`, then
+imported with `docker load`; `docker run --pull=never` prevents a fallback to an
+unproxied daemon download. This does not change or restart the shared Docker
+daemon. AiScientist's locally built `aisci-mle:test` image must still exist as
+required by its `never` pull policy. The proxy is checked before each new MLE
+cell; an unavailable proxy stops that cell instead of falling back to direct
+downloads. Existing running Agents keep their original environment.
+
 ```bash
 cd /mnt/sdc/shijianwang/efficient-agent-research/docker-eval
 

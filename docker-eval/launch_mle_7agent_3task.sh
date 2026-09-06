@@ -41,7 +41,10 @@ AGENT_LIST=${AGENT_LIST:-"ear mlevolve arbor codex claude-code ml-master-2 ai-sc
 # 已完成的第一批 7×3。空字符串表示一张都不跳。
 SKIP_TASKS=${SKIP_TASKS:-"spooky-author-identification jigsaw-toxic-comment-classification-challenge mlsp-2013-birds"}
 
-RELAY_BASE_URL=${RELAY_BASE_URL:-http://127.0.0.1:6200/v1}
+RELAY_BASE_URL=${RELAY_BASE_URL:-http://127.0.0.1:6201/v1}
+export HTTP_PROXY=http://127.0.0.1:17892 HTTPS_PROXY=http://127.0.0.1:17892
+export http_proxy=$HTTP_PROXY https_proxy=$HTTPS_PROXY ALL_PROXY=$HTTP_PROXY all_proxy=$HTTP_PROXY
+export NO_PROXY=localhost,127.0.0.1,::1 no_proxy=localhost,127.0.0.1,::1
 
 # 通知：事件先落盘，再通过本机 MetaBot bridge 投递到当前群聊。
 # 关闭通知只需设置 NOTIFY_ENABLED=0；事件文件仍会保留。
@@ -350,6 +353,7 @@ main() {
   [ -f "$PROTOCOL" ] || die 2 "缺少协议: $PROTOCOL"
   [ -f "$MODEL_CONFIG" ] || die 2 "缺少 model-track: $MODEL_CONFIG"
   [ -x "$ADAPTER_PY" ] || die 2 "缺少 adapter runtime: $ADAPTER_PY"
+  "$ADAPTER_PY" -c 'from BenchmarkAdapters.MLEBenchLite.network import check_proxy; check_proxy()' || die 2 "MLE proxy 17892 is unavailable"
   load_tasks_from_protocol "$PROTOCOL"
   if (( ${#AGENTS[@]} == 0 )); then
     die 2 "AGENT_LIST 不能为空"

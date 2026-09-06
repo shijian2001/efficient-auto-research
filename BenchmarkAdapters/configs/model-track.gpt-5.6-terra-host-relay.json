@@ -5,7 +5,7 @@
   },
   "model_track_id": "gpt-5.6-terra-high-t1-4090-host-relay",
   "outer_model_id": "gpt-5.6-terra",
-  "relay_base_url": "http://127.0.0.1:6200/v1",
+  "relay_base_url": "http://127.0.0.1:6201/v1",
   "request_timeout_seconds": 600,
   "retry_policy": {
     "max_retries": 20

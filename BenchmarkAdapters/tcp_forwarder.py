@@ -28,6 +28,8 @@ class _Handler(socketserver.BaseRequestHandler):
                             pass
                     else:
                         destination.sendall(chunk)
+        except (ConnectionResetError, BrokenPipeError):
+            pass
         finally:
             selector.close()
             upstream.close()
