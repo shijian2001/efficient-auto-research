@@ -306,6 +306,7 @@ done
 if [ "$LLM_SKIP_UPSTREAM_READY" != "1" ]; then
   RELAY_PROBE_HOST=$RELAY_BIND_HOST RELAY_PROBE_PORT=$PROXY_PORT \
   RELAY_PROBE_MODEL=$MODEL RELAY_PROBE_KEY=$RELAY_API_KEY \
+  RELAY_PROBE_TIMEOUT=${LLM_UPSTREAM_TIMEOUT:-600} \
   "$RELAY_PYTHON" - <<'PY' || { echo "LLM upstream unavailable; see $HOST_RELAY_LOG" >&2; exit 1; }
 import json
 import os
@@ -323,7 +324,8 @@ request = urllib.request.Request(
         'Content-Type': 'application/json',
     },
 )
-with opener.open(request, timeout=120) as response:
+# Allow the configured upstream request and its transient-service retries to finish.
+with opener.open(request, timeout=max(120, float(os.environ['RELAY_PROBE_TIMEOUT']))) as response:
     if response.status != 200:
         raise SystemExit(response.status)
 PY

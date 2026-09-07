@@ -22,7 +22,21 @@ tr '\0' '\n' < "/proc/$CONTROLLER_PID/cmdline" | \
 [[ "$(readlink "/proc/$CONTROLLER_PID/cwd")" == "$ROOT" ]]
 [[ "$(tr -d '[:space:]' < "$CAMPAIGN_DIR/controller.pid")" == "$CONTROLLER_PID" ]]
 CONTROLLER_START=$(awk '{print $22}' "/proc/$CONTROLLER_PID/stat")
-[[ "$(awk '{print $3}' "/proc/$CONTROLLER_PID/stat")" != T ]]
+if [[ "$(awk '{print $3}' "/proc/$CONTROLLER_PID/stat")" == T ]]; then
+  "$ADAPTER_PY" - "$STATE_FILE" "$CONTROLLER_PID" "$CONTROLLER_START" <<'PY'
+import json, sys
+from pathlib import Path
+path, pid, start = sys.argv[1:]
+previous = json.loads(Path(path).read_text())
+assert previous["original_controller_pid"] == int(pid)
+assert previous["original_controller_start_ticks"] == start
+assert previous["status"] in {
+    "arbor_failed_original_controller_stays_paused",
+    "invalid_arbor_results_original_controller_stays_paused",
+    "interrupted_original_controller_stays_paused",
+}, "the paused controller is not awaiting a failed repair retry"
+PY
+fi
 
 exec 9>"$CAMPAIGN_DIR/priority-arbor-repair.lock"
 flock -n 9
@@ -58,6 +72,13 @@ payload = {
     "policy": "resume original controller only after all three Arbor results are valid",
 }
 target = Path(path)
+if target.exists():
+    previous = json.loads(target.read_text())
+    history = previous.get("previous_repair_campaigns", [])
+    old_repair = previous.get("repair_campaign")
+    if old_repair and old_repair != repair and old_repair not in history:
+        history.append(old_repair)
+    payload["previous_repair_campaigns"] = history
 temporary = target.with_suffix(".tmp")
 temporary.write_text(json.dumps(payload, indent=2) + "\n")
 os.replace(temporary, target)

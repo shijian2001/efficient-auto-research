@@ -1,5 +1,6 @@
 from pathlib import Path
 import subprocess
+import urllib.request
 
 import pytest
 
@@ -86,3 +87,35 @@ def test_missing_image_is_pulled_through_proxy_then_loaded(tmp_path, monkeypatch
     calls.clear()
     network.ensure_image("example/image:test")
     assert len(calls) == 1
+
+
+@pytest.mark.parametrize("upstream_timeout,expected", [("600", 600), ("1800", 1800), ("30", 120)])
+def test_docker_readiness_allows_upstream_request_to_finish(monkeypatch, upstream_timeout, expected):
+    launcher = (Path(__file__).resolve().parents[2] / "docker-eval/run_in_docker.sh").read_text()
+    probe = launcher.split('if [ "$LLM_SKIP_UPSTREAM_READY" != "1" ]; then', 1)[1]
+    probe = probe.split("\nimport json\n", 1)[1].split("\nPY\n", 1)[0]
+    for name, value in {
+        "RELAY_PROBE_HOST": "127.0.0.1",
+        "RELAY_PROBE_PORT": "6201",
+        "RELAY_PROBE_MODEL": "test-model",
+        "RELAY_PROBE_KEY": "test-token",
+        "RELAY_PROBE_TIMEOUT": upstream_timeout,
+    }.items():
+        monkeypatch.setenv(name, value)
+
+    class Response:
+        status = 200
+
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            pass
+
+    class Opener:
+        def open(self, request, timeout):
+            assert timeout == expected
+            return Response()
+
+    monkeypatch.setattr(urllib.request, "build_opener", lambda *args: Opener())
+    exec("import json\n" + probe, {})
