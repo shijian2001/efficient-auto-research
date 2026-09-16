@@ -424,7 +424,10 @@ def _formal_autoresearch_hardware(
 
 @contextmanager
 def _exclusive_gpu_lock(gpu_id: str, *, task_name: str = "Autoresearch"):
-    lock_path = Path(f"/tmp/efficient-auto-research-gpu-{gpu_id}.lock")
+    default_root = Path(__file__).resolve().parents[1] / ".runtime"
+    lock_root = Path(os.environ.get("MLE_RUNTIME_ROOT", str(default_root))) / "gpu-locks"
+    lock_root.mkdir(parents=True, exist_ok=True)
+    lock_path = lock_root / f"efficient-auto-research-gpu-{gpu_id}.lock"
     with lock_path.open("a+", encoding="utf-8") as handle:
         try:
             fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)

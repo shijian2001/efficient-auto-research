@@ -12,6 +12,13 @@ from typing import Iterator
 from .contracts import AdapterError
 
 
+def _gpu_lock_path(gpu_id: str) -> Path:
+    default_root = Path(__file__).resolve().parents[1] / ".runtime"
+    root = Path(os.environ.get("MLE_RUNTIME_ROOT", str(default_root))) / "gpu-locks"
+    root.mkdir(parents=True, exist_ok=True)
+    return root / f"efficient-auto-research-gpu-{gpu_id}.lock"
+
+
 @contextmanager
 def gpu_allocation(
     gpu_ids: tuple[str, ...],
@@ -34,7 +41,7 @@ def gpu_allocation(
         )
     with ExitStack() as stack:
         for gpu_id in sorted(gpu_ids, key=int):
-            lock_path = Path(f"/tmp/efficient-auto-research-gpu-{gpu_id}.lock")
+            lock_path = _gpu_lock_path(gpu_id)
             handle = stack.enter_context(lock_path.open("a+", encoding="utf-8"))
             try:
                 fcntl.flock(handle.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)

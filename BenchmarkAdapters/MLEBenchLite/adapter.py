@@ -240,7 +240,7 @@ def _native_host_sandbox_argv(
     adapter_venv = require_directory(ROOT / "BenchmarkAdapters/.venv", "adapter runtime")
     output_dir = request.output_dir.resolve()
     if not request.dry_run:
-        for name in ("home", "tmp", "cache", "config"):
+        for name in ("home", "tmp", "cache", "config", "tmp/xdg-cache", "tmp/xdg-config"):
             (output_dir / name).mkdir(parents=True, exist_ok=True)
     mounts = (
         (source_root.resolve(), False),
@@ -494,7 +494,11 @@ def _workspace_sandbox_argv(
         "/proc",
         "--dev",
         "/dev",
-        "--tmpfs",
+        # Keep the sandbox's temporary files beside the run output. A tmpfs
+        # here silently consumes RAM and loses artifacts; the run directory is
+        # always on /mnt/sdc.
+        "--bind",
+        str(output_dir / "tmp"),
         "/tmp",
         "--dir",
         "/tmp/xdg-cache",
@@ -1313,8 +1317,12 @@ class MleLiteAdapter:
         )
         if not native_docker:
             output_dir = protect_generated_output(request.output_dir, ROOT)
+            (output_dir / "tmp").mkdir(parents=True, exist_ok=True)
             with (
-                tempfile.TemporaryDirectory(prefix="mle-agent-relay-") as temporary,
+                tempfile.TemporaryDirectory(
+                    prefix="mle-agent-relay-",
+                    dir=str(request.output_dir.resolve() / "tmp"),
+                ) as temporary,
                 agent_download_proxy() as download_proxy,
             ):
                 socket_path = Path(temporary) / "relay.sock"

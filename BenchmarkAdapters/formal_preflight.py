@@ -91,7 +91,8 @@ def probe_host_relay(model_config: ModelTrackConfig) -> str:
         },
     )
     try:
-        with urllib.request.urlopen(request, timeout=120) as response:
+        probe_timeout = max(600, int(getattr(model_config, "request_timeout_seconds", None) or 600))
+        with urllib.request.urlopen(request, timeout=probe_timeout) as response:
             body = json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", "replace")[:200]

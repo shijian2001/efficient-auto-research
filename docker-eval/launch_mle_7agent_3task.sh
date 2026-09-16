@@ -21,6 +21,11 @@ set -euo pipefail
 ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 cd "$ROOT"
 
+# Keep all launcher scratch and inter-process locks on the SDC-backed checkout.
+RUNTIME_ROOT=${RUNTIME_ROOT:-$ROOT/.runtime}
+mkdir -p "$RUNTIME_ROOT/tmp" "$RUNTIME_ROOT/gpu-locks" "$RUNTIME_ROOT/port-locks"
+export MLE_RUNTIME_ROOT="$RUNTIME_ROOT" TMPDIR="$RUNTIME_ROOT/tmp"
+
 CAMPAIGN_ID=${CAMPAIGN_ID:-$(date +%Y%m%d_%H%M%S)_mle_7agent_22task}
 CAMPAIGN_DIR=${CAMPAIGN_DIR:-$ROOT/experiment-campaigns/$CAMPAIGN_ID}
 PROTOCOL=${PROTOCOL:-$ROOT/BenchmarkAdapters/configs/mle-protocol.n1-12h.json}

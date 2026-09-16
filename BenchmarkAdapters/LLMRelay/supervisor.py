@@ -71,7 +71,7 @@ class RelayProcess:
         if self.unix_socket is not None:
             self.unix_socket.unlink(missing_ok=True)
 
-    def _request(self, path: str, *, payload: bytes | None = None, timeout: float = 120):
+    def _request(self, path: str, *, payload: bytes | None = None, timeout: float = 600):
         import httpx
 
         if self.unix_socket is not None:
@@ -120,7 +120,8 @@ class RelayProcess:
                 "messages": [{"role": "user", "content": "Reply READY"}],
             }
         payload = json.dumps(request_body).encode("utf-8")
-        response = self._request(path, payload=payload, timeout=120)
+        probe_timeout = max(600.0, float(self.request_timeout_seconds or 600))
+        response = self._request(path, payload=payload, timeout=probe_timeout)
         try:
             status = getattr(response, "status_code", getattr(response, "status", None))
             if status != 200:

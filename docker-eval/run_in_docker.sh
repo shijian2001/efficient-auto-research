@@ -41,8 +41,8 @@ ALLOCATED_PORT=""
 # Reserve host-side service ports for this launcher lifetime.  Fixed
 # GPU-index-derived ports collide with orphaned relay/format processes from an
 # interrupted run, so choose a free port under a per-port flock instead.
-PORT_LOCK_ROOT=${PORT_LOCK_ROOT:-/tmp/mle-bench-port-locks}
-mkdir -p "$PORT_LOCK_ROOT"
+# The root is assigned after EAR is resolved below so launcher scratch stays on
+# the experiment filesystem rather than the system disk.
 
 allocate_port() {
   local family=$1 range_start=$2 range_size=$3
@@ -157,6 +157,15 @@ EAR=${EAR_ROOT:-$(cd "$(dirname "$SCRIPT_PATH")/.." && pwd)}
 ROOT=${HOST_ROOT:-$(dirname "$EAR")}
 ALIGNED_KNOWLEDGE_ROOT=${ALIGNED_KNOWLEDGE_ROOT:-${EAR}/ear-worktrees/g3-mlevolve-knowledge-aligned/configs/mlevolve_coldstart}
 
+# Keep launcher scratch, Python tempfile usage, and port locks on /mnt/sdc.
+# Each task gets a private directory below its SDC-backed run root.
+RUNTIME_ROOT=${RUNTIME_ROOT:-${EAR}/.runtime}
+PORT_LOCK_ROOT=${PORT_LOCK_ROOT:-${RUNTIME_ROOT}/port-locks}
+mkdir -p "$PORT_LOCK_ROOT"
+RUN_TMP_ROOT=${RUN_TMP_ROOT:-${RUNTIME_ROOT}/tmp/${RUN_TAG}_${AGENT}_${COMP}_gpu${GPU_ID}}
+mkdir -p "$RUN_TMP_ROOT"
+export TMPDIR=$RUN_TMP_ROOT
+
 # --- LLM 上游 (代理转发目标) ---
 UPSTREAM_BASE_URL=${UPSTREAM_BASE_URL:-${LLM_BASE_URL:-}}
 if [ -z "$UPSTREAM_BASE_URL" ]; then
@@ -205,12 +214,16 @@ case "$MLE_BENCH_DATA_ROOT" in
 esac
 DATA=${MLE_BENCH_DATA_ROOT}/${COMP}/prepared/public
 test -d "$DATA" || { echo "Missing public MLE-Bench data: $DATA" >&2; exit 95; }
+MLE_RUN_ROOT=${MLE_RUN_ROOT:-${EAR}/run-logs/${RUN_TAG}_${AGENT}_${COMP}_gpu${GPU_ID}}
 HF_CACHE_HOST=${HF_CACHE_HOST:-${MLE_RUN_ROOT}/cache/huggingface}
 MLE_CACHE_HOST=${MLE_CACHE_HOST:-${MLE_RUN_ROOT}/cache/mle-bench}
+CONTAINER_TMP_HOST=${CONTAINER_TMP_HOST:-${MLE_RUN_ROOT}/tmp}
+CONTAINER_HOME_HOST=${CONTAINER_HOME_HOST:-${MLE_RUN_ROOT}/container-home}
 TOKEN_LOG_DIR=${MLE_RUN_ROOT}/relay-telemetry
 TOKEN_LOG_PATH=${TOKEN_LOG_DIR}/${AGENT}_${COMP}_gpu${GPU_ID}.jsonl
-mkdir -p "$TOKEN_LOG_DIR"
-mkdir -p "$HF_CACHE_HOST" "$MLE_CACHE_HOST"
+mkdir -p "$TOKEN_LOG_DIR" "$HF_CACHE_HOST" "$MLE_CACHE_HOST" "$CONTAINER_TMP_HOST" "$CONTAINER_HOME_HOST"
+mkdir -p "$CONTAINER_TMP_HOST/xdg-cache" "$CONTAINER_TMP_HOST/xdg-config" \
+  "$CONTAINER_TMP_HOST/pip-cache" "$CONTAINER_TMP_HOST/torch"
 
 # Each Agent branch populates an explicit mount allowlist. Never mount the
 # repository or MLE-Bench data root wholesale into an Agent container.
@@ -829,6 +842,7 @@ PYTHONPATH="$EAR${PYTHONPATH:+:$PYTHONPATH}" "$RELAY_PYTHON" -c \
   'from BenchmarkAdapters.MLEBenchLite.network import main; main()' "$CONTAINER_IMAGE"
 docker run "${DOCKER_RUN_FLAGS[@]}" "${EXTRA_DOCKER_FLAGS[@]}" \
   --pull=never \
+  --log-driver=none \
   --add-host "$RELAY_CONTAINER_HOST:host-gateway" \
   --device "$GPU_DEVICE":/dev/nvidia0 \
   --device /dev/nvidiactl:/dev/nvidiactl \
@@ -837,15 +851,23 @@ docker run "${DOCKER_RUN_FLAGS[@]}" "${EXTRA_DOCKER_FLAGS[@]}" \
   --cpuset-cpus="$CPUSET" \
   --shm-size=8g \
   "${BENCHMARK_MOUNTS[@]}" \
+  -v "${CONTAINER_TMP_HOST}:/tmp:rw" \
+  -v "${CONTAINER_HOME_HOST}:/root:rw" \
   -v /usr/lib/x86_64-linux-gnu/libcuda.so.1:/usr/lib/x86_64-linux-gnu/libcuda.so.1:ro \
   -v /usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1:/usr/lib/x86_64-linux-gnu/libnvidia-ml.so.1:ro \
   -v /usr/bin/nvidia-smi:/usr/bin/nvidia-smi:ro \
   -v ${HF_CACHE_HOST}:/root/.cache/huggingface \
+  -v ${MLE_CACHE_HOST}:/root/.cache/mle-bench \
   -e HF_HUB_OFFLINE=0 \
   -e HF_HOME=/root/.cache/huggingface \
   -e HF_HUB_CACHE=/root/.cache/huggingface/hub \
   -e TRANSFORMERS_CACHE=/root/.cache/huggingface/hub \
   -e HF_HUB_DISABLE_XET=1 \
+  -e TMPDIR=/tmp \
+  -e XDG_CACHE_HOME=/tmp/xdg-cache \
+  -e XDG_CONFIG_HOME=/tmp/xdg-config \
+  -e PIP_CACHE_DIR=/tmp/pip-cache \
+  -e TORCH_HOME=/tmp/torch \
   -e PYTHONUNBUFFERED=1 \
   -e CUDA_VISIBLE_DEVICES=0 \
   -e HTTP_PROXY=${CONTAINER_HTTP_PROXY} \
