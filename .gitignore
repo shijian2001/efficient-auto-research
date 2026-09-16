@@ -40,6 +40,7 @@
 /terminal-bench-2/logs/
 /terminal-bench-2/results/
 /terminal-bench-2/home/
+/.runtime/
 /autoresearch/.runtime/
 /autoresearch/.uv-python/
 /autoresearch/data/
