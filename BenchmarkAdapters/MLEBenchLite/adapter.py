@@ -1319,10 +1319,7 @@ class MleLiteAdapter:
             output_dir = protect_generated_output(request.output_dir, ROOT)
             (output_dir / "tmp").mkdir(parents=True, exist_ok=True)
             with (
-                tempfile.TemporaryDirectory(
-                    prefix="mle-agent-relay-",
-                    dir=str(request.output_dir.resolve() / "tmp"),
-                ) as temporary,
+                tempfile.TemporaryDirectory(prefix="mle-agent-relay-") as temporary,
                 agent_download_proxy() as download_proxy,
             ):
                 socket_path = Path(temporary) / "relay.sock"
