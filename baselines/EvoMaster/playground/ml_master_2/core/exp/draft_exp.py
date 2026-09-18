@@ -128,7 +128,7 @@ class DraftExp(BaseExp):
                         type="function",
                         function=Function(
                             name="execute_bash",
-                            arguments='{"command": "python run.py","timeout": "86400"}'
+                            arguments='{"command": "python run.py","timeout": "' + os.environ.get("ML_MASTER_CHILD_TIMEOUT_SECONDS", "86400") + '"}'
                         )
                     )
                     observation, info =self.draft_agent._execute_tool(tool_call_obj)
@@ -207,7 +207,7 @@ class DraftExp(BaseExp):
                         type="function",
                         function=Function(
                             name="execute_bash",
-                            arguments='{"command": "python run.py","timeout": "86400"}'
+                            arguments='{"command": "python run.py","timeout": "' + os.environ.get("ML_MASTER_CHILD_TIMEOUT_SECONDS", "86400") + '"}'
                         )
                     )
                     observation, info =self.debug_agent._execute_tool(tool_call_obj)
@@ -270,7 +270,6 @@ class DraftExp(BaseExp):
         except Exception as e:
             self.logger.error(f"Draft task execution failed: {e}", exc_info=True)
             raise ValueError(f"Draft task execution failed: {e}")
-
 
 
 

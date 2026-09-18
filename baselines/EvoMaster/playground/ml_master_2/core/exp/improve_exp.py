@@ -125,7 +125,7 @@ class ImproveExp(BaseExp):
                     type="function",
                     function=Function(
                         name="execute_bash",
-                        arguments='{"command": "python run.py","timeout": "86400"}'
+                        arguments='{"command": "python run.py","timeout": "' + os.environ.get("ML_MASTER_CHILD_TIMEOUT_SECONDS", "86400") + '"}'
                     )
                 )
                 observation, info =self.improve_agent._execute_tool(tool_call_obj)
@@ -206,7 +206,7 @@ class ImproveExp(BaseExp):
                     type="function",
                     function=Function(
                         name="execute_bash",
-                        arguments='{"command": "python run.py","timeout": "86400"}'
+                    arguments='{"command": "python run.py","timeout": "' + os.environ.get("ML_MASTER_CHILD_TIMEOUT_SECONDS", "86400") + '"}'
                     )
                 )
                 observation, info =self.debug_agent._execute_tool(tool_call_obj)
@@ -271,5 +271,4 @@ class ImproveExp(BaseExp):
         except Exception as e:
             self.logger.error(f"Improve task execution failed: {e}", exc_info=True)
             raise ValueError(f"Improve task execution failed: {e}")
-
 

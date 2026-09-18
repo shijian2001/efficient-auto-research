@@ -505,6 +505,16 @@ class LocalEnv(BaseEnv):
             final_command = command
 
         try:
+            helper = os.environ.get("ML_MASTER_EXECUTION_HELPER")
+            if helper and os.environ.get("ML_MASTER_STREAM_COMMAND_OUTPUT") == "1":
+                # Opt-in harness execution: same generated command and working
+                # directory, but preserve output and return recoverable failures
+                # to the native draft/debug loop before the global deadline.
+                import importlib.util
+                spec = importlib.util.spec_from_file_location("ml_master_execution_helper", helper)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                return module.run_candidate(final_command, cwd, env, float(timeout))
             result = subprocess.run(
                 final_command,
                 shell=True,
