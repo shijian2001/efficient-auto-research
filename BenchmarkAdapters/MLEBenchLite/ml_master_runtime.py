@@ -134,17 +134,6 @@ def run_candidate(command: str, cwd: str | None, environment: dict[str, str], ti
                         updated_at=time.time(), failure_reason=failure, auto_actions=actions)
             atomic_json(heartbeat_path, data)
     stdout, stderr = tail(stdout_path), tail(stderr_path)
-    # The local wisdom search is optional. The host relay intentionally exposes
-    # chat completions only; turn this known embeddings miss into a successful
-    # tool observation so ML-Master falls back to its documented no-knowledge
-    # path instead of aborting the whole Draft stage.
-    if data["exit_code"] not in (0, None) and "unsupported downstream endpoint: /embeddings" in stderr:
-        actions = data.get("auto_actions", [])
-        actions.append("soften_optional_embeddings_failure")
-        data["auto_actions"] = actions
-        data["exit_code"] = 0
-        atomic_json(heartbeat_path, data)
-        stderr += "\n[RUNTIME] optional embeddings unavailable; continuing without retrieved knowledge.\n"
     if failure:
         stderr += "\n" + failure
     return {"stdout":stdout,"stderr":stderr,"exit_code":data["exit_code"],"output":stdout+stderr}
