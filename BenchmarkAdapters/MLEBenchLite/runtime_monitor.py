@@ -166,6 +166,18 @@ def _gpu_pids() -> set[int]:
 
 
 def observe_process(data: dict[str, Any], gpu_pids: set[int] | None = None) -> ProcessObservation:
+    candidate_ns = data.get("pid_namespace")
+    try:
+        monitor_ns = os.readlink("/proc/self/ns/pid")
+    except OSError:
+        monitor_ns = None
+    if candidate_ns and monitor_ns and candidate_ns != monitor_ns:
+        # Bubblewrap deliberately uses a private PID namespace. A host-side
+        # monitor cannot inspect that namespace's PID table; a fresh heartbeat
+        # is the authoritative liveness signal in this case.
+        if data.get("state") in {"completed", "failed", "timed_out"}:
+            return ProcessObservation(False, True, None, None, (), None, False, "isolated namespace terminal")
+        return ProcessObservation(True, True, "?", None, (), None, False, "isolated pid namespace")
     pid = int(data["pid"])
     info = _proc_stat(pid)
     if info is None:
