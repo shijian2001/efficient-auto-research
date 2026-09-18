@@ -128,3 +128,42 @@ def test_stderr_is_scanned_for_cuda_failures(tmp_path, monkeypatch):
     )
     status = RuntimeMonitor(d, now=lambda: 1000).poll()
     assert any(item["code"] == "cuda_failure" for item in status["incidents"])
+
+
+def test_stale_native_heartbeat_is_a_major_incident(tmp_path, monkeypatch):
+    d = tmp_path / "campaign"
+    heartbeat = d / "cell/agent-output/runtime-monitor/native-heartbeat.json"
+    heartbeat.parent.mkdir(parents=True)
+    heartbeat.write_text(
+        json.dumps(
+            {
+                "state": "running",
+                "updated_at": 0,
+                "deadline": 9999,
+                "task_id": "demo",
+            }
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "BenchmarkAdapters.MLEBenchLite.runtime_monitor.shutil.disk_usage",
+        lambda _: type("D", (), {"free": 20 * 1024**3, "used": 0, "total": 20 * 1024**3})(),
+    )
+    status = RuntimeMonitor(d, now=lambda: 1000).poll()
+    assert any(item["code"] == "native_heartbeat_stale" for item in status["incidents"])
+
+
+def test_api_timeout_retries_are_deduplicated(tmp_path, monkeypatch):
+    d = tmp_path / "campaign"
+    relay = d / "cell/agent-output/relay.log"
+    relay.parent.mkdir(parents=True)
+    relay.write_text("chat.completions attempt 1/21 failed: timed out; retry in 3s\n", encoding="utf-8")
+    monkeypatch.setattr(
+        "BenchmarkAdapters.MLEBenchLite.runtime_monitor.shutil.disk_usage",
+        lambda _: type("D", (), {"free": 20 * 1024**3, "used": 0, "total": 20 * 1024**3})(),
+    )
+    monitor = RuntimeMonitor(d, now=lambda: 1000)
+    first = monitor.poll()
+    second = monitor.poll()
+    assert any(item["code"] == "api_timeout_retries" for item in first["incidents"])
+    assert not any(item["code"] == "api_timeout_retries" for item in second["incidents"])

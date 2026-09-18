@@ -21,6 +21,7 @@ from typing import Any, Iterable
 
 MONITOR_DIR = Path("agent-output") / "runtime-monitor"
 HEARTBEAT_GLOB = "candidate-*.json"
+NATIVE_HEARTBEAT_GLOB = "**/agent-output/runtime-monitor/native-heartbeat.json"
 STALE_SECONDS = 15 * 60
 # A host-side monitor cannot inspect a process in bwrap's private PID
 # namespace.  It may use a heartbeat as evidence, but only while that
@@ -34,6 +35,7 @@ SENSITIVE = re.compile(r"(?i)(?:token|secret|password|authorization|api[_-]?key)
 OOM_RE = re.compile(r"(?:out\s+of\s+memory|oom-kill|cuda\s+out\s+of\s+memory|cublas_status_alloc_failed)", re.I)
 CUDA_LOST_RE = re.compile(r"(?:cuda(?:\s+error)?[^\n]{0,80}(?:device|context).{0,20}(?:lost|reset|unavailable)|device-side assert|nccl.*(?:unhandled|failure))", re.I)
 IMPORT_RE = re.compile(r"(?:unsupported|unknown)[^\n]{0,80}(?:exec|executable)|(?:no module named|importerror|modulenotfounderror)", re.I)
+API_TIMEOUT_RE = re.compile(r"chat\.completions attempt \d+/\d+ failed: timed out", re.I)
 
 REQUIRED_HEARTBEAT = (
     "pid", "pgid", "process_start_ticks", "argv", "started_at", "last_output_at",
@@ -136,6 +138,34 @@ def discover_candidates(campaign_dir: Path) -> tuple[list[Candidate], list[dict[
         except (OSError, ValueError, json.JSONDecodeError) as exc:
             errors.append({"path": str(path), "error": f"unreadable heartbeat: {type(exc).__name__}"})
     return candidates, errors
+
+
+def discover_native_heartbeats(campaign_dir: Path) -> list[tuple[Path, dict[str, Any]]]:
+    """Read native wrapper heartbeats without trusting their PID namespace."""
+    result: list[tuple[Path, dict[str, Any]]] = []
+    for path in sorted(campaign_dir.glob(NATIVE_HEARTBEAT_GLOB)):
+        try:
+            raw = _json_load(path)
+        except (OSError, ValueError, json.JSONDecodeError):
+            continue
+        if not isinstance(raw, dict):
+            continue
+        if not isinstance(raw.get("updated_at"), (int, float)):
+            continue
+        if raw.get("state") not in {"running", "completed", "failed", "budget_expired"}:
+            continue
+        result.append((path, raw))
+    return result
+
+
+def discover_api_timeout_lines(campaign_dir: Path) -> list[tuple[Path, str]]:
+    """Return relay timeout lines, without copying relay contents to status."""
+    rows: list[tuple[Path, str]] = []
+    for path in sorted(campaign_dir.glob("**/agent-output/relay.log")):
+        for line in _tail(path).splitlines():
+            if API_TIMEOUT_RE.search(line):
+                rows.append((path, line.strip()))
+    return rows
 
 
 def _proc_stat(pid: int) -> tuple[str, int, int, tuple[str, ...]] | None:
@@ -327,6 +357,7 @@ class RuntimeMonitor:
         self.incidents_path = self.campaign_dir / "agent-output" / "runtime-monitor" / "incidents.jsonl"
         self._previous_cpu: dict[str, int] = {}
         self._oom_fingerprints: dict[str, set[str]] = {}
+        self._seen_api_timeout_lines: set[str] = set()
         if disk_scope not in {"host", "sandbox", "unknown"}:
             raise ValueError(f"unsupported disk scope: {disk_scope}")
         self.disk_scope = disk_scope
@@ -334,6 +365,8 @@ class RuntimeMonitor:
     def poll(self) -> dict[str, Any]:
         now = float(self.now())
         candidates, malformed = discover_candidates(self.campaign_dir)
+        native_heartbeats = discover_native_heartbeats(self.campaign_dir)
+        api_timeout_lines = discover_api_timeout_lines(self.campaign_dir)
         gpu_pids = _gpu_pids()
         observations: dict[str, ProcessObservation] = {}
         incidents: list[dict[str, Any]] = []
@@ -376,6 +409,47 @@ class RuntimeMonitor:
                 self._previous_cpu[item.candidate_id] = obs.cpu_ticks
         for item in malformed:
             incidents.append(self._incident(None, "malformed_heartbeat", "major", item["error"], path=item["path"]))
+        for path, heartbeat in native_heartbeats:
+            if heartbeat.get("state") != "running":
+                continue
+            age = now - float(heartbeat["updated_at"])
+            if age > HEARTBEAT_STALE_SECONDS:
+                incidents.append(
+                    self._incident(
+                        None,
+                        "native_heartbeat_stale",
+                        "major",
+                        f"native heartbeat has not refreshed for {age:.0f}s",
+                        path=str(path),
+                    )
+                )
+            elif "deadline" in heartbeat and now >= float(heartbeat["deadline"]):
+                incidents.append(
+                    self._incident(
+                        None,
+                        "native_deadline_exceeded",
+                        "major",
+                        "native process heartbeat is still running after its deadline",
+                        path=str(path),
+                    )
+                )
+        new_api_timeouts: list[tuple[Path, str]] = []
+        for path, line in api_timeout_lines:
+            fingerprint = hashlib.sha256(f"{path}\n{line}".encode("utf-8", "replace")).hexdigest()
+            if fingerprint not in self._seen_api_timeout_lines:
+                self._seen_api_timeout_lines.add(fingerprint)
+                new_api_timeouts.append((path, line))
+        if new_api_timeouts:
+            severity = "major" if len(new_api_timeouts) >= 6 else "warning"
+            incidents.append(
+                self._incident(
+                    None,
+                    "api_timeout_retries",
+                    severity,
+                    f"{len(new_api_timeouts)} new chat completion timeout retries observed",
+                    paths=sorted({str(path) for path, _ in new_api_timeouts}),
+                )
+            )
         oom: list[tuple[str, str]] = []
         for cid, txt in all_error_text:
             fingerprints = {
@@ -437,6 +511,17 @@ class RuntimeMonitor:
             "candidates": candidate_rows,
             "summary": {"total": len(candidates), "malformed": len(malformed), "running": sum(x["state"] == "running" for x in candidate_rows), "completed": sum(x["state"] == "completed" for x in candidate_rows), "failed": sum(x["state"] in {"failed", "timed_out"} for x in candidate_rows), "major_incidents": sum(x["severity"] == "major" for x in incidents)},
             "incidents": incidents[-100:],
+            "native_heartbeats": [
+                {
+                    "path": str(path),
+                    "state": heartbeat.get("state"),
+                    "task_id": heartbeat.get("task_id"),
+                    "updated_at": heartbeat.get("updated_at"),
+                    "deadline": heartbeat.get("deadline"),
+                }
+                for path, heartbeat in native_heartbeats
+            ],
+            "api": {"new_timeout_retries": len(new_api_timeouts)},
             "monitor": {
                 "stale_seconds": STALE_SECONDS,
                 "heartbeat_stale_seconds": HEARTBEAT_STALE_SECONDS,
