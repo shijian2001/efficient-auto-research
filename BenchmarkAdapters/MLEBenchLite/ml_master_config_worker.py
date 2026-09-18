@@ -81,7 +81,10 @@ def main() -> int:
     local = payload["session"]["local"]
     local["working_dir"] = str(args.workspace_dir.resolve())
     local["workspace_path"] = str(args.workspace_dir.resolve())
-    local["gpu_devices"] = [str(args.gpu_id)]
+    # The native bwrap sandbox exposes exactly one selected host GPU as
+    # /dev/nvidia0. The host index is retained in the formal hardware
+    # attestation, but must never be passed as the CUDA ordinal inside the jail.
+    local["gpu_devices"] = ["0"]
     local["cpu_devices"] = None
     local["symlinks"] = {str(public_destination.resolve()): "input"}
     args.destination.parent.mkdir(parents=True, exist_ok=True)

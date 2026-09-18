@@ -133,6 +133,40 @@ temperature 与 reasoning effort 仍然强制覆盖成 track 里的值。
 
 ## 3. 先 preflight 再开跑
 
+### AI Scientist 在 relay 启动阶段失败后的重试
+
+`mle-cell` 遇到已有记录时会在启动前拒绝执行，保留原来的 manifest、result 和日志。
+对于 `relay exited early` 且 relay 日志明确为 `AF_UNIX path too long` 的 AI Scientist
+启动失败，可以给原来的 `mle-cell` 命令添加 `--retry-relay-startup`。该参数仅接受
+尚无 Agent 工作文件、提交、评分或调用用量的启动失败；模型配置、任务身份和
+Agent variant 必须与原记录一致。训练失败、超时、有分数的任务不能用它重新跑。
+
+通过数据、GPU 和源码检查后，旧目录整体移入其父目录下的
+`.relay-startup-failures/<任务>/attempt-*/cell/`，同级 `retry.json` 保存原记录哈希。
+新尝试沿用原 run ID 和标准目录，原失败证据不被覆盖。并发调用使用任务锁，
+不会同时归档或运行同一格。relay socket 固定使用 `/tmp` 中的短目录，避免继承
+很长的 `TMPDIR`；训练临时数据仍按原配置存放。
+
+例如重试现有第 7 轮的仙人掌启动失败（另外两题替换任务名即可）：
+
+```bash
+./BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters mle-cell \
+  --protocol BenchmarkAdapters/configs/mle-protocol.n1-12h.json \
+  --agent ai-scientist \
+  --agent-variant ai-scientist@aae385b12b0d1e5ad928c6f988a769cfb173b3e7 \
+  --competition-id aerial-cactus-identification --seed 0 \
+  --data-root mle-bench-data \
+  --campaign-dir experiment-campaigns/20260904_125112_mle_7agent_22task_remaining/round-07/aerial-cactus-identification \
+  --gpu-id 0 \
+  --model-config BenchmarkAdapters/configs/model-track.gpt-5.6-terra-host-relay.json \
+  --retry-relay-startup
+```
+
+这是重新启动实验的命令，不是只读诊断。先按通常流程提交修复、检查可用 GPU、
+加载 relay 凭证并完成 preflight；它不会恢复当前暂停的 MLEvolve campaign。
+
+### 常规 preflight
+
 ```bash
 ./BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters formal-preflight \
   --benchmark mle-bench-lite --agent <agent> --agent-variant <见上表> \

@@ -294,6 +294,10 @@ def _native_host_sandbox_argv(
     for path, writable in mounts:
         _mount_parent_directories(argv, path, created)
         argv.extend(["--bind" if writable else "--ro-bind", str(path), str(path)])
+    if request.agent == "ml-master-2":
+        # Multiprocessing tensor transfer creates AF_UNIX sockets below TMPDIR.
+        # Keep scratch on the project disk while exposing a short jail path.
+        argv.extend(["--bind", str(output_dir / "tmp"), "/tmp"])
     runtime_paths: set[Path] = set()
     for value in wrapper_argv:
         executable = Path(value)
@@ -419,6 +423,8 @@ def _workspace_sandbox_argv(
         raise AdapterError(f"MLE workspace does not exist: {workspace.workspace_dir}")
     if workspace.public_dir.exists() is False:
         raise AdapterError(f"MLE public task does not exist: {workspace.public_dir}")
+    output_dir = workspace.workspace_dir.parent
+    (output_dir / "tmp").mkdir(parents=True, exist_ok=True)
     relay_socket = relay_socket.resolve()
     if not relay_socket.exists() or not stat.S_ISSOCK(relay_socket.stat().st_mode):
         raise AdapterError(f"sandbox relay socket does not exist: {relay_socket}")
@@ -1172,6 +1178,13 @@ def _ml_master_command(request: MleLiteRequest) -> CommandSpec:
             "--run-dir",
             str(request.output_dir.resolve()),
     )
+    native_argv = (
+        str(executable), str(Path(__file__).with_name("ml_master_runtime.py")),
+        "--budget-seconds", str(request.timeout_seconds),
+        "--output-dir", str(request.output_dir.resolve()),
+        "--task-id", request.competition_id,
+        "--", *native_argv,
+    )
     environment = relay_client_env(
         base_url="http://127.0.0.1:6200/v1",
         proxy=request.download_proxy,
@@ -1203,7 +1216,19 @@ def _ml_master_command(request: MleLiteRequest) -> CommandSpec:
                     "/bin",
                 )
             ),
-            "TMPDIR": str(request.output_dir.resolve() / "tmp"),
+            "TMPDIR": "/tmp",
+            "PYTHONUNBUFFERED": "1",
+            "ML_MASTER_RUN_TIMEOUT_SECONDS": str(request.timeout_seconds),
+            "ML_MASTER_CHILD_TIMEOUT_SECONDS": str(min(5400, max(1, request.timeout_seconds - 90))),
+            "ML_MASTER_STREAM_COMMAND_OUTPUT": "1",
+            "ML_MASTER_EXECUTION_HELPER": str(Path(__file__).with_name("ml_master_runtime.py")),
+            "ML_MASTER_MONITOR_DIR": str(request.output_dir.resolve() / "runtime-monitor"),
+            "ML_MASTER_TASK_ID": request.competition_id,
+            # Avoid host-wide BLAS/OpenMP oversubscription while leaving the
+            # Agent's own DataLoader worker policy unchanged.
+            "OMP_NUM_THREADS": "8",
+            "MKL_NUM_THREADS": "8",
+            "OPENBLAS_NUM_THREADS": "8",
             "XDG_CACHE_HOME": str(request.output_dir.resolve() / "cache"),
             "XDG_CONFIG_HOME": str(request.output_dir.resolve() / "config"),
             "BENCHMARK_TASK_SPEC_SHA256": task_spec_digest("mle-bench-lite"),
@@ -1318,10 +1343,9 @@ class MleLiteAdapter:
         if not native_docker:
             output_dir = protect_generated_output(request.output_dir, ROOT)
             (output_dir / "tmp").mkdir(parents=True, exist_ok=True)
-            with (
-                tempfile.TemporaryDirectory(prefix="mle-agent-relay-") as temporary,
-                agent_download_proxy() as download_proxy,
-            ):
+            # Only the socket lives here. Bulk scratch remains on the data
+            # disk; an inherited deep TMPDIR can exceed AF_UNIX's limit.
+            with tempfile.TemporaryDirectory(prefix="mle-agent-relay-", dir="/tmp") as temporary, agent_download_proxy() as download_proxy:
                 socket_path = Path(temporary) / "relay.sock"
                 relay = RelayProcess(
                     agent=request.agent,

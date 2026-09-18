@@ -630,6 +630,10 @@ def _formal_tools_parsers(subparsers: argparse._SubParsersAction) -> None:
     cell.add_argument("--gpu-id", type=int, default=0)
     cell.add_argument("--model-config", type=Path, required=True)
     cell.add_argument("--agent-variant", required=True)
+    cell.add_argument(
+        "--retry-relay-startup", action="store_true",
+        help="archive and retry an AI Scientist relay socket failure before any agent work",
+    )
 
     mle_aggregate = subparsers.add_parser("mle-aggregate", help="aggregate official MLE reports")
     mle_aggregate.add_argument("--protocol", type=Path, required=True)
@@ -1156,6 +1160,7 @@ def _handle_formal_tool(args: argparse.Namespace) -> int | None:
             gpu_id=args.gpu_id,
             model_config=ModelTrackConfig.load(args.model_config, formal=True),
             agent_variant=args.agent_variant,
+            retry_relay_startup=args.retry_relay_startup,
         )
         result = outcome.result if hasattr(outcome, "result") else outcome
         _print_or_write(result.to_dict())

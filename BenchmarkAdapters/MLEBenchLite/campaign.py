@@ -43,6 +43,12 @@ from .membership import (
     validate_mlebench_source_identity,
     verify_task_archive,
 )
+from .retry import (
+    archive_relay_startup_failure,
+    cell_execution_lock,
+    has_cell_evidence,
+    validate_relay_startup_retry,
+)
 
 
 @dataclass(frozen=True)
@@ -345,6 +351,43 @@ def run_campaign_cell(
     model_config: ModelTrackConfig | None = None,
     agent_variant: str = "default",
     _hardware: Mapping[str, Any] | None = None,
+    retry_relay_startup: bool = False,
+) -> FormalMleOutcome | BenchmarkRunResult:
+    cell = replace(cell, run_dir=cell.run_dir.resolve())
+    if formal:
+        require_formal_output_path(cell.run_dir, ROOT)
+    with cell_execution_lock(cell.run_dir):
+        existing = has_cell_evidence(cell.run_dir)
+        if existing:
+            if not retry_relay_startup:
+                raise AdapterError(
+                    f"MLE cell already contains evidence: {cell.run_dir}; "
+                    "use --retry-relay-startup only for an unstarted AI Scientist relay failure"
+                )
+            if model_config is None:
+                raise AdapterError("relay retry requires an explicit model track config")
+            validate_relay_startup_retry(
+                cell.run_dir, run_id=cell.run_id, protocol_digest=protocol.digest,
+                model_config_digest=model_config.digest, agent_variant=agent_variant,
+            )
+        return _run_campaign_cell(
+            cell=cell, protocol=protocol, data_root=data_root, gpu_id=gpu_id,
+            formal=formal, model_config=model_config, agent_variant=agent_variant,
+            _hardware=_hardware, archive_failed_relay=existing and retry_relay_startup,
+        )
+
+
+def _run_campaign_cell(
+    *,
+    cell: MleCampaignCell,
+    protocol: FormalProtocol,
+    data_root: Path,
+    gpu_id: int,
+    formal: bool,
+    model_config: ModelTrackConfig | None,
+    agent_variant: str,
+    _hardware: Mapping[str, Any] | None,
+    archive_failed_relay: bool,
 ) -> FormalMleOutcome | BenchmarkRunResult:
     validate_mle_protocol(protocol, data_root)
     verify_task_archive(data_root, cell.task_id, verify_hash=True)
@@ -355,7 +398,7 @@ def run_campaign_cell(
             gpus_per_evaluation=1,
             max_concurrent_evaluations=1,
         ) as hardware:
-            return run_campaign_cell(
+            return _run_campaign_cell(
                 cell=cell,
                 protocol=protocol,
                 data_root=data_root,
@@ -364,6 +407,7 @@ def run_campaign_cell(
                 model_config=model_config,
                 agent_variant=agent_variant,
                 _hardware=hardware,
+                archive_failed_relay=archive_failed_relay,
             )
     if formal:
         require_formal_output_path(cell.run_dir, ROOT)
@@ -406,6 +450,11 @@ def run_campaign_cell(
         hardware=_hardware,
     )
     manifest.validate()
+    # Do not move any old evidence until data, hardware and source checks pass.
+    # Keep this outside the failure writer, which must never replace old results.
+    if archive_failed_relay:
+        require_clean_upstream_source(cell.agent)
+        archive_relay_startup_failure(cell.run_dir)
     # Publish into run-logs/index/ whatever the outcome: a failed or timed-out
     # cell is the one whose logs get looked at, so it must be as easy to find as
     # a successful one.

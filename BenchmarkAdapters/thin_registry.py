@@ -57,7 +57,7 @@ THIN_CLASSIFICATIONS = {
 UPSTREAM_REVISIONS = {
     "arbor": "92c6fd5c22c8a291796d39730605ac0eb8ba07c5",
     "ai-scientist": "aae385b12b0d1e5ad928c6f988a769cfb173b3e7",
-    "ml-master-2": "07a80dac7f9edad18f2d97bcbffc0585e06d5b46",
+    "ml-master-2": "0c7b5549b5445f76864be9e88572b549bb4b3863",
 }
 
 
