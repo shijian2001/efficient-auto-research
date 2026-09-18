@@ -36,6 +36,7 @@ OOM_RE = re.compile(r"(?:out\s+of\s+memory|oom-kill|cuda\s+out\s+of\s+memory|cub
 CUDA_LOST_RE = re.compile(r"(?:cuda(?:\s+error)?[^\n]{0,80}(?:device|context).{0,20}(?:lost|reset|unavailable)|device-side assert|nccl.*(?:unhandled|failure))", re.I)
 IMPORT_RE = re.compile(r"(?:unsupported|unknown)[^\n]{0,80}(?:exec|executable)|(?:no module named|importerror|modulenotfounderror)", re.I)
 API_RETRY_RE = re.compile(r"(?:chat\.completions|responses?) attempt \d+/\d+ failed:", re.I)
+API_SUCCESS_RE = re.compile(r'HTTP Request: POST .*?/v1/(?:chat/completions|responses)" 2\d\d', re.I)
 
 REQUIRED_HEARTBEAT = (
     "pid", "pgid", "process_start_ticks", "argv", "started_at", "last_output_at",
@@ -158,13 +159,15 @@ def discover_native_heartbeats(campaign_dir: Path) -> list[tuple[Path, dict[str,
     return result
 
 
-def discover_api_timeout_lines(campaign_dir: Path) -> list[tuple[Path, str]]:
-    """Return relay timeout lines, without copying relay contents to status."""
-    rows: list[tuple[Path, str]] = []
+def discover_api_events(campaign_dir: Path) -> list[tuple[Path, str, str]]:
+    """Return retry/success relay events, without copying relay contents."""
+    rows: list[tuple[Path, str, str]] = []
     for path in sorted(campaign_dir.glob("**/agent-output/relay.log")):
         for line in _tail(path).splitlines():
             if API_RETRY_RE.search(line):
-                rows.append((path, line.strip()))
+                rows.append((path, line.strip(), "retry"))
+            elif API_SUCCESS_RE.search(line):
+                rows.append((path, line.strip(), "success"))
     return rows
 
 
@@ -361,7 +364,8 @@ class RuntimeMonitor:
         self.incidents_path = monitor_dir / f"{output_prefix}incidents.jsonl"
         self._previous_cpu: dict[str, int] = {}
         self._oom_fingerprints: dict[str, set[str]] = {}
-        self._seen_api_timeout_lines: set[str] = set()
+        self._seen_api_events: set[str] = set()
+        self._api_retry_streak: dict[str, int] = {}
         if disk_scope not in {"host", "sandbox", "unknown"}:
             raise ValueError(f"unsupported disk scope: {disk_scope}")
         self.disk_scope = disk_scope
@@ -370,7 +374,7 @@ class RuntimeMonitor:
         now = float(self.now())
         candidates, malformed = discover_candidates(self.campaign_dir)
         native_heartbeats = discover_native_heartbeats(self.campaign_dir)
-        api_timeout_lines = discover_api_timeout_lines(self.campaign_dir)
+        api_events = discover_api_events(self.campaign_dir)
         gpu_pids = _gpu_pids()
         observations: dict[str, ProcessObservation] = {}
         incidents: list[dict[str, Any]] = []
@@ -437,23 +441,30 @@ class RuntimeMonitor:
                         path=str(path),
                     )
                 )
-        new_api_timeouts: list[tuple[Path, str]] = []
-        for path, line in api_timeout_lines:
+        new_api_retries: list[tuple[Path, str]] = []
+        for path, line, kind in api_events:
             fingerprint = hashlib.sha256(f"{path}\n{line}".encode("utf-8", "replace")).hexdigest()
-            if fingerprint not in self._seen_api_timeout_lines:
-                self._seen_api_timeout_lines.add(fingerprint)
-                new_api_timeouts.append((path, line))
-        if new_api_timeouts:
-            severity = "major" if len(new_api_timeouts) >= 6 else "warning"
-            all_timeout = all("timed out" in line.lower() for _, line in new_api_timeouts)
+            if fingerprint in self._seen_api_events:
+                continue
+            self._seen_api_events.add(fingerprint)
+            key = str(path)
+            if kind == "success":
+                self._api_retry_streak[key] = 0
+            else:
+                self._api_retry_streak[key] = self._api_retry_streak.get(key, 0) + 1
+                new_api_retries.append((path, line))
+        if new_api_retries:
+            max_streak = max((self._api_retry_streak.get(str(path), 0) for path, _ in new_api_retries), default=0)
+            severity = "major" if max_streak >= 6 else "warning"
+            all_timeout = all("timed out" in line.lower() for _, line in new_api_retries)
             code = "api_timeout_retries" if all_timeout else "api_retry_failures"
             incidents.append(
                 self._incident(
                     None,
                     code,
                     severity,
-                    f"{len(new_api_timeouts)} new API retry failures observed",
-                    paths=sorted({str(path) for path, _ in new_api_timeouts}),
+                    f"{len(new_api_retries)} new API retry failures observed; consecutive streak={max_streak}",
+                    paths=sorted({str(path) for path, _ in new_api_retries}),
                 )
             )
         oom: list[tuple[str, str]] = []
@@ -527,7 +538,10 @@ class RuntimeMonitor:
                 }
                 for path, heartbeat in native_heartbeats
             ],
-            "api": {"new_retry_failures": len(new_api_timeouts)},
+            "api": {
+                "new_retry_failures": len(new_api_retries),
+                "max_consecutive_retry_streak": max(self._api_retry_streak.values(), default=0),
+            },
             "monitor": {
                 "stale_seconds": STALE_SECONDS,
                 "heartbeat_stale_seconds": HEARTBEAT_STALE_SECONDS,

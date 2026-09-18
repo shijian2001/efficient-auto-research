@@ -167,3 +167,24 @@ def test_api_timeout_retries_are_deduplicated(tmp_path, monkeypatch):
     second = monitor.poll()
     assert any(item["code"] == "api_timeout_retries" for item in first["incidents"])
     assert not any(item["code"] == "api_timeout_retries" for item in second["incidents"])
+
+
+def test_consecutive_api_retries_escalate_to_major(tmp_path, monkeypatch):
+    d = tmp_path / "campaign"
+    relay = d / "cell/agent-output/relay.log"
+    relay.parent.mkdir(parents=True)
+    relay.write_text(
+        "".join(
+            f"2026-09-19 04:{index:02d}:00,000 [proxy] WARNING chat.completions attempt {index}/21 failed: timed out; retry in 3s\n"
+            for index in range(1, 7)
+        ),
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(
+        "BenchmarkAdapters.MLEBenchLite.runtime_monitor.shutil.disk_usage",
+        lambda _: type("D", (), {"free": 20 * 1024**3, "used": 0, "total": 20 * 1024**3})(),
+    )
+    status = RuntimeMonitor(d, now=lambda: 1000).poll()
+    incident = next(item for item in status["incidents"] if item["code"] == "api_timeout_retries")
+    assert incident["severity"] == "major"
+    assert "streak=6" in incident["detail"]
