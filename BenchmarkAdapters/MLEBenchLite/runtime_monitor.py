@@ -453,11 +453,11 @@ class RuntimeMonitor:
             else:
                 self._api_retry_streak[key] = self._api_retry_streak.get(key, 0) + 1
                 new_api_retries.append((path, line))
-        if new_api_retries:
-            max_streak = max((self._api_retry_streak.get(str(path), 0) for path, _ in new_api_retries), default=0)
+        max_streak = max(self._api_retry_streak.values(), default=0)
+        if new_api_retries or max_streak >= 6:
             severity = "major" if max_streak >= 6 else "warning"
-            all_timeout = all("timed out" in line.lower() for _, line in new_api_retries)
-            code = "api_timeout_retries" if all_timeout else "api_retry_failures"
+            all_timeout = bool(new_api_retries) and all("timed out" in line.lower() for _, line in new_api_retries)
+            code = "api_timeout_retries" if all_timeout or (not new_api_retries and max_streak >= 6) else "api_retry_failures"
             incidents.append(
                 self._incident(
                     None,
