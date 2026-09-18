@@ -4,7 +4,11 @@ import json
 import os
 from pathlib import Path
 
-from BenchmarkAdapters.MLEBenchLite.runtime_monitor import RuntimeMonitor, discover_candidates, observe_process
+from BenchmarkAdapters.MLEBenchLite.runtime_monitor import (
+    RuntimeMonitor,
+    discover_candidates,
+    observe_process,
+)
 
 
 def _heartbeat(root: Path, **changes):
@@ -74,3 +78,53 @@ def test_repeated_oom_and_low_disk_are_major(tmp_path, monkeypatch):
     codes = {i["code"] for i in status["incidents"]}
     assert "repeated_oom" in codes
     assert "low_disk" in codes
+
+
+def test_same_oom_text_is_not_counted_again_on_every_poll(tmp_path, monkeypatch):
+    d = tmp_path / "campaign"
+    _heartbeat(d, state="failed", failure_reason="CUDA out of memory")
+    monkeypatch.setattr(
+        "BenchmarkAdapters.MLEBenchLite.runtime_monitor.shutil.disk_usage",
+        lambda _: type("D", (), {"free": 20 * 1024**3, "used": 0, "total": 20 * 1024**3})(),
+    )
+    monitor = RuntimeMonitor(d, now=lambda: 1000)
+    first = monitor.poll()
+    second = monitor.poll()
+    assert any(item["code"] == "oom" for item in first["incidents"])
+    assert not any(item["code"] == "repeated_oom" for item in second["incidents"])
+
+
+def test_cross_namespace_requires_a_fresh_heartbeat(monkeypatch):
+    data = {
+        "pid": 7,
+        "pgid": 7,
+        "process_start_ticks": 1,
+        "pid_namespace": "pid:[candidate]",
+        "state": "running",
+        "updated_at": 0,
+        "last_output_at": 0,
+        "started_at": 0,
+        "deadline": 9999,
+    }
+    monkeypatch.setattr(
+        "BenchmarkAdapters.MLEBenchLite.runtime_monitor.os.readlink",
+        lambda _: "pid:[host]",
+    )
+    observed = observe_process(data, now=100)
+    assert observed.present is False
+    assert observed.identity_ok is False
+    assert observed.reason == "isolated pid namespace heartbeat stale"
+
+
+def test_stderr_is_scanned_for_cuda_failures(tmp_path, monkeypatch):
+    d = tmp_path / "campaign"
+    stderr = d / "stderr.log"
+    d.mkdir()
+    stderr.write_text("CUDA error: device-side assert triggered\n", encoding="utf-8")
+    _heartbeat(d, state="failed", stderr_path=str(stderr), stdout_path="missing.log")
+    monkeypatch.setattr(
+        "BenchmarkAdapters.MLEBenchLite.runtime_monitor.shutil.disk_usage",
+        lambda _: type("D", (), {"free": 20 * 1024**3, "used": 0, "total": 20 * 1024**3})(),
+    )
+    status = RuntimeMonitor(d, now=lambda: 1000).poll()
+    assert any(item["code"] == "cuda_failure" for item in status["incidents"])

@@ -188,7 +188,10 @@ def main(argv: list[str] | None = None) -> int:
     atomic_json(directory/"preflight.json",{"ok":True,"time":time.time(),**readiness})
     sys.path.insert(0,str(Path(__file__).resolve().parents[2]))
     from BenchmarkAdapters.MLEBenchLite.runtime_monitor import RuntimeMonitor
-    monitor=RuntimeMonitor(output.parent)
+    # The wrapper is inside bwrap.  Its mount namespace can report a private
+    # filesystem view, so disk exhaustion must be checked by the host-side
+    # monitor; the in-sandbox monitor still records candidate/process events.
+    monitor=RuntimeMonitor(output.parent, disk_scope="sandbox")
     os.environ["ML_MASTER_RUN_TIMEOUT_SECONDS"]=str(max(1,int(deadline-time.time())))
     with (directory/"native-output.log").open("wb") as stream:
         process=subprocess.Popen(child,env=os.environ.copy(),stdout=stream,stderr=subprocess.STDOUT,

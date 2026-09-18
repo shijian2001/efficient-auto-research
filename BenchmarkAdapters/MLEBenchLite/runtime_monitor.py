@@ -7,6 +7,7 @@ spot incidents promptly and to let the campaign coordinator decide what to do.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -21,6 +22,11 @@ from typing import Any, Iterable
 MONITOR_DIR = Path("agent-output") / "runtime-monitor"
 HEARTBEAT_GLOB = "candidate-*.json"
 STALE_SECONDS = 15 * 60
+# A host-side monitor cannot inspect a process in bwrap's private PID
+# namespace.  It may use a heartbeat as evidence, but only while that
+# heartbeat is being refreshed.  A stale heartbeat is an incident, not proof
+# that the recorded PID is still alive.
+HEARTBEAT_STALE_SECONDS = 45
 LOW_DISK_BYTES = 10 * 1024**3
 MAX_TAIL_BYTES = 32 * 1024
 MAX_EVENT_HISTORY = 2000
@@ -165,7 +171,43 @@ def _gpu_pids() -> set[int]:
     return result
 
 
-def observe_process(data: dict[str, Any], gpu_pids: set[int] | None = None) -> ProcessObservation:
+def _process_group_activity(pgid: int, gpu_pids: set[int]) -> tuple[int | None, bool]:
+    """Aggregate CPU/GPU activity across the candidate's process group.
+
+    The recorded candidate is a shell.  Training normally runs in a child
+    Python process, so inspecting only the shell produces false "no activity"
+    incidents while the actual trainer is busy.
+    """
+    total: int | None = 0
+    gpu_active = False
+    try:
+        proc_entries = list(Path("/proc").iterdir())
+    except OSError:
+        return None, False
+    for entry in proc_entries:
+        if not entry.name.isdigit():
+            continue
+        try:
+            text = (entry / "stat").read_text(encoding="utf-8")
+            close = text.rfind(")")
+            fields = text[close + 2 :].split()
+            if int(fields[2]) != pgid:
+                continue
+            ticks = int(fields[11]) + int(fields[12])
+            assert total is not None
+            total += ticks
+            if int(entry.name) in gpu_pids:
+                gpu_active = True
+        except (OSError, ValueError, IndexError, AssertionError):
+            continue
+    return total, gpu_active
+
+
+def observe_process(
+    data: dict[str, Any],
+    gpu_pids: set[int] | None = None,
+    now: float | None = None,
+) -> ProcessObservation:
     candidate_ns = data.get("pid_namespace")
     try:
         monitor_ns = os.readlink("/proc/self/ns/pid")
@@ -173,11 +215,23 @@ def observe_process(data: dict[str, Any], gpu_pids: set[int] | None = None) -> P
         monitor_ns = None
     if candidate_ns and monitor_ns and candidate_ns != monitor_ns:
         # Bubblewrap deliberately uses a private PID namespace. A host-side
-        # monitor cannot inspect that namespace's PID table; a fresh heartbeat
-        # is the authoritative liveness signal in this case.
+        # monitor cannot inspect that namespace's PID table. A fresh heartbeat
+        # is useful evidence, but it must not be treated as PID identity proof.
         if data.get("state") in {"completed", "failed", "timed_out"}:
             return ProcessObservation(False, True, None, None, (), None, False, "isolated namespace terminal")
-        return ProcessObservation(True, True, "?", None, (), None, False, "isolated pid namespace")
+        refreshed = data.get("updated_at", data.get("last_output_at", data.get("started_at", 0)))
+        if now is not None and now - float(refreshed) > HEARTBEAT_STALE_SECONDS:
+            return ProcessObservation(
+                False,
+                False,
+                None,
+                None,
+                (),
+                None,
+                False,
+                "isolated pid namespace heartbeat stale",
+            )
+        return ProcessObservation(True, False, "?", None, (), None, False, "isolated pid namespace; fresh heartbeat")
     pid = int(data["pid"])
     info = _proc_stat(pid)
     if info is None:
@@ -186,15 +240,7 @@ def observe_process(data: dict[str, Any], gpu_pids: set[int] | None = None) -> P
     identity_ok = start_ticks == int(data["process_start_ticks"]) and pgid == int(data["pgid"])
     if not identity_ok:
         return ProcessObservation(True, False, state, pgid, argv, None, False, "pid identity mismatch")
-    gpu_active = pid in (gpu_pids if gpu_pids is not None else set())
-    cpu_ticks = None
-    try:
-        stat_text = Path(f"/proc/{pid}/stat").read_text(encoding="utf-8")
-        close = stat_text.rfind(")")
-        cpu_fields = stat_text[close + 2 :].split()
-        cpu_ticks = int(cpu_fields[11]) + int(cpu_fields[12])
-    except (OSError, ValueError, IndexError):
-        pass
+    cpu_ticks, gpu_active = _process_group_activity(pgid, gpu_pids or set())
     return ProcessObservation(True, True, state, pgid, argv, cpu_ticks, gpu_active)
 
 
@@ -267,14 +313,23 @@ def _atomic_json(path: Path, value: Any) -> None:
 
 
 class RuntimeMonitor:
-    def __init__(self, campaign_dir: Path, *, now: callable = time.time) -> None:
+    def __init__(
+        self,
+        campaign_dir: Path,
+        *,
+        now: callable = time.time,
+        disk_scope: str = "host",
+    ) -> None:
         self.campaign_dir = campaign_dir.resolve()
         self.now = now
         self.status_path = self.campaign_dir / "agent-output" / "runtime-monitor" / "status.json"
         self.events_path = self.campaign_dir / "agent-output" / "runtime-monitor" / "events.jsonl"
         self.incidents_path = self.campaign_dir / "agent-output" / "runtime-monitor" / "incidents.jsonl"
         self._previous_cpu: dict[str, int] = {}
-        self._oom_seen: dict[str, int] = {}
+        self._oom_fingerprints: dict[str, set[str]] = {}
+        if disk_scope not in {"host", "sandbox", "unknown"}:
+            raise ValueError(f"unsupported disk scope: {disk_scope}")
+        self.disk_scope = disk_scope
 
     def poll(self) -> dict[str, Any]:
         now = float(self.now())
@@ -285,17 +340,27 @@ class RuntimeMonitor:
         all_error_text: list[tuple[str, str]] = []
         for item in candidates:
             data = item.data
-            obs = observe_process(data, gpu_pids)
+            obs = observe_process(data, gpu_pids, now)
             observations[item.candidate_id] = obs
             text = str(data.get("failure_reason", ""))
-            stdout = Path(data["stdout_path"])
-            if not stdout.is_absolute():
-                stdout = self.campaign_dir / stdout
-            text += "\n" + _tail(stdout)
+            for output_key in ("stdout_path", "stderr_path"):
+                output_value = data.get(output_key)
+                if not isinstance(output_value, str):
+                    continue
+                output_path = Path(output_value)
+                if not output_path.is_absolute():
+                    output_path = self.campaign_dir / output_path
+                text += "\n" + _tail(output_path)
             all_error_text.append((item.candidate_id, text))
-            if not obs.identity_ok and obs.present:
+            if (
+                not obs.identity_ok
+                and obs.present
+                and not (obs.reason or "").startswith("isolated pid namespace")
+            ):
                 incidents.append(self._incident(item.candidate_id, "identity_mismatch", "major", obs.reason or "pid identity mismatch"))
-            if data["state"] == "running" and not obs.present:
+            if data["state"] == "running" and obs.reason == "isolated pid namespace heartbeat stale":
+                incidents.append(self._incident(item.candidate_id, "heartbeat_stale", "major", "isolated-namespace heartbeat stopped refreshing"))
+            elif data["state"] == "running" and not obs.present:
                 severity = "major" if now >= float(data["deadline"]) else "warning"
                 incidents.append(self._incident(item.candidate_id, "process_absent", severity, "running heartbeat has no matching process"))
             elif data["state"] == "running" and now >= float(data["deadline"]):
@@ -311,10 +376,19 @@ class RuntimeMonitor:
                 self._previous_cpu[item.candidate_id] = obs.cpu_ticks
         for item in malformed:
             incidents.append(self._incident(None, "malformed_heartbeat", "major", item["error"], path=item["path"]))
-        oom = [(cid, txt) for cid, txt in all_error_text if OOM_RE.search(txt)]
-        for cid, _ in oom:
-            self._oom_seen[cid] = self._oom_seen.get(cid, 0) + 1
-        repeated_oom_ids = {cid for cid, count in self._oom_seen.items() if count >= 2}
+        oom: list[tuple[str, str]] = []
+        for cid, txt in all_error_text:
+            fingerprints = {
+                hashlib.sha256(line.strip().lower().encode("utf-8", "replace")).hexdigest()
+                for line in txt.splitlines()
+                if OOM_RE.search(line)
+            }
+            if fingerprints:
+                oom.append((cid, txt))
+            self._oom_fingerprints.setdefault(cid, set()).update(fingerprints)
+        repeated_oom_ids = {
+            cid for cid, fingerprints in self._oom_fingerprints.items() if len(fingerprints) >= 2
+        }
         cuda = [(cid, txt) for cid, txt in all_error_text if CUDA_LOST_RE.search(txt)]
         imports = [(cid, txt) for cid, txt in all_error_text if IMPORT_RE.search(txt)]
         if len(oom) >= 2 or repeated_oom_ids:
@@ -326,7 +400,7 @@ class RuntimeMonitor:
         if imports:
             incidents.append(self._incident(imports[0][0], "unsupported_exec_import", "major", "unsupported executable/import failure evidence found"))
         disk = shutil.disk_usage(self.campaign_dir)
-        if disk.free < LOW_DISK_BYTES:
+        if self.disk_scope == "host" and disk.free < LOW_DISK_BYTES:
             incidents.append(self._incident(None, "low_disk", "major", f"free bytes {disk.free} below {LOW_DISK_BYTES}"))
         event_keys = _existing_event_keys(self.events_path)
         emitted = []
@@ -343,7 +417,9 @@ class RuntimeMonitor:
             obs = observations[item.candidate_id]
             candidate_rows.append({
                 "candidate_id": item.candidate_id, "path": str(item.path), "state": item.data["state"],
-                "pid": item.data["pid"], "identity_ok": obs.identity_ok, "process_present": obs.present,
+                "pid": item.data["pid"], "identity_ok": obs.identity_ok,
+                "identity_verified": not (obs.reason or "").startswith("isolated"),
+                "process_present": obs.present,
                 "process_state": obs.state, "cpu_ticks": obs.cpu_ticks, "gpu_active": obs.gpu_active,
                 "last_output_at": item.data["last_output_at"], "deadline": item.data["deadline"],
                 "exit_code": item.data["exit_code"], "auto_actions": _redact(item.data["auto_actions"]),
@@ -351,10 +427,22 @@ class RuntimeMonitor:
             })
         status = {
             "schema_version": 1, "observed_at": now, "campaign_dir": str(self.campaign_dir),
-            "disk": {"free_bytes": disk.free, "used_bytes": disk.used, "total_bytes": disk.total, "low_threshold_bytes": LOW_DISK_BYTES},
+            "disk": {
+                "free_bytes": disk.free,
+                "used_bytes": disk.used,
+                "total_bytes": disk.total,
+                "low_threshold_bytes": LOW_DISK_BYTES,
+                "scope": self.disk_scope,
+            },
             "candidates": candidate_rows,
             "summary": {"total": len(candidates), "malformed": len(malformed), "running": sum(x["state"] == "running" for x in candidate_rows), "completed": sum(x["state"] == "completed" for x in candidate_rows), "failed": sum(x["state"] in {"failed", "timed_out"} for x in candidate_rows), "major_incidents": sum(x["severity"] == "major" for x in incidents)},
-            "incidents": incidents[-100:], "monitor": {"stale_seconds": STALE_SECONDS, "read_only": True},
+            "incidents": incidents[-100:],
+            "monitor": {
+                "stale_seconds": STALE_SECONDS,
+                "heartbeat_stale_seconds": HEARTBEAT_STALE_SECONDS,
+                "disk_scope": self.disk_scope,
+                "read_only": True,
+            },
         }
         _atomic_json(self.status_path, status)
         return status
