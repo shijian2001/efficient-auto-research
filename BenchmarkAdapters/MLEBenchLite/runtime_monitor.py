@@ -35,7 +35,7 @@ SENSITIVE = re.compile(r"(?i)(?:token|secret|password|authorization|api[_-]?key)
 OOM_RE = re.compile(r"(?:out\s+of\s+memory|oom-kill|cuda\s+out\s+of\s+memory|cublas_status_alloc_failed)", re.I)
 CUDA_LOST_RE = re.compile(r"(?:cuda(?:\s+error)?[^\n]{0,80}(?:device|context).{0,20}(?:lost|reset|unavailable)|device-side assert|nccl.*(?:unhandled|failure))", re.I)
 IMPORT_RE = re.compile(r"(?:unsupported|unknown)[^\n]{0,80}(?:exec|executable)|(?:no module named|importerror|modulenotfounderror)", re.I)
-API_TIMEOUT_RE = re.compile(r"chat\.completions attempt \d+/\d+ failed: timed out", re.I)
+API_RETRY_RE = re.compile(r"(?:chat\.completions|responses?) attempt \d+/\d+ failed:", re.I)
 
 REQUIRED_HEARTBEAT = (
     "pid", "pgid", "process_start_ticks", "argv", "started_at", "last_output_at",
@@ -163,7 +163,7 @@ def discover_api_timeout_lines(campaign_dir: Path) -> list[tuple[Path, str]]:
     rows: list[tuple[Path, str]] = []
     for path in sorted(campaign_dir.glob("**/agent-output/relay.log")):
         for line in _tail(path).splitlines():
-            if API_TIMEOUT_RE.search(line):
+            if API_RETRY_RE.search(line):
                 rows.append((path, line.strip()))
     return rows
 
@@ -349,12 +349,16 @@ class RuntimeMonitor:
         *,
         now: callable = time.time,
         disk_scope: str = "host",
+        output_prefix: str = "",
     ) -> None:
         self.campaign_dir = campaign_dir.resolve()
         self.now = now
-        self.status_path = self.campaign_dir / "agent-output" / "runtime-monitor" / "status.json"
-        self.events_path = self.campaign_dir / "agent-output" / "runtime-monitor" / "events.jsonl"
-        self.incidents_path = self.campaign_dir / "agent-output" / "runtime-monitor" / "incidents.jsonl"
+        if any(char in output_prefix for char in "/\\"):
+            raise ValueError("monitor output prefix must be a filename prefix")
+        monitor_dir = self.campaign_dir / "agent-output" / "runtime-monitor"
+        self.status_path = monitor_dir / f"{output_prefix}status.json"
+        self.events_path = monitor_dir / f"{output_prefix}events.jsonl"
+        self.incidents_path = monitor_dir / f"{output_prefix}incidents.jsonl"
         self._previous_cpu: dict[str, int] = {}
         self._oom_fingerprints: dict[str, set[str]] = {}
         self._seen_api_timeout_lines: set[str] = set()
@@ -441,12 +445,14 @@ class RuntimeMonitor:
                 new_api_timeouts.append((path, line))
         if new_api_timeouts:
             severity = "major" if len(new_api_timeouts) >= 6 else "warning"
+            all_timeout = all("timed out" in line.lower() for _, line in new_api_timeouts)
+            code = "api_timeout_retries" if all_timeout else "api_retry_failures"
             incidents.append(
                 self._incident(
                     None,
-                    "api_timeout_retries",
+                    code,
                     severity,
-                    f"{len(new_api_timeouts)} new chat completion timeout retries observed",
+                    f"{len(new_api_timeouts)} new API retry failures observed",
                     paths=sorted({str(path) for path, _ in new_api_timeouts}),
                 )
             )
@@ -521,7 +527,7 @@ class RuntimeMonitor:
                 }
                 for path, heartbeat in native_heartbeats
             ],
-            "api": {"new_timeout_retries": len(new_api_timeouts)},
+            "api": {"new_retry_failures": len(new_api_timeouts)},
             "monitor": {
                 "stale_seconds": STALE_SECONDS,
                 "heartbeat_stale_seconds": HEARTBEAT_STALE_SECONDS,
@@ -549,10 +555,15 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--campaign-dir", required=True, type=Path)
     parser.add_argument("--poll", type=float, default=30.0, help="poll interval in seconds (default: 30)")
     parser.add_argument("--once", action="store_true", help="poll once and exit")
+    parser.add_argument(
+        "--output-prefix",
+        default="",
+        help="filename prefix for status/events/incidents (use internal- or host- to avoid races)",
+    )
     args = parser.parse_args(argv)
     if not args.campaign_dir.is_dir():
         parser.error(f"campaign directory does not exist: {args.campaign_dir}")
-    monitor = RuntimeMonitor(args.campaign_dir)
+    monitor = RuntimeMonitor(args.campaign_dir, output_prefix=args.output_prefix)
     if args.once:
         monitor.poll()
     else:
