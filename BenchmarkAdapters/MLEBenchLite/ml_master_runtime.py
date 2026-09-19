@@ -138,9 +138,25 @@ def run_candidate(command: str, cwd: str | None, environment: dict[str, str], ti
                 data["updated_at"] = now
                 atomic_json(heartbeat_path, data)
                 errors = tail(stderr_path, 16384)
-                if "AF_UNIX path too long" in errors or "No space left on device" in errors:
-                    failure = "Infrastructure error in candidate stderr; stopped candidate for native recovery."
-                    actions.append("stop_known_infrastructure_failure_and_return_to_debug")
+                offline_download = (
+                    "Downloading:" in errors
+                    or "download.pytorch.org" in errors
+                    or "huggingface.co" in errors and "download" in errors.lower()
+                )
+                if (
+                    "AF_UNIX path too long" in errors
+                    or "No space left on device" in errors
+                    or offline_download
+                ):
+                    if offline_download:
+                        failure = (
+                            "Candidate attempted an offline model-weight download; stopped it "
+                            "and returned the error to the native debug agent."
+                        )
+                        actions.append("stop_offline_model_download_and_return_to_debug")
+                    else:
+                        failure = "Infrastructure error in candidate stderr; stopped candidate for native recovery."
+                        actions.append("stop_known_infrastructure_failure_and_return_to_debug")
                     stop_group(process)
                     break
                 if time.monotonic() >= mono_deadline:
