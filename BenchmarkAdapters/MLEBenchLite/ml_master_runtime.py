@@ -107,7 +107,12 @@ def run_candidate(command: str, cwd: str | None, environment: dict[str, str], ti
     _apply_candidate_runtime_guards(cwd, env, actions)
     started = time.time()
     global_deadline = float(env.get("ML_MASTER_DEADLINE_EPOCH", started + timeout + 90))
-    allowance = min(float(timeout), float(env.get("ML_MASTER_CHILD_TIMEOUT_SECONDS", "5400")),
+    # The candidate is allowed to use the whole remaining cell budget. There is
+    # intentionally no fixed 90-minute watchdog here: a slow but valid Agent
+    # training run is its responsibility, while the outer 12-hour deadline is
+    # the only formal wall-clock limit. Keep the environment value as an
+    # optional coordination bound for callers that explicitly provide one.
+    allowance = min(float(timeout), float(env.get("ML_MASTER_CHILD_TIMEOUT_SECONDS", str(timeout))),
                     max(0, global_deadline - started - 90))
     if allowance <= 0:
         message = "Global run budget exhausted; preserve the existing best submission."
@@ -147,7 +152,7 @@ def run_candidate(command: str, cwd: str | None, environment: dict[str, str], ti
                     or ("huggingface.co" in errors and "download" in errors.lower())
                     or ("huggingface.co" in output_tail and "download" in output_tail.lower())
                 )
-                if (
+                if env.get("ML_MASTER_CANDIDATE_POLICY") != "native" and (
                     "AF_UNIX path too long" in errors
                     or "No space left on device" in errors
                     or offline_download

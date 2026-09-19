@@ -1219,7 +1219,14 @@ def _ml_master_command(request: MleLiteRequest) -> CommandSpec:
             "TMPDIR": "/tmp",
             "PYTHONUNBUFFERED": "1",
             "ML_MASTER_RUN_TIMEOUT_SECONDS": str(request.timeout_seconds),
-            "ML_MASTER_CHILD_TIMEOUT_SECONDS": str(min(5400, max(1, request.timeout_seconds - 90))),
+            # Do not impose an arbitrary per-candidate wall-clock cap. The
+            # Agent owns the candidate's training choice; the formal cell owns
+            # only the whole-run deadline. Reserve 90 seconds before it for
+            # final artifact publication.
+            "ML_MASTER_CHILD_TIMEOUT_SECONDS": str(max(1, request.timeout_seconds - 90)),
+            # Let native execution/debug handle candidate failures. Monitoring
+            # must not abort a candidate based on download/error output.
+            "ML_MASTER_CANDIDATE_POLICY": "native",
             "ML_MASTER_STREAM_COMMAND_OUTPUT": "1",
             "ML_MASTER_EXECUTION_HELPER": str(Path(__file__).with_name("ml_master_runtime.py")),
             "ML_MASTER_MONITOR_DIR": str(request.output_dir.resolve() / "runtime-monitor"),

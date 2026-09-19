@@ -3,7 +3,9 @@ from __future__ import annotations
 import json
 import os
 import signal
+import shlex
 import sys
+import time
 from pathlib import Path
 
 import pytest
@@ -70,4 +72,43 @@ def test_monitor_failure_preserves_child_lifecycle(
     else:
         assert marker.read_text() == "completed"
         assert heartbeat["return_code"] == child_exit
+    assert not Path(f"/proc/{heartbeat['pid']}").exists()
+
+
+@pytest.mark.parametrize("legacy_cap", [None, "43110", "5400"])
+def test_candidate_gets_remaining_budget_without_default_ninety_minute_cap(tmp_path, legacy_cap):
+    environment = {**os.environ, "ML_MASTER_MONITOR_DIR": str(tmp_path),
+                   "ML_MASTER_DEADLINE_EPOCH": str(time.time() + 43200),
+                   "ML_MASTER_CANDIDATE_POLICY": "native"}
+    environment.pop("ML_MASTER_CHILD_TIMEOUT_SECONDS", None)
+    if legacy_cap:
+        environment["ML_MASTER_CHILD_TIMEOUT_SECONDS"] = legacy_cap
+    command = shlex.join([sys.executable, "-c", "import time; time.sleep(0.1)"])
+    result = runtime.run_candidate(command, str(tmp_path), environment, 86400)
+    assert result["exit_code"] == 0
+    heartbeat = json.loads(next(tmp_path.glob("candidate-*.json")).read_text())
+    allowance = heartbeat["deadline"] - heartbeat["started_at"]
+    if legacy_cap == "5400":
+        # Existing Cactus processes keep the configuration they launched with.
+        assert allowance == 5400
+    else:
+        assert 43000 < allowance <= 43110
+
+
+@pytest.mark.parametrize("native_timeout", [0.2, 86400])
+def test_native_policy_ignores_error_text_but_enforces_real_time_limits(tmp_path, native_timeout):
+    environment = {**os.environ, "ML_MASTER_MONITOR_DIR": str(tmp_path),
+                   "ML_MASTER_DEADLINE_EPOCH": str(time.time() + 90.4),
+                   "ML_MASTER_CANDIDATE_POLICY": "native"}
+    environment.pop("ML_MASTER_CHILD_TIMEOUT_SECONDS", None)
+    command = shlex.join([sys.executable, "-c",
+                         "import time; print('Downloading: weights; AF_UNIX path too long', flush=True); time.sleep(30)"])
+    result = runtime.run_candidate(command, str(tmp_path), environment, native_timeout)
+    heartbeat = json.loads(next(tmp_path.glob("candidate-*.json")).read_text())
+    assert result["exit_code"] == -1
+    assert heartbeat["state"] == "timed_out"
+    assert "Downloading:" in result["stdout"]
+    assert "stop_candidate_at_deadline_and_return_to_debug" in heartbeat["auto_actions"]
+    assert not any("offline" in action or "infrastructure_failure" in action
+                   for action in heartbeat["auto_actions"])
     assert not Path(f"/proc/{heartbeat['pid']}").exists()

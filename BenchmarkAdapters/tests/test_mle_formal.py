@@ -220,6 +220,12 @@ def test_every_mle_launcher_declares_one_explicit_final_artifact(
         assert "prepared/public" in command_text
         assert "--mlebench-data-dir" not in command.argv
         assert "--skip-final-validation" in command.argv
+    if agent == "ml-master-2":
+        from dataclasses import replace
+
+        command = MleLiteAdapter(agent).build_command(replace(request, timeout_seconds=43200))
+        assert command.env["ML_MASTER_CHILD_TIMEOUT_SECONDS"] == "43110"
+        assert command.env["ML_MASTER_CANDIDATE_POLICY"] == "native"
 
 
 def test_native_wrappers_publish_only_declared_final_path(tmp_path: Path) -> None:
