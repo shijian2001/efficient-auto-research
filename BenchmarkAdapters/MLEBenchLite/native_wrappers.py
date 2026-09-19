@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import filecmp
 import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
+from typing import Callable
 
 
 # Seconds allowed for the launcher to exit on SIGTERM before it is killed, and
@@ -22,6 +25,10 @@ def _copy_exclusive(source: Path, destination: Path) -> None:
     if not source.is_file() or source.is_symlink() or source.stat().st_size <= 0:
         raise RuntimeError(f"native launcher did not produce a regular final artifact: {source}")
     destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.exists() or destination.is_symlink():
+        if destination.is_file() and not destination.is_symlink() and filecmp.cmp(source, destination, shallow=False):
+            return
+        raise RuntimeError(f"refusing to overwrite native final artifact: {destination}")
     try:
         with source.open("rb") as input_handle, destination.open("xb") as output_handle:
             shutil.copyfileobj(input_handle, output_handle)
@@ -31,7 +38,42 @@ def _copy_exclusive(source: Path, destination: Path) -> None:
         raise RuntimeError(f"refusing to overwrite native final artifact: {destination}") from exc
 
 
-def _run_native(argv: list[str], *, budget_seconds: float | None = None) -> None:
+def _publish_live(source: Path, destination: Path) -> bool:
+    """Publish a stable best submission while the native Agent is still running.
+
+    ML-Master can spend a long time in a later LLM/API phase after it has already
+    promoted a valid submission.  The live copy is deliberately idempotent and
+    uses a same-directory replace so readers never observe a partial CSV.
+    """
+    source = source.resolve()
+    if not source.is_file() or source.is_symlink() or source.stat().st_size <= 0:
+        return False
+    destination = destination.resolve()
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    if destination.is_file() and not destination.is_symlink():
+        if filecmp.cmp(source, destination, shallow=False):
+            return True
+        return False
+    temporary = destination.with_name(f".{destination.name}.live-{os.getpid()}-{time.time_ns()}")
+    try:
+        with source.open("rb") as input_handle, temporary.open("wb") as output_handle:
+            shutil.copyfileobj(input_handle, output_handle)
+            output_handle.flush()
+        os.replace(temporary, destination)
+        return True
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+
+
+def _run_native(
+    argv: list[str],
+    *,
+    budget_seconds: float | None = None,
+    on_tick: Callable[[], None] | None = None,
+) -> None:
     """Run the native launcher, stopping it in time to still publish its artifact.
 
     The outer adapter kills this whole process tree at budget+120s. That backstop
@@ -58,21 +100,33 @@ def _run_native(argv: list[str], *, budget_seconds: float | None = None) -> None
         return
 
     process = subprocess.Popen(argv)
-    try:
-        return_code = process.wait(timeout=max(1.0, budget_seconds))
-    except subprocess.TimeoutExpired:
-        process.terminate()
+    deadline = time.monotonic() + max(1.0, budget_seconds)
+    return_code: int | None = None
+    while return_code is None:
         try:
-            process.wait(timeout=_GRACE_SECONDS)
+            return_code = process.wait(timeout=min(2.0, max(0.05, deadline - time.monotonic())))
         except subprocess.TimeoutExpired:
-            process.kill()
-            process.wait()
-        print(
-            f"native launcher reached its {budget_seconds:.0f}s budget; "
-            "publishing the artifact it had already written",
-            file=sys.stderr,
-        )
-        return
+            if on_tick is not None:
+                try:
+                    on_tick()
+                except OSError:
+                    # A live mirror must never turn a valid native run into a
+                    # failed run because the host filesystem is under pressure.
+                    pass
+            if time.monotonic() < deadline:
+                continue
+            process.terminate()
+            try:
+                process.wait(timeout=_GRACE_SECONDS)
+            except subprocess.TimeoutExpired:
+                process.kill()
+                process.wait()
+            print(
+                f"native launcher reached its {budget_seconds:.0f}s budget; "
+                "publishing the artifact it had already written",
+                file=sys.stderr,
+            )
+            return
     if return_code:
         raise RuntimeError(f"native launcher exited with code {return_code}")
 
@@ -98,9 +152,21 @@ def run_ml_master(
     *,
     budget_seconds: float | None = None,
 ) -> None:
-    _run_native(argv, budget_seconds=budget_seconds)
     source = workspace_dir.resolve() / "best_submission/submission.csv"
-    _copy_exclusive(source, output_dir.resolve() / "submission.csv")
+    destination = output_dir.resolve() / "submission.csv"
+    try:
+        _run_native(
+            argv,
+            budget_seconds=budget_seconds,
+            on_tick=lambda: _publish_live(source, destination),
+        )
+    except RuntimeError:
+        # Preserve a valid artifact if the native research loop fails after it
+        # has already promoted a best candidate.  The host grader still decides
+        # whether the published CSV is valid.
+        if not _publish_live(source, destination):
+            raise
+    _copy_exclusive(source, destination)
 
 
 def main(argv: list[str] | None = None) -> int:

@@ -316,7 +316,7 @@ def _existing_event_keys(path: Path) -> set[str]:
     return keys
 
 
-def _append_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
+def _append_jsonl(path: Path, rows: Iterable[dict[str, Any]], *, sync: bool = True) -> None:
     rows = list(rows)
     if not rows:
         return
@@ -325,10 +325,11 @@ def _append_jsonl(path: Path, rows: Iterable[dict[str, Any]]) -> None:
         for row in rows:
             fh.write(json.dumps(_redact(row), ensure_ascii=False, sort_keys=True) + "\n")
         fh.flush()
-        os.fsync(fh.fileno())
+        if sync:
+            os.fsync(fh.fileno())
 
 
-def _atomic_json(path: Path, value: Any) -> None:
+def _atomic_json(path: Path, value: Any, *, sync: bool = True) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, temporary = tempfile.mkstemp(prefix=f".{path.name}.", dir=str(path.parent))
     try:
@@ -336,7 +337,8 @@ def _atomic_json(path: Path, value: Any) -> None:
             json.dump(_redact(value), fh, ensure_ascii=False, indent=2, sort_keys=True)
             fh.write("\n")
             fh.flush()
-            os.fsync(fh.fileno())
+            if sync:
+                os.fsync(fh.fileno())
         os.replace(temporary, path)
     finally:
         try:
@@ -353,6 +355,7 @@ class RuntimeMonitor:
         now: callable = time.time,
         disk_scope: str = "host",
         output_prefix: str = "",
+        durable_writes: bool = True,
     ) -> None:
         self.campaign_dir = campaign_dir.resolve()
         self.now = now
@@ -369,6 +372,7 @@ class RuntimeMonitor:
         if disk_scope not in {"host", "sandbox", "unknown"}:
             raise ValueError(f"unsupported disk scope: {disk_scope}")
         self.disk_scope = disk_scope
+        self.durable_writes = durable_writes
 
     def poll(self) -> dict[str, Any]:
         now = float(self.now())
@@ -501,8 +505,8 @@ class RuntimeMonitor:
             if incident["event_key"] not in event_keys:
                 emitted.append(incident)
                 event_keys.add(incident["event_key"])
-        _append_jsonl(self.events_path, emitted)
-        _append_jsonl(self.incidents_path, emitted)
+        _append_jsonl(self.events_path, emitted, sync=self.durable_writes)
+        _append_jsonl(self.incidents_path, emitted, sync=self.durable_writes)
         candidate_rows = []
         for item in candidates:
             obs = observations[item.candidate_id]
@@ -549,7 +553,7 @@ class RuntimeMonitor:
                 "read_only": True,
             },
         }
-        _atomic_json(self.status_path, status)
+        _atomic_json(self.status_path, status, sync=self.durable_writes)
         return status
 
     @staticmethod
@@ -574,10 +578,19 @@ def main(argv: list[str] | None = None) -> int:
         default="",
         help="filename prefix for status/events/incidents (use internal- or host- to avoid races)",
     )
+    parser.add_argument(
+        "--no-fsync",
+        action="store_true",
+        help="avoid blocking on filesystem journal flushes for live host monitoring",
+    )
     args = parser.parse_args(argv)
     if not args.campaign_dir.is_dir():
         parser.error(f"campaign directory does not exist: {args.campaign_dir}")
-    monitor = RuntimeMonitor(args.campaign_dir, output_prefix=args.output_prefix)
+    monitor = RuntimeMonitor(
+        args.campaign_dir,
+        output_prefix=args.output_prefix,
+        durable_writes=not args.no_fsync,
+    )
     if args.once:
         monitor.poll()
     else:

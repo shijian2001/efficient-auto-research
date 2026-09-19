@@ -5,10 +5,19 @@ from __future__ import annotations
 import argparse
 import copy
 import json
+import os
 import shutil
 from pathlib import Path
 
 import yaml
+
+
+def _link_or_copy(source: str, destination: str) -> None:
+    """Stage public data without duplicating multi-GB image trees when possible."""
+    try:
+        os.link(source, destination)
+    except OSError:
+        shutil.copy2(source, destination)
 
 
 def main() -> int:
@@ -32,7 +41,7 @@ def main() -> int:
         args.staged_data_root / args.competition_id / "prepared/public"
     )
     public_destination.parent.mkdir(parents=True, exist_ok=False)
-    shutil.copytree(args.public_dir, public_destination)
+    shutil.copytree(args.public_dir, public_destination, copy_function=_link_or_copy)
     payload["competition_id"] = args.competition_id
     payload["data_root"] = str(args.staged_data_root.resolve())
     # Upstream resolves every agent-local relative asset (the prompts/*.txt
