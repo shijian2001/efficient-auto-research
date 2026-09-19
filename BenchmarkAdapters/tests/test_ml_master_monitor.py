@@ -4,9 +4,13 @@ import json
 import os
 from pathlib import Path
 
+import pytest
+
 from BenchmarkAdapters.MLEBenchLite.runtime_monitor import (
     RuntimeMonitor,
+    discover_api_events,
     discover_candidates,
+    discover_native_heartbeats,
     observe_process,
 )
 
@@ -188,3 +192,76 @@ def test_consecutive_api_retries_escalate_to_major(tmp_path, monkeypatch):
     incident = next(item for item in status["incidents"] if item["code"] == "api_timeout_retries")
     assert incident["severity"] == "major"
     assert "streak=6" in incident["detail"]
+
+
+def test_discovery_avoids_scratch_and_survives_directory_removal(tmp_path, monkeypatch):
+    root = tmp_path / "campaign"
+    cell = root / "round-01/task/ml-master-2/seed-0/task"
+    _heartbeat(cell, state="completed", exit_code=0)
+    output = cell / "agent-output"
+    native = output / "runtime-monitor/native-heartbeat.json"
+    native.write_text(json.dumps({"state": "running", "updated_at": 1000}))
+    relay = output / "relay.log"
+    relay.write_text("chat.completions attempt 1/21 failed: timed out\n")
+    scratch = output / "tmp/pymp-vanishing"
+    scratch.mkdir(parents=True)
+    # Directory churn outside agent-output must not hide a healthy sibling cell.
+    disappearing = root / "removed-during-scan"
+    disappearing.mkdir()
+    scanned = []
+    scandir = os.scandir
+
+    def racing_scandir(path):
+        directory = Path(path)
+        scanned.append(directory)
+        if directory == disappearing:
+            directory.rmdir()
+        if directory == scratch:
+            directory.rmdir()
+        return scandir(path)
+
+    monkeypatch.setattr(os, "scandir", racing_scandir)
+    candidates, errors = discover_candidates(root)
+    assert [item.candidate_id for item in candidates] == ["abc"]
+    assert errors == []
+    assert [path for path, _ in discover_native_heartbeats(root)] == [native]
+    assert [path for path, _, _ in discover_api_events(root)] == [relay]
+    assert disappearing in scanned
+    assert not disappearing.exists()
+    assert scratch.exists()
+    assert not any(output / name in scanned for name in ("tmp", "workspace", "native"))
+
+
+def test_monitor_retries_after_status_write_failure(tmp_path, monkeypatch, caplog):
+    from BenchmarkAdapters.MLEBenchLite import runtime_monitor as module
+
+    _heartbeat(tmp_path, state="completed", exit_code=0)
+    monkeypatch.setattr(module, "_gpu_pids", lambda: set())
+    original = module._atomic_json
+    writes = []
+
+    def write_once_failing(path, value, **kwargs):
+        writes.append(path)
+        if len(writes) == 1:
+            raise OSError("No space left on device")
+        return original(path, value, **kwargs)
+
+    monkeypatch.setattr(module, "_atomic_json", write_once_failing)
+    monitor = RuntimeMonitor(tmp_path, durable_writes=False)
+    assert monitor.poll_safely() is None
+    assert "will retry without stopping the Agent" in caplog.text
+    status = monitor.poll_safely()
+    assert status["summary"]["completed"] == 1
+    assert json.loads(monitor.status_path.read_text())["summary"]["completed"] == 1
+
+
+@pytest.mark.parametrize("signal_error", [KeyboardInterrupt, SystemExit])
+def test_safe_poll_preserves_cancellation(tmp_path, monkeypatch, signal_error):
+    monitor = RuntimeMonitor(tmp_path)
+
+    def cancelled():
+        raise signal_error()
+
+    monkeypatch.setattr(monitor, "poll", cancelled)
+    with pytest.raises(signal_error):
+        monitor.poll_safely()

@@ -261,7 +261,7 @@ def main(argv: list[str] | None = None) -> int:
             while process.poll() is None:
                 heartbeat["updated_at"]=time.time()
                 atomic_json(directory/"native-heartbeat.json",heartbeat)
-                monitor.poll()
+                monitor.poll_safely()
                 if time.time()>=deadline:
                     stop_group(process)
                     heartbeat["state"]="budget_expired"
@@ -273,7 +273,7 @@ def main(argv: list[str] | None = None) -> int:
             if heartbeat["state"]=="running":
                 heartbeat["state"]="completed" if process.returncode==0 else "failed"
             atomic_json(directory/"native-heartbeat.json",heartbeat)
-            monitor.poll()
+            monitor.poll_safely()
     return 0 if heartbeat["state"]=="budget_expired" else int(process.returncode or 0)
 
 

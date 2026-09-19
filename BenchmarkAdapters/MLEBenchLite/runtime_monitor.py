@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import logging
 import os
 import re
 import shutil
@@ -21,7 +22,7 @@ from typing import Any, Iterable
 
 MONITOR_DIR = Path("agent-output") / "runtime-monitor"
 HEARTBEAT_GLOB = "candidate-*.json"
-NATIVE_HEARTBEAT_GLOB = "**/agent-output/runtime-monitor/native-heartbeat.json"
+logger = logging.getLogger(__name__)
 STALE_SECONDS = 15 * 60
 # A host-side monitor cannot inspect a process in bwrap's private PID
 # namespace.  It may use a heartbeat as evidence, but only while that
@@ -122,9 +123,32 @@ def _candidate_id(path: Path, data: dict[str, Any]) -> str:
     return path.stem.removeprefix("candidate-")
 
 
+def _discovery_error(error: OSError) -> None:
+    # A directory can disappear between os.walk listing it and entering it.
+    if not isinstance(error, (FileNotFoundError, NotADirectoryError)):
+        raise error
+
+
+def _discover_paths(campaign_dir: Path, relative_pattern: str) -> list[Path]:
+    """Find telemetry without descending into Agent workspaces or scratch data."""
+    paths: list[Path] = []
+    for directory, names, _ in os.walk(campaign_dir, onerror=_discovery_error, followlinks=False):
+        if "agent-output" not in names:
+            continue
+        names.remove("agent-output")
+        output = Path(directory) / "agent-output"
+        if output.is_symlink():
+            continue
+        try:
+            paths.extend(output.glob(relative_pattern))
+        except (FileNotFoundError, NotADirectoryError):
+            continue
+    return sorted(paths)
+
+
 def discover_candidates(campaign_dir: Path) -> tuple[list[Candidate], list[dict[str, Any]]]:
     """Discover only heartbeat paths; never recursively inspect arbitrary files."""
-    paths = sorted(campaign_dir.glob("**/agent-output/runtime-monitor/candidate-*.json"))
+    paths = _discover_paths(campaign_dir, "runtime-monitor/candidate-*.json")
     candidates: list[Candidate] = []
     errors: list[dict[str, Any]] = []
     for path in paths:
@@ -144,7 +168,7 @@ def discover_candidates(campaign_dir: Path) -> tuple[list[Candidate], list[dict[
 def discover_native_heartbeats(campaign_dir: Path) -> list[tuple[Path, dict[str, Any]]]:
     """Read native wrapper heartbeats without trusting their PID namespace."""
     result: list[tuple[Path, dict[str, Any]]] = []
-    for path in sorted(campaign_dir.glob(NATIVE_HEARTBEAT_GLOB)):
+    for path in _discover_paths(campaign_dir, "runtime-monitor/native-heartbeat.json"):
         try:
             raw = _json_load(path)
         except (OSError, ValueError, json.JSONDecodeError):
@@ -162,7 +186,7 @@ def discover_native_heartbeats(campaign_dir: Path) -> list[tuple[Path, dict[str,
 def discover_api_events(campaign_dir: Path) -> list[tuple[Path, str, str]]:
     """Return retry/success relay events, without copying relay contents."""
     rows: list[tuple[Path, str, str]] = []
-    for path in sorted(campaign_dir.glob("**/agent-output/relay.log")):
+    for path in _discover_paths(campaign_dir, "relay.log"):
         for line in _tail(path).splitlines():
             if API_RETRY_RE.search(line):
                 rows.append((path, line.strip(), "retry"))
@@ -564,8 +588,24 @@ class RuntimeMonitor:
 
     def run_forever(self, poll_seconds: float = 30.0) -> None:
         while True:
-            self.poll()
+            self.poll_safely()
             time.sleep(max(0.1, poll_seconds))
+
+    def poll_safely(self) -> dict[str, Any] | None:
+        """A telemetry failure must not kill a monitored training process.
+
+        Log failures and retry on the next tick. Cancellation and termination
+        signals (BaseException) still propagate to the runtime's cleanup.
+        """
+        try:
+            return self.poll()
+        except Exception as exc:
+            logger.warning(
+                "Runtime monitor poll failed (%s); will retry without stopping the Agent: %s",
+                type(exc).__name__,
+                _redact(str(exc)),
+            )
+            return None
 
 
 def main(argv: list[str] | None = None) -> int:
