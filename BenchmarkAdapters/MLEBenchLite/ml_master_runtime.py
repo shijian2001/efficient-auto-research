@@ -138,10 +138,14 @@ def run_candidate(command: str, cwd: str | None, environment: dict[str, str], ti
                 data["updated_at"] = now
                 atomic_json(heartbeat_path, data)
                 errors = tail(stderr_path, 16384)
+                output_tail = tail(stdout_path, 16384)
                 offline_download = (
                     "Downloading:" in errors
+                    or "Downloading:" in output_tail
                     or "download.pytorch.org" in errors
-                    or "huggingface.co" in errors and "download" in errors.lower()
+                    or "download.pytorch.org" in output_tail
+                    or ("huggingface.co" in errors and "download" in errors.lower())
+                    or ("huggingface.co" in output_tail and "download" in output_tail.lower())
                 )
                 if (
                     "AF_UNIX path too long" in errors
