@@ -53,7 +53,9 @@ def _publish_live(source: Path, destination: Path) -> bool:
     if destination.is_file() and not destination.is_symlink():
         if filecmp.cmp(source, destination, shallow=False):
             return True
-        return False
+        # ML-Master may promote a better candidate later in the same native
+        # run. Replace the previously mirrored best atomically so the public
+        # artifact always follows the current best_submission.
     temporary = destination.with_name(f".{destination.name}.live-{os.getpid()}-{time.time_ns()}")
     try:
         with source.open("rb") as input_handle, temporary.open("wb") as output_handle:
