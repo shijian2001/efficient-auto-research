@@ -1,12 +1,11 @@
 # Docker Evaluation Harness
 
-This directory is the historical MLE Docker runner. It launches one Agent per
-container with a fixed GPU/CPU allocation and an in-container LLM relay, and it
-supports the older EAR, MLEvolve, and Arbor experiments. It is not the canonical
-entry point for the current seven-Agent x two-Benchmark comparison; use
-`BenchmarkAdapters/` with `mle-cell` and `terminal-ao` for that work. The host
-harness is outside the EAR Git worktree, so every historical run records launcher
-and relay SHA-256 values in `launch_manifest.json`.
+This directory contains the native MLE Docker runner and historical experiment
+launchers. Formal seven-Agent runs enter through `BenchmarkAdapters mle-cell`,
+which still calls `run_in_docker.sh` for EAR, MLEvolve and Arbor. Current campaign
+commands and paused-run handling live in the
+[runbook](../BenchmarkAdapters/docs/CAMPAIGN_LAUNCH.md); this page documents runner
+arguments, mounts and artifacts.
 
 ## EAR Generation
 
@@ -82,15 +81,15 @@ must use the frozen protocol, model track, source commits, and scorecard under
 
 | Variable | Meaning |
 |---|---|
-| `EAR_AGENT_DIR` | clean committed G7 worktree |
+| `EAR_AGENT_DIR` | clean committed Agent checkout; current formal EAR uses G3 |
 | `RUN_TAG` | unique run ID and output namespace |
 | `SEED` | Python/NumPy controller seed |
-| `EAR_INITIAL_ROOT_ATTEMPTS` | independent roots during bootstrap; default `3` |
-| `EAR_NEW_ROOT_STAGNATION` | stagnation threshold; default `8` |
-| `EAR_NEW_ROOT_COOLDOWN_ATTEMPTS` | minimum gap between fresh roots; default `4` |
+| `EAR_INITIAL_ROOT_ATTEMPTS` | historical generation-specific root policy; used only if the selected CLI supports it |
+| `EAR_NEW_ROOT_STAGNATION` | historical generation-specific stagnation policy |
+| `EAR_NEW_ROOT_COOLDOWN_ATTEMPTS` | historical generation-specific root cooldown |
 | `MODEL` | LLM model rewritten by relay; default `gpt-5.5` |
 | `LLM_REASONING_EFFORT` | relay reasoning effort; default `high` |
-| `DETACH=1` | run container in background |
+| `DETACH=1` | unsupported; runner exits because relay/format services share its lifecycle |
 
 Candidate code runs in an attempt-local subprocess with the public data directory
 and its own current working directory. The launcher does not inject a hidden
@@ -114,25 +113,25 @@ config SHA-256.
 
 ## LLM Relay
 
-Each container uses the repository-owned `BenchmarkAdapters/LLMRelay/server.py`
-service on host-network port `6200+GPU_ID`:
+The runner launches `BenchmarkAdapters/LLMRelay/server.py` on an allocated host
+port and exposes it through the Docker bridge. Port leases live in
+`.runtime/port-locks/`; relay, grading and download-forwarder ports are recorded
+for the run. They are not a fixed `6200 + GPU_ID` / `5200 + GPU_ID` table.
 
-```text
-agent -> http://127.0.0.1:620X/v1 -> relay proxy -> configured upstream
-```
+The shared model-track currently points to the host service on 6201. Dedicated
+controllers can supply a different model-track, such as v7's 6202/6203 lanes.
+Protocol conversion, output caps and token-accounting semantics are documented
+once in the [relay README](../BenchmarkAdapters/LLMRelay/README.md).
 
-The proxy rewrites the model, injects reasoning effort, normalizes unsupported
-parameters/messages, retries transport/rate/server failures, handles streaming
-and tool-call compatibility, and writes token usage to:
+Runner token logs retain the per-run path:
 
 ```text
 run-logs/<RUN_TAG>_token_usage/<agent>_<task>_gpu<N>.jsonl
 ```
 
-Relevant variables are `UPSTREAM_BASE_URL`, `UPSTREAM_API_KEY` or
-`OPENAI_API_KEY`, `LLM_UPSTREAM_TIMEOUT`, and `LLM_MAX_RETRIES`. Credentials are
-forwarded only through environment variables and are never printed or placed in
-the manifest.
+Upstream credentials are passed through environment variables, not the manifest.
+Use the [campaign runbook](../BenchmarkAdapters/docs/CAMPAIGN_LAUNCH.md) for shared
+service startup rather than copying a historical port configuration.
 
 ## Hardware and Mounts
 
@@ -142,7 +141,7 @@ the manifest.
 - Shared memory is 8 GiB.
 - The host conda environment is mounted read-only.
 - Project public data/cache paths are mounted for the outer agent and candidate.
-- LLM proxy ports use `6200+GPU_ID`; baseline grading ports use `5200+GPU_ID`.
+- Relay, grading and download proxy ports are allocated with per-port locks; read the run records for actual values.
 
 ## Outputs
 
@@ -202,3 +201,11 @@ Model download failure: verify the host proxy and writable model cache.
 The launcher has no hardcoded API credential. Any previously exposed credential
 must remain revoked and be rotated server-side. New credentials are accepted only
 through `UPSTREAM_API_KEY` or `OPENAI_API_KEY`.
+
+## Historical launcher names
+
+`launch_12h_ear_latest_6task.sh` and `watch_clean_gpus_and_launch_g7.sh` default to
+`ear-worktrees/g7-converged`, but that worktree was observed at G3 `7cd9ed5` on
+branch `ear/g3-rollback` on 2026-09-20. The directory/script name is not a version
+identifier. Historical launchers are not the current campaign resume interface;
+check the actual commit and generation before using one for a separate experiment.

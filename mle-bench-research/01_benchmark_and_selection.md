@@ -8,7 +8,7 @@
 > **当前评测边界（2026-08-16）**：本文记录的是历史六题选型，不代表当前
 > 22 题 × 7 Agent 的 MLE-Bench Lite 正式 campaign 已完成。统一 Adapter 的协议、资产、
 > 依赖和真实 smoke 状态以
-> [`BenchmarkAdapters/docs/SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md`](../BenchmarkAdapters/docs/SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md)
+> [Adapter 主文档](../BenchmarkAdapters/README.md)
 > 为准。
 
 ---

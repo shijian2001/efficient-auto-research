@@ -1,25 +1,21 @@
 # Efficient Agent Research
 
-本仓库包含 EAR 的历史研究，以及七个 Agent 的统一 Benchmark Adapter。
+本仓库研究 EAR 的 Agent 搜索效率，并维护 EAR 与六个 baseline 的统一 Benchmark Adapter。
+本机进行 **MLE-Bench Lite 22 题**和 **Terminal-Bench AO 36 dev / 53 held-out** 两条评测。
+MLE 比较七家，AO 比较 EAR、Arbor、Codex、Claude Code、AiScientist 五家。
 
-当前正式评测目标是 **MLE-Bench Lite 22 题**和
-`terminal-bench-ao-reconstruction-v1` 的 **36 dev / 53 held-out** AO 评测，覆盖 EAR、
-MLEvolve、Arbor、Codex、Claude Code、ML-Master 2.0 和 AiScientist。Adapter 的代码入口、
-原生 launcher、评分器和聚合器已经写入仓库，但当前还没有完成正式运行所需的协议文件、
-模型配置、运行环境整理和真实 scored smoke，因此不能把当前状态写成“已经有七 Agent
-正式横向分数”。准确状态见
-[`BenchmarkAdapters/docs/SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md`](BenchmarkAdapters/docs/SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md)。
+当前实验已经开始，尚未完成；2026-09-20 核验时，MLEvolve 的三个 cell 和 v7 补跑仍暂停。
+当前协议、模型与就绪状态统一见 [Adapter 主文档](BenchmarkAdapters/README.md)，
+新建运行和暂停批次处理见[启动手册](BenchmarkAdapters/docs/CAMPAIGN_LAUNCH.md)，
+源码身份见[版本记录](BenchmarkAdapters/docs/ON_DISK_AGENT_VERSIONS.md)。
 
-下面的 EAR/MLEvolve 六题内容属于历史研究，不是当前 22 题 × 7 Agent 的正式结果。
-当前 EAR 代码基准为 `mle-bench-agents/efficient-auto-research@ear/g3@7cd9ed5`；G4-G7
-实验分支仍保留作历史记录。七家本轮**不追上游**，按 2026-08-27 磁盘 checkout 跑
-（含未提交补丁）；身份表见
-[`BenchmarkAdapters/docs/ON_DISK_AGENT_VERSIONS.md`](BenchmarkAdapters/docs/ON_DISK_AGENT_VERSIONS.md)。
+- 本轮模型：`gpt-5.6-terra`，reasoning effort high、temperature 1.0；旧 gpt-5.5 结果单列。
+- 本轮重复次数：N=1，MLE 每题 12h / AO 外层 48h；不是已经完成的 Avg@3 比较。
+- 主机：256 vCPU / 251GB RAM / 8×RTX 4090；各 run 的实际配额以 manifest 为准。
+- MLE 权威分数：官方 `mlebench grade_csv`；Agent 的本地 `best_metric` 不等于官方分。
 
-- **LLM：** gpt-5.5（relay 端点，reasoning_effort=high），经本地转发代理统一接入
-- **硬件：** 256 vCPU / 251GB RAM / 8× RTX 4090
-- **权威评分：** 一律用官方 `mlebench grade_csv`（`docker-eval/grade.py`），report.json 里的
-  `best_metric` 只是本地 holdout，**不等于**官方分
+下文第 1–7 节保留 G0–G5 历史研究脉络；其中六题、模型和算法代际的结果不能作为
+当前 22 题正式横评。完整导航见第 9 节。
 
 ---
 
@@ -35,40 +31,17 @@ MLEvolve 12-24 倍，G5 仍需独立验证。
 
 ---
 
-## 2. 架构：纯上游零侵入 + 本地转发代理
+## 2. 运行架构与历史基础设施
 
-历史 MLE 实验主要使用 **EAR、纯原版 MLEvolve、Arbor**。当前七 Agent 正式 Adapter
-统一通过本地转发代理接入模型；各 Agent 的源码版本、variant 和运行状态必须以
-`BenchmarkAdapters/registry.py` 与正式 preflight 输出为准：
+当前正式入口是 `BenchmarkAdapters` 的 `mle-cell` / `terminal-ao`，Agent 保留自己的
+搜索循环，host 负责预算、产物、relay 与最终评分。MLE 的部分原生路径仍调用
+`docker-eval/run_in_docker.sh`，因此该脚本不是废弃实现。
 
-```
-EAR / MLEvolve / Arbor
-    │  OPENAI_BASE_URL → http://127.0.0.1:620X/v1   (端口 = 6200 + GPU_ID，每容器一个实例)
-    ▼
-BenchmarkAdapters/LLMRelay/server.py
-    │  模型重写→gpt-5.5 · 强制 reasoning_effort=high · 剥 max_tokens 等参数
-    │  重试20次 · 不限超时 · 非流式化+SSE合成 · tool-call JSON兜底 · system-only消息归一化
-    │  token 独立记账 → run-logs/<TAG>_token_usage/<agent>_<comp>_gpu<N>.jsonl
-    ▼
-relay 上游 (gpt-5.5)
-```
+共享 host relay 与 per-run relay 的关系、协议转换和 token 记账统一见
+[LLM relay 说明](BenchmarkAdapters/LLMRelay/README.md)。本机共享配置使用 6201，
+v7 保存了 6202/6203 的独立 slot 配置；不能把历史 `6200 + GPU_ID` 示意当作当前固定端口表。
 
-价值：换模型只改环境变量；token 记账覆盖各 Agent 的调用；代理重试在全部实验中兜住上游抖动
-（合计 60+ 次重试，零 agent 层失败）。详见 [docker-eval/README.md](docker-eval/README.md)。
-
-**cache token 记账（2026-08-27 修复）**：上游 `gpt-5.6-terra` 两个端点报的 usage 形状不同——
-`/v1/chat/completions` 把命中数放在 `usage.prompt_tokens_details.cached_tokens`（实测长 prompt
-重复请求：`prompt_tokens=11207`，其中 `cached_tokens=11008`），`/v1/responses` 则放在
-`usage.input_tokens_details.{cached_tokens,cache_write_tokens}`、reasoning 放在
-`output_tokens_details.reasoning_tokens`。原 `_append_token_log` 只读 `prompt_tokens_details` /
-`completion_tokens_details`，且要求 Anthropic 与 OpenAI 三个字段**同时**非空才算 `cache_tokens`，
-结果所有真实命中都被写成 `cache_tokens=None`（387 条 host 日志里 111 条有 `cached_tokens`、
-0 条有 `cache_tokens`），并让 `summarize_token_log` 把整段 cache 汇总降级为 None。现改为按端点
-回退取值、只要有任一 cache 信号就求和；上游完全不报时仍为 None（保持「未知」而非伪造 0）。
-`total_tokens = input + output` 保持不变且**正确**：OpenAI 约定里 `cached_tokens` 是
-`prompt_tokens` 的子集而非增量（实测 11207+5=11212=上游 `total_tokens`），加上去会重复计数。
-
-### 历史三 Agent 的代码状态
+### 历史三 Agent 的代码状态（记录当时的代际）
 
 | Agent | 分支 / 位置 | 说明 |
 |-------|------------|------|
@@ -181,7 +154,7 @@ efficient-agent-research/
 ├── baselines/                   # Arbor、MLEvolve、Codex、Claude、ML-Master、AiScientist
 ├── ear-worktrees/
 │   ├── stagnation-cache/        # 历史 G2/G3 benchmark 产物
-│   └── attempt-isolation-telemetry-v2/ # ★ G5（ear/g5；尚未正式 benchmark）
+│   └── attempt-isolation-telemetry-v2/ # G5/G6 历史基础设施 worktree；当前为 ear/g6
 │       └── docker_runs/<tag>_<comp>/
 │           ├── launch_manifest.json
 │           ├── submission.csv
@@ -192,7 +165,8 @@ efficient-agent-research/
 └── cache/                       # HF 模型缓存
 ```
 
-**历史基础设施代码**：`ear-worktrees/attempt-isolation-telemetry-v2`，分支 `ear/g5`。G5
+**历史基础设施代码**：`ear-worktrees/attempt-isolation-telemetry-v2` 当前在 `ear/g6`；下述 G5
+指历史 commit，而不是该目录今天的 HEAD。G5
 行为基线 `a6acc90` 从 `212870f`（撤销 G4 行为过滤）出发，只增加 attempt/run 隔离、artifact
 完整性和 telemetry；`thompson.py` 保持 G3 byte-identical。当前统一 Adapter 选用的 EAR
 source 是上面的 G3 checkout；下面列出的分数仍是历史版本结果，不能视作当前 Adapter 的新结果。
@@ -218,7 +192,7 @@ token 日志同名 `run-logs/20260713_stagcache_token_usage/`、`20260714_3newta
 
 ---
 
-## 7. 快速开始
+## 7. 历史 G5 运行示例
 
 ```bash
 cd docker-eval
@@ -234,90 +208,35 @@ source /mnt/sdc/shijianwang/miniconda3/etc/profile.d/conda.sh && conda activate 
 python grade.py <comp> <path/to/submission.csv>
 ```
 
-迭代工作流（新建 worktree、版本可追溯、compare_runs）见
-[G5 ITERATION](ear-worktrees/attempt-isolation-telemetry-v2/docs/ITERATION.md)。完整架构和实验口径见
-[ARCHITECTURE](ear-worktrees/attempt-isolation-telemetry-v2/docs/ARCHITECTURE.md) 与
-[EXPERIMENT_PROTOCOL](ear-worktrees/attempt-isolation-telemetry-v2/docs/EXPERIMENT_PROTOCOL.md)。
+历史迭代、架构和 G5 协议文档位于主实验工作区的
+`ear-worktrees/attempt-isolation-telemetry-v2/docs/`，文件名分别为 `ITERATION.md`、
+`ARCHITECTURE.md`、`EXPERIMENT_PROTOCOL.md`。这些本地 worktree 不随外层 Git 分发，
+复现时需同时确认它们的路径和历史 commit。
 
 ---
 
-## 8. 下一步
+## 8. 当前后续工作
 
-1. **先做 G5 最小端到端 smoke**：验证 launcher、Docker、relay、GPU、manifest、report 和
-   final hash 闭环；closeout 只做了 mock/单元测试，没有真实启动。
-2. **确认旧 credential 已服务端撤销，并版本化宿主工具**：当前 launcher/relay/plot 在 EAR Git
-   仓库外，只能依靠运行 manifest 的 SHA-256 追踪。
-3. **再做 G5 全 6 题统一复跑**：必须来自同一 frozen commit，不得用 G0–G3 历史最优拼接。
-4. **mlsp 仍输官方满血 MLEvolve 的方案档次**（历史 G2 0.924 vs 本地 MLEvolve 0.929/官方 0.95）：EAR 的
-   「复杂度纪律」变成天花板，写不出 7000 行的重型 pipeline。下一步：停滞时**双解锁**——
-   放大探索方差（已做，治 chaii）+ 解锁重型方案档 prompt（待做，治 mlsp）。
-5. MLEvolve 复现分数远低于官方，需确认是否纯 LLM 差异（gpt-5.5 vs Gemini-3-Pro）。
-```
+1. 按暂停收据核对现有进程、预算和原配置，再安排未完成 cell；入口见启动手册。
+2. 保留失败、重试、评分和 token 记录，按协议、模型、硬件和 adapter commit 分组核验。
+3. 核查 Arbor 的来源记录：MLE manifest 使用 registry 的 `baselines/Arbor` 身份，Docker
+   实际默认快照来自 `baselines/Arbor-longrun-patched`；两棵树必须同时追溯，不能当作重复目录删除。
+4. 后续算法代际或 N=3 比较独立冻结协议，不将历史最好分拼成当前结果。
 
----
+## 9. 文档导航
 
-## 9. Baseline、Benchmark Adapter 与 UV 环境
+| 内容 | 入口 |
+|---|---|
+| 当前状态、比较集合、架构和计分规则 | [BenchmarkAdapters](BenchmarkAdapters/README.md) |
+| 新建运行、暂停批次、preflight、重试和聚合 | [运行手册](BenchmarkAdapters/docs/CAMPAIGN_LAUNCH.md) |
+| 当前源码 pin 与历史身份 | [Agent 版本记录](BenchmarkAdapters/docs/ON_DISK_AGENT_VERSIONS.md) |
+| 各 Agent 在两个 Benchmark 上的接入差异 | [逐格文档](BenchmarkAdapters/docs/adapters/README.md) |
+| 原生 Docker runner、镜像、挂载和历史 launcher | [docker-eval](docker-eval/README.md) |
+| 依赖环境安装 | [UV 环境矩阵](BenchmarkAdapters/environments/README.md) |
+| 历史研究、六题结果与算法演化 | [研究档案](mle-bench-research/README.md) |
+| Benchmark / Baseline 上游调研资料 | [基准与 Baseline 调研](baselines/README.md) |
+| 其他 Benchmark 与修复历史 | [文档索引](BenchmarkAdapters/docs/README.md) |
 
-本仓库的 `full` 分支把 Baseline 源码、MLE-Bench / Terminal-Bench 源码、共享
-Adapter 和可复现的 UV 配置放在同一个集成树中。Adapter 的唯一入口是
-[`BenchmarkAdapters/`](BenchmarkAdapters/)，其中按 Benchmark 分为
-`MLEBenchLite/` 与 `TerminalBench/`，公共进程、Relay、Agent registry 和 CLI
-位于其根目录。
-
-此外，`autoresearch/` 保存了 Architecture Design Benchmark 的固定上游源码快照
-`karpathy/autoresearch@228791f`、原始 `uv.lock` 和本项目部署脚本。共享 Benchmark
-Adapter、七 Agent 原生 bridge、held-out evaluator 和聚合命令已经实现；真实 smoke 与
-`7×3×48h` 正式 campaign 仍是独立验收门槛，因此不能把“命令可以构造”写成“正式协议
-已经跑通”。架构、评分有效性、held-out 复测、测试矩阵和完成条件见
-[`AUTORESEARCH_SEVEN_AGENT_ADAPTER_PLAN.md`](BenchmarkAdapters/docs/AUTORESEARCH_SEVEN_AGENT_ADAPTER_PLAN.md)。
-
-`optimizer-design/` 进一步复用上述架构，冻结
-`modded-nanogpt@bc1b58e` 的 Track 3 Optimizer Design，并采用“Benchmark 公共层 + 七个
-Agent 小 Adapter”的两层结构。当前命令和 contract 已写入，但正式运行仍需要先完成双
-held-out baseline 记录；详见
-[`OPTIMIZER_DESIGN_SEVEN_AGENT_ADAPTER.md`](BenchmarkAdapters/docs/OPTIMIZER_DESIGN_SEVEN_AGENT_ADAPTER.md)。
-
-Terminal-Bench 现在有两条不同路径：`terminal-direct-smoke` 是 89 题直接解题路径，
-只能做基础设施检查；正式横向比较使用
-`terminal-bench-ao-reconstruction-v1`，由外层 Agent 在 36 个 dev task 上优化同一份
-`terminus-2`，最后只评测一次 53 个 held-out task。两条路径的分数不能混用。
-
-当前 registry 已登记七个 Agent，但默认入口并不等于每个 Agent 都已经可以正式评分：
-Arbor 的 MLE 需要 `arbor-benchmark-patched`，Terminal AO 的 AiScientist 需要
-`ai-scientist-terminal-variant`。MLEvolve 和 ML-Master 2.0 **不参与** Terminal AO
-（任务形状不匹配）。模型配置、协议资产、Python 依赖、clean source 和真实 smoke
-全部完成后，才可以开始正式 campaign。后面怎么起实验（比较集合、冻结资产、
-formal-preflight、smoke、22×7×3 MLE 与 5×3×48h AO）见
-[`SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md` 第 17 节](BenchmarkAdapters/docs/SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md)。
-
-已修复的四类正确性问题（2026-08-26，细节见各自文档）：
-
-- **ML-Master 的 `is_lower_better`**：per-run config 以前沿用上游模板里写死的 `false`，
-  在 22 题中的 7 道 lower-is-better 题上把最差解留在 `best_submission/`。方向现在由
-  host 侧 `MLEBenchLite/metric_direction_worker.py` 从官方 leaderboard 解出后显式传入。
-- **Arbor 内层仓库**：`executor_timeout` 4h→2h 的改动过去只提交到外层仓库，
-  内层 `baselines/Arbor-longrun-patched` 的 dirty 子树让 launcher 直接 `exit 2`。
-  该改动已提交到内层仓库；死变量 `ARBOR_SOURCE_ALLOW_DIRTY` 已删除。
-- **relay 截断信号**：chat / responses / messages 三个协议互转时会把上游的
-  `incomplete` 压成 `stop`/`end_turn`，让 Agent 把被截断的回答当成完整回答。
-  三个方向现在都透传 `length` / `max_tokens` / `incomplete_details`。
-- **95% CI 用 z 而非 t**：n=3 时用 z=1.96 把区间宽度低估约 2.2 倍，现在按
-  `outer_repetitions - 1` 取 Student-t 临界值（df=2 时 4.3027）。
-
-另有一处**尚未修复**的 provenance 错配：run manifest 记录 `baselines/Arbor` 的 commit，
-launcher 实际跑的是 `baselines/Arbor-longrun-patched`，两者不是同一份代码。修复需要改
-`registry.py`，见 `BenchmarkAdapters/docs/ARBOR_MLE_ADAPTER_REPAIR.md`。
-
-每个 Agent 的差异说明位于对应目录的 `adapter_docs/`；环境安装清单与一键脚本位于
-[`BenchmarkAdapters/environments/`](BenchmarkAdapters/environments/)：
-
-```bash
-bash BenchmarkAdapters/environments/install.sh --list
-bash BenchmarkAdapters/environments/install.sh autoresearch
-bash BenchmarkAdapters/environments/install.sh all
-```
-
-根仓库不会提交本机数据集、模型权重、虚拟环境、UV 缓存、Docker 运行目录、任务运行
-记录或 token 日志。这些边界由根目录 `.gitignore` 统一管理；Benchmark 的 Python 源码、
-任务定义、`pyproject.toml`、`uv.lock` 和安装清单会保留在 Git 中。API key 只通过运行时
-环境变量提供，不写入仓库。
+根仓库保留源码、任务定义、协议和依赖锁文件；数据、权重、虚拟环境、运行目录和
+大部分 `analysis/` 产物由 `.gitignore` 排除。当前运行入口及原始实验记录仍需在本机
+保全，不能仅以是否受 Git 跟踪判断能否清理。

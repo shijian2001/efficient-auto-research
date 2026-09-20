@@ -5,7 +5,7 @@
 | 形态 | 原生 Docker 启动器 |
 | registry `mle_backend` | `native-docker` |
 | 源码树 | `mle-bench-agents/efficient-auto-research` |
-| variant | 原版 ID（无 variant） |
+| variant | 原版身份 `ear` 或版本记录中的 G3 标签，需显式传入 |
 | 入口 | `MLEBenchLite/adapter.py::_docker_command` → `docker-eval/run_in_docker.sh efficient-auto-research` |
 
 ## 做法

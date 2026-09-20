@@ -1,4 +1,35 @@
-# 当前磁盘上的 Agent 版本（2026-08-27）
+# Agent 源码身份
+
+当前快照核验于 **2026-09-20**，针对主实验工作区 `full4090`。正式源码 pin 以代码的
+`thin_registry.UPSTREAM_REVISIONS`、registry 与各运行 manifest 为准；此记录不代表
+上游最新版本，也不要求升级已有实验。
+
+| Agent / 用途 | 源码位置 | 当前 HEAD | 说明 |
+|---|---|---|---|
+| EAR | `mle-bench-agents/efficient-auto-research` | `169947e667d0f555c1ca680cf24166fbe78e20be` | `ear/g3`，G3 标签仍为 `g3@7cd9ed5c1db0ff5250faad373e5d5a67209e604c` |
+| MLEvolve | `baselines/MLEvolve` | `ed595138c62a3785532bfb11cbd14b14e51a701f` | `main` |
+| Arbor registry / AO | `baselines/Arbor` | `92c6fd5c22c8a291796d39730605ac0eb8ba07c5` | `feat/mle-bench-adapter-hardening` |
+| Arbor MLE Docker source | `baselines/Arbor-longrun-patched` | `a51a1fe4b48e07259a22a02d4969abc04494f77e` | 同分支名，单独 checkout；MLE 用 `arbor-benchmark-patched` |
+| ML-Master 2.0 | `baselines/EvoMaster` | `0c7b5549b5445f76864be9e88572b549bb4b3863` | 当前正式 variant 为 `ml-master-2@0c7b5549b5445f76864be9e88572b549bb4b3863` |
+| AiScientist | `baselines/AiScientist` | `aae385b12b0d1e5ad928c6f988a769cfb173b3e7` | MLE 使用该 pin；AO 用 `ai-scientist-terminal-variant` |
+| Codex / Claude Code 的集成源码 | `baselines/Codex`、`baselines/ClaudeCode` | 随外层主实验 commit `ee29c5cf07ef2bea2a7137e5e1f5f80906d9c312` | 没有独立 nested Git；实际 CLI 版本需另读运行 manifest/版本命令 |
+
+核验时外层和六个 nested checkout 均干净。v7 的 `controller.json` 也记录上述外层
+adapter commit；进行中的运行不因文档修订而更换来源身份。
+
+EvoMaster 相比 8 月的 `07a80da`，新增 native execution helper hook，并修正
+Draft/Improve 的可选检索处理；宿主侧配套的 PATH、短 TMPDIR、监控及产物同步见
+[ML-Master MLE 适配说明](adapters/mle-bench-lite.ml-master-2.md)。旧 pin 不能继续用于新格子的
+当前源码检查。
+
+Arbor 的两棵树仍需同时记录：`campaign.py` 从 registry `install_path` 取 agent commit，
+Docker runner 默认从 longrun checkout 快照。读取 provenance 时核对内层 launch manifest，
+不要将它们当成同一份代码或可删除的重复目录。
+
+## 2026-08-27 历史冻结记录
+
+以下原样保留当时的版本与修补来源；其中“当前”“本轮”和工作区状态指 **8 月 27 日**，
+不覆盖上面的 9 月 20 日快照。
 
 本轮实验**不追上游最新版**。各家用本机 checkout 里已经有的代码跑，
 并把身份记在这里。未提交的补丁也是这套版本的一部分，不是要丢掉的脏文件。

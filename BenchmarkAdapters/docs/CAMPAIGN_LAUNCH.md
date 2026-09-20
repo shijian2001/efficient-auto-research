@@ -1,253 +1,181 @@
-# 正式 campaign 启动手册
+# MLE / Terminal AO 运行手册
 
-本轮（2026-08-27）冻结配置：**gpt-5.6-terra**，**N=1**，MLE 12h / AO 48h。
+本手册维护这台 4090 主机的运行步骤。当前能力与实验进度见
+[Adapter README](../README.md)，源码 pin 见[版本记录](ON_DISK_AGENT_VERSIONS.md)。
+本轮冻结配置为 `gpt-5.6-terra`、N=1、MLE 每题 12h / AO 外层 48h。
 
-## 0. 先起 host relay —— 最容易漏的一步
+## 先区分暂停续跑与新建运行
 
-model-track 里的 `relay_base_url` 是 `http://127.0.0.1:6200/v1`。这个端口
-**不会被 adapter 自动拉起**：每格自己起的那个 relay 是 Unix-socket 的
-per-run 转发器，它的上游正是 6200。6200 没人监听时，症状是
+2026-09-20 核验时，以下运行仍在暂停状态：
 
-```
-[proxy] WARNING chat.completions attempt 1/21 failed: [Errno 111] Connection refused
-```
+| 运行 | 应读取的本地记录 |
+|---|---|
+| `20260904_125112_mle_7agent_22task_remaining` 的三个 MLEvolve cell | `.runtime/campaign-pause-20260917T172424.json`；三个暂停容器及其原挂载 |
+| `20260920_mle_five_sticky_v7`，两题 ML-Master + 三题 AiScientist 的计划 | `.runtime/campaign-pause-20260920.json`；campaign 内的 `controller.json`、`pause.json`、`plan.json`、`launcher-source.py` |
 
-然后按 `max_retries` 一路重试到超时。**不会**报 "relay 没起"，所以很容易
-误判成模型或网络问题。
+v7 当前入口是本机 `analysis/run_mle_five_sticky_20260920.py`，其副本保存在 campaign
+中。它及运行目录受 `.gitignore` 影响，不会自动随 Git 分发。保留这些文件和原路径。
+AiScientist 容器可能显示 Docker `running`，但其进程被 SIGSTOP；需要同时读暂停收据
+和进程状态。零字节的 GPU/端口/controller 锁也可能正在被持有。
 
-启动（跑完整个 campaign 期间保持存活）：
+下面的 `mle-cell` 命令用于**新建运行**，不是恢复现有暂停 cell。恢复时以收据中的
+PID、启动时间、容器 ID、原配置和预算为依据；wall-clock 在进程暂停期间仍会推进，
+不能把直接重启 launcher 或重新跑一格当作保留原预算的 resume。本次文档整理没有
+恢复这些实验。
+
+正式入口检查 adapter 和 Agent 工作区是否干净，成绩还绑定 adapter commit。
+文档修改也会使工作区 dirty；正在进行的 campaign 应保留其源码版本，在独立 worktree
+整理文档或开发下一轮更改。
+
+## 冻结资产
+
+所有路径均相对项目根目录。
+
+| 用途 | 路径与含义 |
+|---|---|
+| MLE 协议 | `BenchmarkAdapters/configs/mle-protocol.n1-12h.json`；22 题、seed `[0]`、43200 秒 |
+| MLE 数据身份 | `BenchmarkAdapters/MLEBenchLite/data_manifest.json`；schema 2，绑定 prepared / archive / grader 资产 |
+| AO 协议 | `terminal-bench-2/ao_protocol/protocol.json`；schema 2、36/53、seed `[0]`、172800 秒 |
+| 默认 model-track | `BenchmarkAdapters/configs/model-track.gpt-5.6-terra-host-relay.json`；共享 host relay 6201 |
+| v7 的实际 model-track | campaign 内 `model-track-slot-1.json` / `model-track-slot-2.json`；6202 / 6203，按任务固定 provider credential |
+
+已有协议不为解决启动错误而重新生成。N=3 是独立的后续设计；本轮 N=1 只能报告
+`single_run`，不能写 Avg@3 或显著差异。旧 gpt-5.5 track 及其结果保持独立。
+
+## 新建运行所需的 host relay
+
+共享默认配置使用 **127.0.0.1:6201**。Agent sandbox 内常见的 6200 是 per-run
+入口，不能据此把共享配置改成 6200。v7 的 6202/6203 使用原保存配置，不应被共享
+服务替换。协议和输出 token 上限的详细行为统一见 [LLM relay](../LLMRelay/README.md)。
+
+在新运行的整个期间保持该服务存活；服务启动脚本读取 `~/.mle_relay_env`，其中需要
+配置上游 URL 和 `UPSTREAM_API_KEY`。凭据不写入 model-track JSON。
 
 ```bash
 cd /mnt/sdc/shijianwang/efficient-agent-research
-env UPSTREAM_BASE_URL="$OPENAI_BASE_URL" \
-    UPSTREAM_API_KEY="$OPENAI_API_KEY" \
-    LLM_FORCE_MODEL="gpt-5.6-terra" \
-    LLM_FORCE_PARAMETERS_JSON='{"temperature":1.0,"reasoning_effort":"high"}' \
-    LLM_UPSTREAM_TIMEOUT=600 \
-    LLM_MAX_RETRIES=20 \
-    LLM_PROXY_API_KEY="$OPENAI_API_KEY" \
-    LLM_TOKEN_LOG_PATH=/path/to/host_relay_tokens.jsonl \
-    LLM_PROXY_AGENT_NAME=host-relay \
-    ./BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters.LLMRelay.server \
-    --port 6200 --host 127.0.0.1
+bash docker-eval/start_mle_host_relay.sh
 ```
 
-`LLM_PROXY_API_KEY` 是**入站**凭据，必须设成 per-run relay 会发过来的那把 key。
-per-run relay 取 `UPSTREAM_API_KEY` 或 `OPENAI_API_KEY` 作为 Authorization 发给
-6200；而 host relay 默认只认字面量 `"proxy"`（`server.py:97`）。两边不一致时
-每格会在 1 秒内失败（`preflight` 的 `host_relay_reachable` 现在会先拦住）：
+脚本固定共享服务的 model/temperature/reasoning effort，使用代理 17892，并将 token
+日志默认写入 `cache/mle-host-relay-proxied.tokens.jsonl`。per-run relay 不会自动启动
+这项共享服务。缺少容器镜像时的代理下载工具见 [Docker runner](../../docker-eval/README.md)。
 
-```
-[proxy] ERROR upstream 4xx passthrough: upstream 401: {"error": {"message": "invalid relay credential"}}
-result.json: status=failed  failure_reason=RuntimeError: relay upstream readiness returned 401
-```
+host relay 的入站凭据必须与 per-run relay 实际使用的凭据一致。连接拒绝通常是端口
+无人监听；401 是入站凭据不符，不能当作 Agent 解题失败。密钥池及粘性策略见
+[RELAY_KEY_POOL.md](RELAY_KEY_POOL.md)。
 
-这一条和上面的 6200 没起是**两个独立的坑**，会依次踩到。正式 preflight 里的
-`host_relay_reachable` 会同时挡住这两种情况：它用 per-run relay 实际会发的那把
-凭据向 `relay_base_url` 真发一次请求，并核对返回的 model 与 model-track 一致，
-所以起漏了、key 配错了、`LLM_FORCE_MODEL` 写错了，都会在开跑前就报出来。
+## Agent 身份
 
-`LLM_FORCE_MODEL` 与 `LLM_FORCE_PARAMETERS_JSON` 必须与 model-track 一致，
-否则成绩单记的模型身份和实际调用不符。relay 会把任何 model 名改写成
-`LLM_FORCE_MODEL`，所以 Agent 侧传什么名字都不影响实际模型。
+正式入口要求显式 `--agent-variant`，拒绝 `default`。当前完整 commit 与本机状态
+只在[版本记录](ON_DISK_AGENT_VERSIONS.md)维护。
 
-自检：
-
-```bash
-curl -s http://127.0.0.1:6200/v1/chat/completions \
-  -H 'Content-Type: application/json' \
-  -H "Authorization: Bearer $OPENAI_API_KEY" \
-  -d '{"model":"anything","messages":[{"role":"user","content":"Reply with exactly: RELAY_OK"}]}'
-```
-
-返回里 `model` 应为 `gpt-5.6-terra`。
-
-### 协议按客户端原样透传，不做跨协议改写
-
-relay 的入口本来就同时接 `/chat/completions`、`/responses`、`/messages`。
-现在出口也按同一条协议转发：**Agent 用什么协议发，就用什么协议到上游**。
-
-原先出口由一个全局开关（`LLM_UPSTREAM_API`）决定，一份配置管所有 Agent，
-所以怎么设都只能对一半：
-
-| 开关 | 后果 |
-|---|---|
-| `chat` | Codex 的 `/responses` 被降级；它的工具声明放在 `additional_tools`
-  条目里，chat 没有对应结构 → 工具全丢，Agent 报「没有 shell」，烧满 token 交白卷 |
-| `responses` | MLEvolve 的 chat 请求被转成 responses → 第一次真实调用挂十分钟，
-  跑满 1210s 只调用模型 1 次，最后 fusion 找不到 submission |
-
-跨协议改写本身就是有损的：目标格式表达不了的东西会被丢掉。改成原样透传后，
-两家都不需要任何 per-Agent 配置，model track 里也不再需要 `api_mode`。
-
-口径统一不受影响——`_rewrite_body` 仍在两条路径上分别强制 model、
-temperature=1.0、reasoning_effort=high，并且都不注入 max tokens（Agent 自带的保留）。
-
-需要强制单协议时（上游只有一个端点），设 `LLM_FORCE_CROSS_PROTOCOL=1`
-配合 `LLM_UPSTREAM_API`，恢复旧的改写行为。默认关闭。
-
-### 历史备注：曾经的 `LLM_UPSTREAM_API=responses`
-
-默认 `chat` 会把 Responses 请求降级成 chat completions，而 **Codex 的工具声明
-在这一步会被整个丢掉**。Codex 不用标准的 `tools` 字段，它把工具放在 input 数组里
-一个 `{"type":"additional_tools", ...}` 条目中；转换器只认 `body["tools"]`，
-那个条目既不是 role message 又没有 content，于是被跳过。
-
-结果是模型收到「有任务、但没有任何工具」，Codex 正常启动、正常烧 token，然后回
-
-    I'm unable to access the filesystem in this session
-
-**不报错、不超时，看起来像模型能力不行。** 这是最贵的一种失败：一格烧满预算却交白卷。
-
-`responses` 直连把请求原样透传给上游，工具声明完整保留。model track 的重写不受影响：
-temperature 与 reasoning effort 仍然强制覆盖成 track 里的值。
-
-`max_tokens` / `max_output_tokens` 是例外：campaign **不注入**（model track 里没有这一项），
-但 Agent 自己设的会原样保留——那是 Agent 自己的预算，不是我们该替它决定的采样参数。
-
-## 1. 冻结的协议与 model-track
-
-| 用途 | 路径 |
-|---|---|
-| MLE 协议 | `BenchmarkAdapters/configs/mle-protocol.n1-12h.json`（22 题 / seed 0 / 12h） |
-| AO 协议 | `terminal-bench-2/ao_protocol/protocol.json`（36/53 / seed 0 / 48h） |
-| model-track | `BenchmarkAdapters/configs/model-track.gpt-5.6-terra-host-relay.json` |
-
-## 2. 每格必须传的 `--agent-variant`
-
-`agent_variant_explicit` 门禁**拒绝 `default`**。各格合法值：
-
-| Agent | MLE | Terminal AO |
+| Agent | MLE variant | AO variant |
 |---|---|---|
-| EAR | `ear` | `ear` |
+| EAR | `ear` 或版本记录中的 G3 标签 | 同左 |
 | MLEvolve | `mlevolve` | 不参与 |
-| Arbor | `arbor-benchmark-patched` | `arbor@92c6fd5c22c8a291796d39730605ac0eb8ba07c5` |
+| Arbor | `arbor-benchmark-patched` | `arbor@<当前 pin>` |
 | Codex | `codex` | `codex` |
 | Claude Code | `claude-code` | `claude-code` |
-| ML-Master 2.0 | `ml-master-2@07a80dac7f9edad18f2d97bcbffc0585e06d5b46` | 不参与 |
-| AiScientist | `ai-scientist@aae385b12b0d1e5ad928c6f988a769cfb173b3e7` | `ai-scientist-terminal-variant` |
+| ML-Master 2.0 | `ml-master-2@<当前 pin>` | 不参与 |
+| AiScientist | `ai-scientist@<当前 pin>` | `ai-scientist-terminal-variant` |
 
-带 `@` 的那三家用的是**本机 pin**，不是上游 tip。写错会被
-`require_clean_upstream_source` 拒（报错会给出正确哈希）。来源见
-`ON_DISK_AGENT_VERSIONS.md`。
+`codex-budget-loop` / `claude-code-budget-loop` 是单独登记的 MLE 续跑变体，不能与表中
+原版单次 CLI 混用；已有运行按 manifest 中的实际 variant 继续处理。
 
-## 3. 先 preflight 再开跑
-
-### AI Scientist 在 relay 启动阶段失败后的重试
-
-`mle-cell` 遇到已有记录时会在启动前拒绝执行，保留原来的 manifest、result 和日志。
-对于 `relay exited early` 且 relay 日志明确为 `AF_UNIX path too long` 的 AI Scientist
-启动失败，可以给原来的 `mle-cell` 命令添加 `--retry-relay-startup`。该参数仅接受
-尚无 Agent 工作文件、提交、评分或调用用量的启动失败；模型配置、任务身份和
-Agent variant 必须与原记录一致。训练失败、超时、有分数的任务不能用它重新跑。
-
-通过数据、GPU 和源码检查后，旧目录整体移入其父目录下的
-`.relay-startup-failures/<任务>/attempt-*/cell/`，同级 `retry.json` 保存原记录哈希。
-新尝试沿用原 run ID 和标准目录，原失败证据不被覆盖。并发调用使用任务锁，
-不会同时归档或运行同一格。relay socket 固定使用 `/tmp` 中的短目录，避免继承
-很长的 `TMPDIR`；训练临时数据仍按原配置存放。
-
-例如重试现有第 7 轮的仙人掌启动失败（另外两题替换任务名即可）：
+需要带 commit 的值可从代码读取，避免继续复制 8 月的旧 ML-Master pin：
 
 ```bash
-./BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters mle-cell \
-  --protocol BenchmarkAdapters/configs/mle-protocol.n1-12h.json \
-  --agent ai-scientist \
-  --agent-variant ai-scientist@aae385b12b0d1e5ad928c6f988a769cfb173b3e7 \
-  --competition-id aerial-cactus-identification --seed 0 \
-  --data-root mle-bench-data \
-  --campaign-dir experiment-campaigns/20260904_125112_mle_7agent_22task_remaining/round-07/aerial-cactus-identification \
-  --gpu-id 0 \
-  --model-config BenchmarkAdapters/configs/model-track.gpt-5.6-terra-host-relay.json \
-  --retry-relay-startup
+./BenchmarkAdapters/.venv/bin/python -c 'from BenchmarkAdapters.thin_registry import UPSTREAM_REVISIONS; print("\n".join(f"{agent}@{revision}" for agent, revision in UPSTREAM_REVISIONS.items()))'
 ```
 
-这是重新启动实验的命令，不是只读诊断。先按通常流程提交修复、检查可用 GPU、
-加载 relay 凭证并完成 preflight；它不会恢复当前暂停的 MLEvolve campaign。
+## 新建 MLE cell
 
-### 常规 preflight
+以下示例使用新目录，正式预算为 12h。先在运行 shell 中加载 relay 环境，再执行
+formal-preflight。**formal-preflight 会向配置的 relay 发送真实模型请求**；`--help`
+和参数解析才是离线检查。以 JSON 中所有适用检查为准，不固定写死检查数量。
 
 ```bash
+set -a
+source "${MLE_RELAY_ENV_FILE:-$HOME/.mle_relay_env}"
+set +a
+
 ./BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters formal-preflight \
-  --benchmark mle-bench-lite --agent <agent> --agent-variant <见上表> \
+  --benchmark mle-bench-lite --agent codex --agent-variant codex \
   --protocol BenchmarkAdapters/configs/mle-protocol.n1-12h.json \
   --model-config BenchmarkAdapters/configs/model-track.gpt-5.6-terra-host-relay.json \
   --data-root mle-bench-data
-```
 
-14 项全 PASS 才开跑。注意 `formal_source_clean` 查的是**工作区当下状态**，
-有未提交改动就会失败——先提交再 preflight。
-
-## 4. 跑一格
-
-MLE（`mle-cell` 是正式入口，走 `--model-config`）：
-
-```bash
 ./BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters mle-cell \
   --protocol BenchmarkAdapters/configs/mle-protocol.n1-12h.json \
-  --agent <agent> --agent-variant <见上表> \
-  --competition-id <task> --seed 0 \
-  --data-root mle-bench-data --campaign-dir <campaign> --gpu-id <n> \
+  --agent codex --agent-variant codex \
+  --competition-id spooky-author-identification --seed 0 \
+  --data-root mle-bench-data --campaign-dir /runs/mle/new-campaign --gpu-id 0 \
   --model-config BenchmarkAdapters/configs/model-track.gpt-5.6-terra-host-relay.json
 ```
 
-AO 一次独占 8 卡（`dev_concurrency=8`），所以 5 家只能串行：
+`mle-cell` 保留已有 manifest/result，不能靠复用同一个目录覆盖旧失败。实际批量
+controller 的分组、优先重跑和输出路径以对应 campaign 记录为准。
+
+### 仅适用于 relay 启动失败的重试
+
+`--retry-relay-startup` 只处理 AiScientist 尚未产生 Agent 工作、提交、评分或调用用量的
+relay 启动失败，例如 `AF_UNIX path too long`。使用原 cell 的任务、模型和 variant
+参数，在原 `mle-cell` 命令上加该选项。
+
+通过 preflight 后，旧目录移到 `.relay-startup-failures/<任务>/attempt-*/cell/`，
+`retry.json` 保存原记录哈希，再创建新尝试。训练失败、已有评分、已消耗调用预算或
+暂停中的任务不适用这条路径。relay socket 使用 `/tmp` 下的短目录，训练临时目录按
+各 Agent 的 runtime 处理；ML-Master 的短 TMPDIR 例外见其适配文档。
+
+## 新建 Terminal AO run
+
+这是五家比较集合中的一次正式 48h 运行；36 dev 搜索后只运行一次 53-task held-out。
+当前 host 调度约定为八卡、dev concurrency 8，各外层 run 按资源串行安排。
 
 ```bash
-./BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters terminal-ao \
-  --agent <agent> --agent-variant <见上表> \
+./BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters formal-preflight \
+  --benchmark terminal-bench-ao --agent codex --agent-variant codex \
   --protocol terminal-bench-2/ao_protocol/protocol.json \
-  --output-dir <out> --seed 0 \
+  --model-config BenchmarkAdapters/configs/model-track.gpt-5.6-terra-host-relay.json
+
+./BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters terminal-ao \
+  --agent codex --agent-variant codex \
+  --protocol terminal-bench-2/ao_protocol/protocol.json \
+  --output-dir /runs/ao/new-campaign/codex/seed-0 --seed 0 \
   --model-config BenchmarkAdapters/configs/model-track.gpt-5.6-terra-host-relay.json \
   --gpu-id 0 --gpu-id 1 --gpu-id 2 --gpu-id 3 \
   --gpu-id 4 --gpu-id 5 --gpu-id 6 --gpu-id 7
 ```
 
-## 已知坑
+`--dry-run` 仅检查命令构造，不能作为分数。短预算 smoke 应使用单独的非正式协议/输出
+和适用的 smoke 入口，先核对其预算参数；不能把上面的 12h/48h 命令改个目录名就称为
+短跑，也不能将 `terminal-direct-smoke` 的直接解题分数混入 AO。旧修复计划的长预算
+“smoke”示例已移除。
 
-- **`mle` 子命令实跑不了。** 它只接 `--model` + `--upstream-base-url`，不传
-  `model_parameters`，relay 会抛
-  `RuntimeError: relay model parameters must be configured explicitly`。
-  调试用 `--dry-run`；实跑一律用 `mle-cell`。
-- **prepared 数据的完整性由上游负责，我们不再重复校验。**
-  原先 `validate_lite_data_root` 会按内容重新哈希全部 22 题的 prepared
-  public+private 树：一轮读约 135 GB，本机这组盘满负载只有约 16 MB/s，单次要按
-  小时算，而 154 格每格都要重付一次。
+## 聚合与检查结果
 
-  这层是我们自己加的（`cc6b84f`），上游 mle-bench 本来就在
-  `mlebench prepare` 时为每个 competition 生成并核对 public/private 的逐文件
-  checksum，存在 `competitions/<task>/checksums.yaml`（22 题全都有）。等于同一件事
-  做了两遍，而且我们这遍做了 154 次。
+```bash
+./BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters mle-scorecard \
+  --protocol BenchmarkAdapters/configs/mle-protocol.n1-12h.json \
+  --campaign-dir /runs/mle/new-campaign --output /runs/mle-scorecard.json
 
-  现在只做结构检查：prepared public/private 存在、非符号链接、非空，且上游
-  checksums.yaml 在位。实测 **0.70 秒**（原先一小时以上）。
+./BenchmarkAdapters/.venv/bin/python -m BenchmarkAdapters terminal-ao-scorecard \
+  --protocol terminal-bench-2/ao_protocol/protocol.json \
+  --campaign-dir /runs/ao/new-campaign --output /runs/ao-scorecard.json
+```
 
-  仍然按内容校验的部分没变：每格自己的源码归档 `verify_task_archive`
-  （只哈希本格那一个），以及 `data_manifest.json` 记录的身份——成绩单绑定的
-  东西一个没少。要重新逐文件校验 prepared 数据，跑上游
-  `mlebench prepare`（不加 `--skip-verification`），或显式的
-  `mle-freeze-assets`。
+使用实际批次目录；聚合完成不代表所有格子完成。失败/缺失保留分母，MLE 固定 22 题，
+AO 固定 53 个 held-out task。检查 `score_valid`、比较集合、模型/硬件/adapter 身份，
+同时保留每格官方 grader 输出、预算和 token 记录。
 
-- **用满时间不再等于零分（MLE-011 已修）。** 协议里的 `wall_clock_seconds`
-  （正式 MLE 12h、AO 48h）是每格给 Agent 的解题时间。原先唯一的强制手段是
-  `预算+120s` 时 SIGKILL 整个进程树，那一刀连我们自己的 wrapper 一起砍，
-  于是 Agent 早已写好的 `submission.csv` 来不及被拷进成绩目录。ML-Master 因此
-  把一个官方 grader 打 0.91987、够金牌的结果记成了 `timed_out / score: null`。
+## 已解决问题与仍需遵守的约定
 
-  现在 native wrapper 自己在预算点停 Agent（先 SIGTERM，20s 不退再 SIGKILL），
-  剩下的窗口用来发布产物；外层硬 kill 退化成保底。**Agent 的解题时间没有变**，
-  变的只是"超时"的含义：从"你做的全作废"变成"时间到，交已经做出来的"。
-  子进程真失败仍然照常报错，不会被当成功发布。
-
-- **有的 Agent 需要指定运行镜像，正式入口现在会自己带上。**
-  镜像登记在 `registry.AGENT_RUNTIME_IMAGES`：AiScientist 用本地构建的
-  `aisci-mle:test`，Arbor 用 `alexgshaw/fix-git:20251031`（它启动时先初始化 git
-  工作区，而 `run_in_docker.sh` 的默认镜像 `ubuntu:20.04` 里没有 git，
-  会立刻报 `No such file or directory: 'git'`）。
-
-  2026-08-23 那次 12h Arbor 长跑是走老脚本、由 `campaign.env` 显式传镜像才成功的；
-  `mle-cell` 这条正式路径此前不传，于是同一个 Agent 在正式入口上跑不起来。
-  两条路径的镜像来源现在统一到 registry。
-
-- **N=1 没有误差棒。** `repetition_summary` 只给 `mean`，
-  standard_deviation / standard_error / ci95 全为 `null`。排名不得表述为显著差异。
+- 正式 MLE 使用 `mle-cell`；旧 `mle` 命令的模型参数接口不能替代冻结 model-track。
+- MLE prepared 数据的常规启动检查采用结构/上游 checksum 文件检查；显式重新冻结
+  才做完整身份核验。需要逐文件复验时使用上游 `mlebench prepare`，不要把重复读取
+  全部数据放到每个 cell 的启动路径。
+- native wrapper 在预算结束时保留 Agent 已产出的 submission；ML-Master 还持续同步
+  上游最新 best。是否为有效分数仍由 host grader 判断，不能把“文件存在”等同于成功。
+- 镜像由 `registry.AGENT_RUNTIME_IMAGES` 指定；AiScientist 使用本地 `aisci-mle:test`，
+  Arbor 使用 `alexgshaw/fix-git:20251031`。不要回退到缺少运行依赖的默认镜像。
+- N=1 的标准差、SEM、CI 为空。后续 N=3 需另行冻结实验协议，不能在当前批次里临时换 seed。

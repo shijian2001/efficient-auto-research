@@ -5,7 +5,7 @@
 | 形态 | AO native launcher（CLI 子进程） |
 | registry `terminal_ao_backend` | `native-codex-cli` |
 | 源码树 | `baselines/Codex`（无 nested `.git`） |
-| variant | 原版 ID（无 variant） |
+| variant | 原版身份 `codex`，需显式传入 |
 | launcher | `TerminalAO/launchers/common.py::_codex` |
 
 ## 做法

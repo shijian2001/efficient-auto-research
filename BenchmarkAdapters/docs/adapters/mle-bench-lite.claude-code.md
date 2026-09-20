@@ -5,7 +5,7 @@
 | 形态 | 通用 workspace + CLI |
 | registry `mle_backend` | `generic-mle-workspace` |
 | 源码树 | `baselines/ClaudeCode`（无 nested `.git`，跟外层走） |
-| variant | 原版 ID（无 variant） |
+| variant | 原版 `claude-code`；显式变体 `claude-code-budget-loop` |
 | 入口 | `MLEBenchLite/adapter.py::_workspace_command` → host `claude` CLI |
 
 ## 做法
@@ -26,7 +26,8 @@ claude --print
        <instruction>
 ```
 
-`instruction` 与 Codex 逐字节相同（`task_specs/mle-bench-lite.md`）。
+共同任务书由 `cli_harness_instruction` 组合规范、CLI addendum 和预算；Codex 另有
+会话结束行为提示，因此不能把两个最终 prompt 写成逐字节相同。
 
 不传 `--bare`、不传 `--no-session-persistence`、也不强加 `--output-format`。
 Claude Code 按自己的方式把 session 写到 `$HOME/.claude`；这一格把 HOME 绑到
@@ -48,9 +49,10 @@ Claude Code 受 turn 数和 wall clock 双重约束，Codex 只受 wall clock �
 ### 沙箱
 
 同 Codex：bwrap `--unshare-all`，网络只通 relay 的 Unix socket，
-`HOME=/tmp/home`，`ANTHROPIC_API_KEY=proxy`。
+`HOME=/agent-home/claude`，`ANTHROPIC_API_KEY=proxy`。`/agent-home` 绑定输出目录的
+持久 `agent-home/`，transcript 随实验保存。
 
-注意沙箱环境里 `CODEX_HOME=/tmp/codex-home` 是无条件设的（共用代码路径），
+注意沙箱环境里 `CODEX_HOME=/agent-home/codex` 是无条件设的（共用代码路径），
 对 Claude Code 无害但也无用。
 
 ## 产物
@@ -61,3 +63,12 @@ Claude Code 受 turn 数和 wall clock 双重约束，Codex 只受 wall clock �
 
 同 Codex：`MleLiteAdapter.run` 起 `RelayProcess` + Unix socket，
 `base_url=http://127.0.0.1:6200/v1`，`ANTHROPIC_API_KEY=proxy`。
+
+## 显式预算续跑变体
+
+原版 `claude-code` 是一次 `--print` 调用。`claude-code-budget-loop` 使用
+`cli_budget_loop.py` 和原生 `--continue` 在整格剩余预算内继续会话，保存
+`workspace/budget-loop.jsonl`，并将变体写入 manifest。它不是原版入口自动开启的行为。
+
+这里的 6200 是 sandbox 本地入口；共享 host relay 当前为 6201，具体地址仍由该 run
+的 model-track 决定，见[运行手册](../CAMPAIGN_LAUNCH.md)。

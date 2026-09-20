@@ -5,7 +5,7 @@
 | 形态 | AO native launcher（Python 进程内调用） |
 | registry `terminal_ao_backend` | `native-ear-repository` |
 | 源码树 | `mle-bench-agents/efficient-auto-research` |
-| variant | 原版 ID（无 variant） |
+| variant | 原版身份 `ear` 或版本记录中的 G3 标签，需显式传入 |
 | launcher | `TerminalAO/launchers/ear.py` |
 | runtime | `BenchmarkAdapters/environments/mle/ear/.venv/bin/python` |
 
@@ -71,5 +71,5 @@ templates/
 
 ## 共享部分
 
-candidate 准备、dev broker、sealed test、沙箱、评分见 `../IMPLEMENTATION.md`
+candidate 准备、dev broker、sealed test、沙箱、评分见 [Adapter 主文档](../../README.md)
 的 "Terminal AO Fairness Boundary" 与 `TerminalAO/supervisor.py`。

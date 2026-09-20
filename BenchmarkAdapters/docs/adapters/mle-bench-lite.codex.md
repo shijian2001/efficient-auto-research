@@ -5,13 +5,14 @@
 | 形态 | 通用 workspace + CLI |
 | registry `mle_backend` | `generic-mle-workspace` |
 | 源码树 | `baselines/Codex`（无 nested `.git`，跟外层走） |
-| variant | 原版 ID（无 variant） |
+| variant | 原版 `codex`；显式预算续跑变体 `codex-budget-loop` 单独记录 |
 | 入口 | `MLEBenchLite/adapter.py::_workspace_command` → host `codex` CLI |
 
 ## 做法
 
-Codex 是通用编码 CLI，不带 MLE 搜索引擎。这一格不给它套外层循环——
-准备一个 workspace，把任务书交给 `codex exec` 一次，让它自己在这个目录里干活。
+Codex 是通用编码 CLI，不带 MLE 搜索引擎。原版 `codex` 入口将准备好的 workspace
+交给一次 `codex exec`；显式 `codex-budget-loop` 则通过预算包装器继续同一 session，
+二者必须按 manifest 的 variant 区分。
 
 ### workspace 构造（`prepare_workspace`）
 
@@ -44,9 +45,10 @@ codex exec --ephemeral --skip-git-repo-check
            <instruction>
 ```
 
-`instruction` 默认是 `task_specs/mle-bench-lite.md` 的正文，与 Claude Code
-那一格**逐字节相同**。`--ephemeral` + `--skip-git-repo-check` 避免它把 workspace
-当成 git 仓库或写持久 session。
+默认任务书由 `cli_harness_instruction(timeout_seconds)` 组合共同 task spec、CLI
+harness addendum 和预算信息。Codex 还附加了“纯文本结束回复会关闭会话”的说明，
+因此实际 prompt 并不与 Claude Code 逐字节相同。原版带 `--ephemeral`；预算续跑变体
+去掉该选项，以便 `codex exec resume --last` 找到同一会话。
 
 `--dangerously-bypass-approvals-and-sandbox` 不是放开沙箱。这一格已经跑在
 host 的 Bubblewrap jail 里，jail 内没有 bwrap，Codex 自己再起一层 sandbox
@@ -64,13 +66,14 @@ Bubblewrap，`--die-with-parent --new-session --unshare-all`。只读挂
 `/usr /bin /lib /lib64 /etc/ssl /etc/hosts /etc/passwd /etc/group /sys`，
 `--proc /proc --dev /dev --tmpfs /tmp`。
 
-- CLI 可执行文件挂到 `/agent-bin/<name>`
+- CLI 挂到 `/agent-bin/<name>`；存在随发行版提供的同名前缀伴随程序时挂载整个 bin 目录，
+  例如 Codex 的 code-mode host，避免启动后缺少执行工具
 - workspace 可写，public task 目录只读
 - 网络经 `sandbox_runner.py` + `LLMRelay/forwarder.py` 转到 relay 的 Unix socket，
   `/etc/resolv.conf` 被替换成只有 `nameserver 10.0.2.3`
-- `CODEX_HOME=/tmp/codex-home`，里面预置 `auth.json` = `{"OPENAI_API_KEY":"proxy"}`
-  （0600），让 CLI 的鉴权检查通过而不需要真 key
-- `HOME=/tmp/home`，`XDG_*` 全部指到 tmpfs
+- `CODEX_HOME=/agent-home/codex`，预置 `auth.json` = `{"OPENAI_API_KEY":"proxy"}`（0600）
+- `HOME=/agent-home/claude`；`/agent-home` 可写绑定到输出目录下的 `agent-home/`，会话记录
+  随运行保存。TMPDIR 和 XDG cache/config 仍使用沙箱内 `/tmp`
 
 GPU：`nvidia-smi --query-gpu=uuid` 解析出 UUID 填 `CUDA_VISIBLE_DEVICES`，
 用 UUID 而不是序号，避免容器内外编号错位。解析失败直接报错。
@@ -92,4 +95,9 @@ token log 落 `output_dir/token_usage.jsonl`，relay log 落 `output_dir/relay.l
 
 - `max_turns` 对 Codex **不生效**（只有 Claude Code 那一格用）。Codex 的预算由
   `timeout_seconds` 控制。
-- 单次 `exec` 会话，没有 adapter 侧重试。Agent 自己决定迭代几轮。
+- 原版为单次 `exec`。`codex-budget-loop` 使用 `cli_budget_loop.py` 在剩余整格预算内
+  调用原生 resume，写 `workspace/budget-loop.jsonl`；这是显式的 harness 变体，不能
+  将它记成原版单次会话。
+
+沙箱中的 6200 是本地 forwarder 入口；宿主服务地址来自 model-track，详见
+[运行手册](../CAMPAIGN_LAUNCH.md)和 [relay 说明](../../LLMRelay/README.md)。

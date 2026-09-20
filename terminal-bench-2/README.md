@@ -3,6 +3,12 @@
 This directory contains a self-contained installation of Harbor and the
 Terminal-Bench 2.0 dataset for evaluating this repository's own agent.
 
+For the project’s formal 36-dev / 53-held-out Harness Engineering AO track, use
+[BenchmarkAdapters](../BenchmarkAdapters/README.md) and its
+[campaign runbook](../BenchmarkAdapters/docs/CAMPAIGN_LAUNCH.md). The direct-solving
+examples below are infrastructure smoke checks and do not produce comparable AO scores.
+The frozen reconstruction assets live in `ao_protocol/`.
+
 ## Installation Status
 
 - Harbor version: `0.20.0` (pinned)

@@ -5,7 +5,7 @@
 | 形态 | AO native launcher（CLI 子进程） |
 | registry `terminal_ao_backend` | `native-claude-cli` |
 | 源码树 | `baselines/ClaudeCode`（无 nested `.git`） |
-| variant | 原版 ID（无 variant） |
+| variant | 原版身份 `claude-code`，需显式传入 |
 | launcher | `TerminalAO/launchers/common.py::_claude` |
 
 ## 做法

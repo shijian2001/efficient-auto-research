@@ -5,7 +5,7 @@
 | 形态 | 原生 host 启动器（bwrap） |
 | registry `mle_backend` | `native-mle` |
 | 源码树 | `baselines/AiScientist` |
-| variant | 原版 ID（无 variant） |
+| variant | `ai-scientist@<当前 pin>`，见[版本记录](../ON_DISK_AGENT_VERSIONS.md) |
 | 入口 | `MLEBenchLite/adapter.py::_ai_scientist_command` → `.venv/bin/aisci mle run` |
 
 ## 做法

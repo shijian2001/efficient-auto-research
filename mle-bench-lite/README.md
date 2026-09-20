@@ -2,9 +2,13 @@
 
 本目录管理 OpenAI MLE-Bench Lite（Low split，22 个 Kaggle 竞赛）的本地安装。
 
+本页描述安装资产。正式 22 题实验的当前状态和运行步骤见
+[Adapter 主文档](../BenchmarkAdapters/README.md)与
+[运行手册](../BenchmarkAdapters/docs/CAMPAIGN_LAUNCH.md)。
+
 ## 当前结构
 
-- `source/`：链接到本机已有的官方 `openai/mle-bench` 最新源码
+- `source/`：链接到本机已有的冻结的官方 `openai/mle-bench` 源码
 - `data/`：链接到 `/mnt/sdc` 上约 254GB 的完整 Lite 数据目录
 - `.venv/`：本次新建的官方完整 Python 依赖环境
 - `legacy-python-env/`：旧的六题轻量 Conda 环境，仅供参考

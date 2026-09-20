@@ -1,27 +1,14 @@
-初步筛选的结果是
+# Benchmark 与 Baseline 调研档案
 
-MLE-Bench Lite
+以下保存上游能力、论文结果与部署选型资料，不是本机当前实验成绩。当前能力矩阵与状态
+统一见 [Adapter 主文档](../BenchmarkAdapters/README.md)，运行步骤见
+[启动手册](../BenchmarkAdapters/docs/CAMPAIGN_LAUNCH.md)，源码 pin 见
+[版本记录](../BenchmarkAdapters/docs/ON_DISK_AGENT_VERSIONS.md)。
 
-MLRC-Bench
+本机当前两项评测为 MLE-Bench Lite 与 Terminal AO；AutoResearch、Optimizer Design
+和 FML 的代码/协议保留，按各自机器和环境条件单独部署。下文的上游硬件、模型、次数
+与我们本轮 N=1 配置不同，只能按各表原口径阅读。
 
-NanoGPT-Bench
-
-Terminal-Bench 2.0
-
-在4090的服务器上可以跑MLE-Bench Lite和Terminal-Bench 2.0
-
-MLRC-Bench需要单卡48GB的服务器  
-NanoGPT-Bench需要4*A100的服务器  
-
-> **当前统一评测状态（2026-08-16）**：本页前面的成绩、论文结果和上游能力描述都是
-> 历史或上游资料，不能当作本仓库当前七 Agent × 两个正式 Benchmark 的成绩。当前统一
-> 入口是 `BenchmarkAdapters/`；MLE-Bench Lite 22 题和 Terminal AO 36/53 的协议、数据
-> manifest、模型配置、运行环境和真实 smoke 尚未全部准备完成，因此目前没有可发布的
-> 横向分数。逐项状态见
-> [`BenchmarkAdapters/docs/SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md`](../BenchmarkAdapters/docs/SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md)。
-
-
-# Benchmark 与 Baseline
 只有数据、计分方式、模型、运行时间和硬件都相同，分数才能直接比较。
 
 代码状态只看 Agent 本身及其运行框架，不看底层模型：✅ 完整开源；⚠️ 开源但代码不全；❌ 未开源。
@@ -938,35 +925,5 @@ benchmark 适配情况（历史/上游能力，不等于当前统一 Adapter 已
 | **ML-Master 2.0** | **✅**** Agent 官方原生适配**。主要评测目标就是 MLE-Bench；Arbor 表中引用 Lite 成绩 75.76%。 | **🛠**** 只有框架级可移植性**。EvoMaster 支持下游任务扩展，但没有公开 Autoresearch Adapter。 | **🛠**** 只有框架级可移植性**。没有 Track 3 workspace、metric parser 或 optimizer-specific 配置。 | **— 未发现**。没有 Terminal-Bench 或 terminus-2 优化入口。 | **— 未发现当前适配**。不在当前注册列表中。 |
 | **AiScientist（Arbor 表中的 AweAI 系统）** | **✅**** Agent 官方适配**。官方仓库包含 MLE-Bench integration，论文报告 Lite 81.82%。 | **— 未发现**。官方公开 benchmark integration 只有 PaperBench 与 MLE-Bench。 | **— 未发现**。没有 modded-NanoGPT Track 3 Adapter。 | **— 未发现**。没有 Terminal-Bench/Harbor Adapter。 | **— 精确 Agent 无适配**。FML-Bench 里的 “The AI Scientist v1/v2” 是另一套 Agent，不是 Arbor 表中引用的 AweAI AiScientist。 |
 
-
-
-
-部署情况（当前统一 Adapter）
-
-| Benchmark | 部署位置 | 部署情况 |
-| --- | --- | --- |
-| MLEBenchLite | 4090 | Adapter 代码和 contract 检查已完成；schema-v2 data manifest、真实 scored smoke 和正式 campaign 尚未完成 |
-| TerminalBench AO | 4090 | AO Adapter 代码和 contract 检查已完成；schema-v2 protocol、真实 scored smoke 和正式 campaign 尚未完成 |
-| AutoResearch | H100 | Adapter 代码和 contract 已写；真实 smoke 与正式 campaign 尚未完成 |
-| NanoGPT Optimizer Design | H100 | Adapter 代码和 dry-run 已写；双 seed baseline 尚未晋级，不能正式运行 |
-| FML-Bench | H100 | Adapter 代码已写；upstream 尚未 clean，真实 relay smoke 与正式分数尚未完成 |
-
-
-
-
-Benchmark 适配情况（当前七 Agent × 两个目标 Benchmark）
-
-| Agent | MLE-Bench Lite | Autoresearch：Architecture Design | modded-NanoGPT：Optimizer Design | Terminal-Bench：Arbor AO | FML-Bench 当前版 |
-| --- | --- | --- | --- | --- | --- |
-| **EAR** | 代码入口已写；需固定 clean source、真实 smoke 和正式资产 | AO 代码入口已写；需 schema-v2 protocol、clean source、真实 smoke |
-| **MLEvolve** | 代码入口已写；需固定 clean source、真实 smoke 和正式资产 | AO 代码入口已写；需 schema-v2 protocol、clean source、真实 smoke |
-| **Arbor** | 需显式 `arbor-benchmark-patched` variant；其他正式条件未齐 | 原生 launcher 已写；正式条件未齐 |
-| **Codex** | launcher 已写；正式条件未齐 | launcher 已写；正式条件未齐 |
-| **Claude Code** | launcher 已写；正式条件未齐 | launcher 已写；正式条件未齐 |
-| **ML-Master 2.0** | launcher 已写；正式条件未齐 | 需显式 `ml-master-autoresearch-variant`；正式条件未齐 |
-| **AiScientist** | launcher 已写；正式条件未齐 | 需显式 `ai-scientist-terminal-variant`；正式条件未齐 |
-
-
-
-
-## Appendix
+当前部署/适配矩阵集中维护在 [BenchmarkAdapters README](../BenchmarkAdapters/README.md)，
+不在调研档案末尾重复保存。新增 baseline 的记录要求见 [集成说明](docs/README.md)。

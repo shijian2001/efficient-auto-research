@@ -76,4 +76,4 @@ TerminalTaskSubagent 没有显式 seed 接口。这一格的可复现性弱于 E
 ## 共享部分
 
 candidate / dev broker / sealed test / 沙箱见 `TerminalAO/supervisor.py`
-与 `../IMPLEMENTATION.md`。
+与 [Adapter 主文档](../../README.md)。

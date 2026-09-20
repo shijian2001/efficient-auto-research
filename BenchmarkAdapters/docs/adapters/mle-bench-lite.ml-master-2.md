@@ -1,85 +1,72 @@
 # ML-Master 2.0 × MLE-Bench Lite
 
-| | |
+| 项目 | 当前实现 |
 |---|---|
-| 形态 | 原生 host 启动器（bwrap） |
-| registry `mle_backend` | `native-mle` |
-| 源码树 | `baselines/EvoMaster` |
-| variant | 原版 ID（无 variant） |
-| 入口 | `MLEBenchLite/adapter.py::_ml_master_command` → `.venv/bin/python run.py --agent ml_master_2` |
+| registry key / 目录 | `ml-master-2` / `baselines/EvoMaster` |
+| 形态 | 原生 host workflow，外层 Bubblewrap + runtime / artifact wrapper |
+| variant | `ml-master-2@<当前 pin>`，精确值见[版本记录](../ON_DISK_AGENT_VERSIONS.md) |
+| 入口 | `adapter.py::_ml_master_command` → `native_wrappers.py` → `ml_master_runtime.py` → `run.py --agent ml_master_2` |
+| 原生产物 | `<output_dir>/workspaces/task_0/best_submission/submission.csv` |
+| 对外产物 | `<output_dir>/submission.csv`，交 host 官方 grader |
 
-> 目录名是 `EvoMaster`，registry key 是 `ml-master-2`，display name 是
-> `ML-Master 2.0`。三个名字指同一棵树。
+## 原生 workflow 与运行包装
 
-## 做法
+Draft / Research / Improve 仍由 EvoMaster 编排；adapter 负责生成配置、隔离、预算、
+执行兼容与发布产物。不是只抽取上游一段 prompt 代替完整 Agent。
 
-跑官方 `run.py --agent ml_master_2` 的完整 workflow（Draft / Research / Improve
-三阶段由上游自己编排，adapter 不拆不包）。
+`require_clean_upstream_source("ml-master-2")` 要求当前 pin 与干净源码。
+`request.config_path` 必须由 campaign 层生成，不能直接使用带题目路径/模型设置的
+上游 example。生成逻辑在 `ml_master_config_worker.py`，lower-is-better 由 host 的
+官方 metric-direction worker 注入。
 
-前置：`require_clean_upstream_source("ml-master-2")`。
+原生调用形状为：
 
-### 命令
-
-```
-<install_path>/.venv/bin/python run.py
-    --agent ml_master_2
-    --config <generated per-run config>
-    --task <public_dir>/description.md
+```text
+<locked-python> run.py --agent ml_master_2
+    --config <generated-config>
+    --task <public-description>
     --run-dir <output_dir>
 ```
 
-### 必须外部生成 config
+单任务仍走上游 batch 入口，任务 ID 为 `task_0`，实际 workspace 是
+`<output_dir>/workspaces/task_0`，不是旧文档里的 `<output_dir>/workspace`。
 
-`request.config_path is None` 时直接报错：
+## 预算、监控和执行兼容
 
-> ML-Master 2 requires a generated per-run config_path; the upstream example
-> contains task-specific paths and model settings
+`ml_master_runtime.py` 在原生调用外维护截止时间与运行监控。adapter 设置
+`ML_MASTER_RUN_TIMEOUT_SECONDS=request.timeout_seconds`；单个候选服从原生请求的
+command timeout 和整格剩余时间，不再施加固定 90 分钟候选上限，保留 90 秒用于发布。
 
-上游的 example config 里写死了任务路径和模型设置，直接用会串格。
-所以每格必须由调用方（campaign 层）生成一份，adapter 只负责校验文件存在
-并传进去。相关生成逻辑见 `MLEBenchLite/ml_master_config_worker.py`。
+- PATH 优先使用 EvoMaster 锁定 venv，避免生成的 `python run.py` 落到没有 python 的宿主路径。
+- TMPDIR 使用沙箱内的短 `/tmp`，避免 multiprocessing 的 Unix socket 路径过长；
+  HOME 和 XDG 目录按运行隔离。
+- BLAS/OpenMP 线程限制由 adapter 设置；当前 v7 不改生成代码自己的 DataLoader worker
+  数，也不额外设置 `NUMPY_MADVISE_HUGEPAGE`。
+- `ML_MASTER_CANDIDATE_POLICY=native`；监控不依据下载/错误日志自行中止候选。
+  host 与 sandbox 的监控状态分开保存，训练和监控失败不能混为一谈。
 
-**这是七格里唯一一个 adapter 不能自足、必须上游调用方先备料的格。**
+源码在 8 月冻结之后又增加了 `evomaster/env/local.py` 的 execution helper hook，
+并修正 Draft/Improve 可选检索的处理。完整源码身份在版本记录中维护，不能继续使用
+旧 `07a80da` 作为当前运行 pin。
 
-### 沙箱
+## 产物发布与评分
 
-同 AiScientist 的 `_native_host_sandbox_argv`，但**不挂 docker socket** —— 
-ML-Master 2.0 在 host 进程内直接跑，不自己起容器。
+`native_wrappers.run_ml_master` 运行期间持续将上游当前 `best_submission` 原子同步到
+`output_dir/submission.csv`，后续晋升会更新副本。正常结束再核对/发布最终文件；如果
+研究循环后来失败，已存在的有效 best 文件仍可保留，是否有效和最终得分由 host grader
+决定。包装器不从多个候选自行挑最优分，也不把“存在 CSV”当作有效成绩。
 
-挂载：`baselines/EvoMaster` (ro)、public task 目录 (ro)、`output_dir` (rw)、
-`BenchmarkAdapters/` + `.venv` + Python runtime roots (ro)。
-`HOME` / `TMPDIR` / `XDG_*` 指到 `output_dir` 子目录。
+## 沙箱与 relay
 
-## 产物：wrapper 定位
+`_native_host_sandbox_argv` 只读挂载源码、public task、adapter/runtime 等必要路径，
+输出目录可写，不挂 Docker socket。ML-Master 在本地进程内执行候选，不自行创建容器。
 
-ML-Master 2.0 通过复制 `submission_<uid>.csv` 晋升最优解，最终落在
-`<workspace_dir>/best_submission/submission.csv`，其中
-`workspace_dir = output_dir/workspace`。
+`MleLiteAdapter.run` 启动 per-run relay 与 Unix socket。共享 host 服务地址来自
+model-track，当前默认 6201；v7 使用各 slot 的配置，详见[运行手册](../CAMPAIGN_LAUNCH.md)。
+Agent 使用本地代理凭据，provider key 留在 host。
 
-`native_wrappers.py ml-master-2` 在原生命令跑完后把它复制到
-`output_dir/submission.csv`，同样用 `open("xb")` 拒绝覆盖，
-且要求源文件是非空正规文件（非符号链接）。
+## 与 AO 的关系
 
-`artifact_path = output_dir/submission.csv`。
-
-## Relay
-
-`native-mle`，`MleLiteAdapter.run` 起 `RelayProcess` + Unix socket。
-
-## 本地补丁
-
-`baselines/EvoMaster` HEAD `07a80da`，相对上游只有：
-
-- `evomaster/utils/llm.py`：把 `reasoning_effort` 从 config 传到请求里
-  （campaign 统一 high，不是给 ML-Master 单独加探索）。
-- `playground/ml_master_2/core/utils/watch_dog.py`：超时从写死 86400s 改成读
-  `ML_MASTER_RUN_TIMEOUT_SECONDS`，默认仍 86400。adapter 目前**不设**这个
-  环境变量，所以默认行为与上游相同；12h protocol 是否注入它，跑前要再确认。
-- `uv.lock` 是新增锁文件（+3438），不是改已有 pin。
-
-## 与 AO 那一格的关系
-
-这一格是**完全原生可用**的。ML-Master 2.0 被排除在 Terminal AO 之外，
-原因是 AO 的任务形状（git revision + dev pass rate）与它 Kaggle 形状的
-playground 不兼容，**不是**它能力不足。见
-[terminal-bench-ao.ml-master-2.md](terminal-bench-ao.ml-master-2.md)。
+ML-Master 在 MLE 运行完整 workflow，但不参与 Terminal AO。AO 候选是 harness git
+revision，而上游 workspace/晋升逻辑依赖 Kaggle CSV 产物，见
+[Terminal AO 排除说明](terminal-bench-ao.ml-master-2.md)。

@@ -5,7 +5,7 @@
 | 形态 | 原生 Docker 启动器 |
 | registry `mle_backend` | `native-docker` |
 | 源码树 | `baselines/MLEvolve` |
-| variant | 原版 ID（无 variant） |
+| variant | 原版身份 `mlevolve`，需显式传入 |
 | 入口 | `MLEBenchLite/adapter.py::_docker_command` → `docker-eval/run_in_docker.sh MLEvolve` |
 
 ## 做法

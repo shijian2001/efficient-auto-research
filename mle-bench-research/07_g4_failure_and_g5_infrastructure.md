@@ -8,7 +8,7 @@
 > Benchmark 的 Adapter 代码大体已写，但 MLE schema-v2 manifest、Terminal AO schema-v2
 > protocol、真实 model-track 配置、Adapter Python 依赖、干净 Agent source 和真实 scored
 > smoke 尚未全部准备好，因此没有正式横向分数。以
-> `BenchmarkAdapters/docs/SEVEN_AGENT_BENCHMARK_REPAIR_PLAN.md` 的清单为准。
+> [Adapter 主文档](../BenchmarkAdapters/README.md) 的清单为准。
 
 ## 1. 代际定位
 
@@ -122,8 +122,9 @@ G5 closeout 完成：
 6. 只有 G5 官方分数才能与 MLEvolve 官方分数计算差值和胜负。
 7. 不得拼接 G0–G3 历史最好值构造 G5 成绩。
 
-完整操作清单见
-[G5 Experiment Protocol](../ear-worktrees/attempt-isolation-telemetry-v2/docs/EXPERIMENT_PROTOCOL.md)。
+历史 G5 操作清单位于主实验工作区的
+`ear-worktrees/attempt-isolation-telemetry-v2/docs/EXPERIMENT_PROTOCOL.md`。
+该文件属于本地 worktree，不随外层 Git 分发；复现时按历史 commit 定位。
 
 ## 8. 尚未完成
 
