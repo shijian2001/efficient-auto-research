@@ -226,6 +226,9 @@ def test_every_mle_launcher_declares_one_explicit_final_artifact(
         command = MleLiteAdapter(agent).build_command(replace(request, timeout_seconds=43200))
         assert command.env["ML_MASTER_CHILD_TIMEOUT_SECONDS"] == "43110"
         assert command.env["ML_MASTER_CANDIDATE_POLICY"] == "native"
+        aptos = MleLiteAdapter(agent).build_command(replace(request, competition_id="aptos2019-blindness-detection"))
+        assert "ML_MASTER_FORCE_NUM_WORKERS" not in aptos.env
+        assert "NUMPY_MADVISE_HUGEPAGE" not in aptos.env
 
 
 def test_native_wrappers_publish_only_declared_final_path(tmp_path: Path) -> None:

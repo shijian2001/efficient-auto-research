@@ -112,3 +112,17 @@ def test_native_policy_ignores_error_text_but_enforces_real_time_limits(tmp_path
     assert not any("offline" in action or "infrastructure_failure" in action
                    for action in heartbeat["auto_actions"])
     assert not Path(f"/proc/{heartbeat['pid']}").exists()
+
+
+def test_candidate_worker_choice_is_not_rewritten_even_with_legacy_environment(tmp_path):
+    source = "NUM_WORKERS = 8\nprint(NUM_WORKERS, flush=True)\n"
+    script = tmp_path / "run.py"
+    script.write_text(source)
+    environment = {**os.environ, "ML_MASTER_MONITOR_DIR": str(tmp_path),
+                   "ML_MASTER_CANDIDATE_POLICY": "native", "ML_MASTER_FORCE_NUM_WORKERS": "0"}
+    result = runtime.run_candidate(shlex.join([sys.executable, str(script)]), str(tmp_path), environment, 10)
+    assert result["exit_code"] == 0
+    assert result["stdout"].strip() == "8"
+    assert script.read_text() == source
+    heartbeat = json.loads(next(tmp_path.glob("candidate-*.json")).read_text())
+    assert not any("worker" in action for action in heartbeat["auto_actions"])

@@ -1241,13 +1241,6 @@ def _ml_master_command(request: MleLiteRequest) -> CommandSpec:
             "BENCHMARK_TASK_SPEC_SHA256": task_spec_digest("mle-bench-lite"),
         }
     )
-    if request.competition_id == "aptos2019-blindness-detection":
-        # The public APTOS PNGs are high resolution.  CUDA is initialized before
-        # ML-Master executes generated code, so forked DataLoader workers can
-        # stall in IPC on a busy/full host before the first batch.  The runtime
-        # helper rewrites only NUM_WORKERS=... in the generated candidate to 0;
-        # model/data decisions remain Agent-owned.
-        environment["ML_MASTER_FORCE_NUM_WORKERS"] = "0"
     environment.update(proxy_environment(request.download_proxy))
     wrapper_argv = (
              str(ROOT / "BenchmarkAdapters/.venv/bin/python"),

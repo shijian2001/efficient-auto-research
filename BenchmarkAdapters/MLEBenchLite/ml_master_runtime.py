@@ -3,7 +3,6 @@ from __future__ import annotations
 import argparse
 import json
 import os
-import re
 from pathlib import Path
 import signal
 import subprocess
@@ -13,32 +12,6 @@ import time
 import uuid
 
 MAX_RETURN_BYTES = 512 * 1024
-
-
-def _apply_candidate_runtime_guards(cwd: str | None, environment: dict[str, str], actions: list[str]) -> None:
-    """Apply deterministic guards to generated training scripts when requested.
-
-    APTOS images are large enough that CUDA-initialized forked DataLoader workers
-    can stall before the first batch on a busy host.  The guard is opt-in from
-    the adapter and only changes the generated script's worker count; it does
-    not alter model code or data.
-    """
-    if environment.get("ML_MASTER_FORCE_NUM_WORKERS") != "0" or not cwd:
-        return
-    path = Path(cwd) / "run.py"
-    try:
-        source = path.read_text(encoding="utf-8")
-    except OSError:
-        return
-    updated, count = re.subn(
-        r"(?m)^(\s*NUM_WORKERS\s*=\s*).*$",
-        r"\g<1>0",
-        source,
-        count=1,
-    )
-    if count and updated != source:
-        path.write_text(updated, encoding="utf-8")
-        actions.append("force_zero_dataloader_workers_for_stable_ipc")
 
 
 def atomic_json(path: Path, data: dict) -> None:
@@ -104,7 +77,6 @@ def run_candidate(command: str, cwd: str | None, environment: dict[str, str], ti
     if env.get("CUDA_VISIBLE_DEVICES") != "0":
         actions.append("reset_gpu_to_single_sandbox_ordinal")
     env["CUDA_VISIBLE_DEVICES"] = "0"
-    _apply_candidate_runtime_guards(cwd, env, actions)
     started = time.time()
     global_deadline = float(env.get("ML_MASTER_DEADLINE_EPOCH", started + timeout + 90))
     # The candidate is allowed to use the whole remaining cell budget. There is

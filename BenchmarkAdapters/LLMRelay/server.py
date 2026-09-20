@@ -23,6 +23,8 @@ Agent 侧只需把 OPENAI_BASE_URL 指到本代理 (http://127.0.0.1:<port>/v1)�
 环境变量:
   UPSTREAM_BASE_URL     上游 API 地址（必填）
   UPSTREAM_API_KEY      上游 API key (必填, 或复用 OPENAI_API_KEY)
+  UPSTREAM_EXTRA_KEYS_FILE  可选：权限 600 的 JSON 字符串数组文件，附加上游 key
+  UPSTREAM_KEY_SLOT      多 key 时必填：本 relay 固定使用的 key 序号（从 1 开始）
   LLM_FORCE_MODEL       统一改写的模型名（必填）
   LLM_FORCE_PARAMETERS_JSON  统一模型参数 JSON 对象（必填且不可为空）
   LLM_UPSTREAM_TIMEOUT  上游超时秒数 (默认空 = 不限)
@@ -47,6 +49,7 @@ import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 import socketserver
+import stat
 
 logging.basicConfig(
     level=logging.INFO,
@@ -60,6 +63,54 @@ logger = logging.getLogger("llm_relay_proxy")
 
 UPSTREAM_BASE_URL = os.environ.get("UPSTREAM_BASE_URL", "").rstrip("/")
 UPSTREAM_API_KEY = os.environ.get("UPSTREAM_API_KEY") or os.environ.get("OPENAI_API_KEY") or ""
+
+
+def _load_upstream_keys() -> tuple[str, ...]:
+    """Keep real provider credentials inside this host-owned relay only."""
+    keys = [UPSTREAM_API_KEY] if UPSTREAM_API_KEY else []
+    path = os.environ.get("UPSTREAM_EXTRA_KEYS_FILE", "").strip()
+    if path:
+        try:
+            fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+            with os.fdopen(fd, "r", encoding="utf-8") as stream:
+                info = os.fstat(stream.fileno())
+                if not stat.S_ISREG(info.st_mode) or info.st_mode & 0o077 or info.st_uid != os.getuid():
+                    raise ValueError("unsafe credential file permissions")
+                if info.st_size > 65536:
+                    raise ValueError("credential file too large")
+                extra = json.load(stream)
+            if not isinstance(extra, list) or not extra:
+                raise ValueError("expected a nonempty JSON array")
+            if any(not isinstance(key, str) or not key or any(c.isspace() for c in key) for key in extra):
+                raise ValueError("invalid credential entry")
+        except (OSError, ValueError, UnicodeError):
+            raise RuntimeError(
+                "UPSTREAM_EXTRA_KEYS_FILE must be an owned regular file with mode 600 "
+                "containing a nonempty JSON array of nonempty keys"
+            ) from None
+        keys.extend(extra)
+    return tuple(dict.fromkeys(keys))
+
+
+UPSTREAM_API_KEYS = _load_upstream_keys()
+_key_slot_raw = os.environ.get("UPSTREAM_KEY_SLOT", "").strip()
+try:
+    if len(UPSTREAM_API_KEYS) > 1 and not _key_slot_raw:
+        raise ValueError("multi-key relays need an explicit slot")
+    UPSTREAM_KEY_SLOT = int(_key_slot_raw or "1")
+    if not 1 <= UPSTREAM_KEY_SLOT <= max(1, len(UPSTREAM_API_KEYS)):
+        raise ValueError("slot out of range")
+except ValueError:
+    raise RuntimeError("UPSTREAM_KEY_SLOT must select a configured key (1-based)") from None
+
+
+def _safe_upstream_error(value: object) -> str:
+    text = str(value)
+    for key in UPSTREAM_API_KEYS:
+        text = text.replace(key, "<redacted>")
+    return text
+
+
 FORCE_MODEL = os.environ.get("LLM_FORCE_MODEL", "").strip()
 try:
     _configured_force_parameters = json.loads(
@@ -187,6 +238,7 @@ MODEL_TRACK_DIGEST = _model_track_digest()
 _token_log_lock = threading.Lock()
 _upstream_call_lock = threading.Lock()
 _upstream_calls = 0
+_upstream_key_calls = [0] * len(UPSTREAM_API_KEYS)
 
 # 每线程一个 httpx client（trust_env=False: relay 直连，不走容器代理变量）
 _thread_local = threading.local()
@@ -250,6 +302,7 @@ def _append_token_log(
         "call_type": call_type,
         "duration_seconds": duration,
         "retries": retries,
+        "upstream_key_slot": getattr(_thread_local, "upstream_key_slot", None),
         "reasoning_effort": REASONING_EFFORT or None,
         "model_track_digest": MODEL_TRACK_DIGEST,
         "effective_request_param_digest": MODEL_TRACK_DIGEST,
@@ -966,10 +1019,8 @@ def _is_retryable_status(status: int) -> bool:
 def _post_upstream(path: str, body: dict, call_type: str) -> tuple[dict, float, int]:
     """POST 到上游，带重试。返回 (response_json, duration, retries_used)。"""
     url = f"{UPSTREAM_BASE_URL}{path}"
-    headers = {
-        "Content-Type": "application/json",
-        "Authorization": f"Bearer {UPSTREAM_API_KEY}",
-    }
+    if not UPSTREAM_API_KEYS:
+        raise RuntimeError("no upstream API key configured")
     last_error: Exception | None = None
     t0 = time.time()
     for attempt in range(MAX_RETRIES):
@@ -983,10 +1034,20 @@ def _post_upstream(path: str, body: dict, call_type: str) -> tuple[dict, float, 
                     raise _UpstreamCallLimitError(
                         f"relay upstream call limit reached: {MAX_UPSTREAM_CALLS}"
                     )
+                # A relay lane is pinned to one key. The campaign assigns each
+                # run instance to a lane once; neither requests nor retries
+                # switch credentials, including after a transient failure.
+                slot = UPSTREAM_KEY_SLOT - 1
                 _upstream_calls += 1
+                _upstream_key_calls[slot] += 1
+            _thread_local.upstream_key_slot = slot + 1
+            headers = {
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {UPSTREAM_API_KEYS[slot]}",
+            }
             resp = _client().post(url, json=body, headers=headers)
             if _is_retryable_status(resp.status_code):
-                raise RuntimeError(f"upstream {resp.status_code}: {resp.text[:300]}")
+                raise RuntimeError(f"upstream {resp.status_code}: {_safe_upstream_error(resp.text)[:300]}")
             if resp.status_code != 200:
                 # 不可重试的 4xx：原样抛给调用方处理
                 raise _UpstreamHTTPError(resp.status_code, resp.text)
@@ -998,11 +1059,11 @@ def _post_upstream(path: str, body: dict, call_type: str) -> tuple[dict, float, 
         except _UpstreamCallLimitError:
             raise
         except Exception as exc:
-            last_error = exc
+            last_error = RuntimeError(_safe_upstream_error(exc))
             wait = min(60, 3 * (attempt + 1))
             logger.warning(
                 "%s attempt %s/%s failed: %s; retry in %ss",
-                call_type, attempt + 1, MAX_RETRIES, exc, wait,
+                call_type, attempt + 1, MAX_RETRIES, last_error, wait,
             )
             if attempt < MAX_RETRIES - 1:
                 time.sleep(wait)
@@ -1011,6 +1072,7 @@ def _post_upstream(path: str, body: dict, call_type: str) -> tuple[dict, float, 
 
 class _UpstreamHTTPError(Exception):
     def __init__(self, status: int, text: str):
+        text = _safe_upstream_error(text)
         super().__init__(f"upstream {status}: {text[:300]}")
         self.status = status
         self.text = text
@@ -1229,7 +1291,11 @@ class ProxyHandler(BaseHTTPRequestHandler):
             })
             return
         if self.path in ("/", "/health", "/healthz"):
-            self._send_json(200, {"status": "ok", "upstream": UPSTREAM_BASE_URL, "model": FORCE_MODEL})
+            with _upstream_call_lock:
+                key_calls = list(_upstream_key_calls)
+            self._send_json(200, {"status": "ok", "upstream": UPSTREAM_BASE_URL, "model": FORCE_MODEL,
+                                  "upstream_key_count": len(UPSTREAM_API_KEYS), "upstream_key_slot": UPSTREAM_KEY_SLOT,
+                                  "upstream_key_attempts": key_calls})
             return
         self._send_json(404, {"error": {"message": f"not found: {self.path}"}})
 
@@ -1400,7 +1466,7 @@ def main() -> None:
             "LLM_FORCE_PARAMETERS_JSON plus explicit LLM_MAX_RETRIES are required"
         )
 
-    if not UPSTREAM_API_KEY:
+    if not UPSTREAM_API_KEYS:
         logger.warning("UPSTREAM_API_KEY / OPENAI_API_KEY 未设置，上游调用将失败")
 
     if args.unix_socket is None:
@@ -1417,6 +1483,7 @@ def main() -> None:
         MODEL_TRACK_DIGEST[:16], REASONING_EFFORT or "(none)", UPSTREAM_TIMEOUT,
         MAX_RETRIES, AGENT_NAME,
     )
+    logger.info("upstream credential pool: %s key(s), pinned slot=%s", len(UPSTREAM_API_KEYS), UPSTREAM_KEY_SLOT)
     try:
         server.serve_forever()
     finally:
